@@ -105,6 +105,8 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
         let mut inner = fixture.live.state.inner.lock().unwrap();
         let index = inner.find_session_index(session).unwrap();
         inner.sessions[index].runtime = runtime;
+        // Loading persisted state deliberately omits the live work association.
+        inner.sessions[index].engram.work_binding = Some(binding.clone());
     }
     assert_eq!(
         fixture.live.state.engram_turn_root_capture(session),
@@ -147,7 +149,7 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
             if generation == named.generation as i64)
         );
     });
-    let before = content_revision(&fixture.root).unwrap().1;
+    let before = fixture.source_id_now(session, &fixture.root);
     let (body, receipt) =
         fixture.historical_registered_check(session, &fixture.root, "cargo test --offline");
     assert_eq!(body.registration.binding, binding);
@@ -160,9 +162,8 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
     assert_eq!(stored["check_kind"], "test");
     finish_live_root(&fixture.live.state, session);
     fixture.wait_for_reports(session);
-    assert_eq!(
-        content_revision(&fixture.root).unwrap().1,
-        before,
+    assert!(
+        fixture.source_id_now(session, &fixture.root) == before,
         "no invented source edit"
     );
     let shown = fixture.work(session, &["show", work, "--json"]);
@@ -171,6 +172,7 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
     let EngramVerificationRecordInput::Commit { commit } = &body.input else {
         panic!("historical evaluation witness requires its retained Commit record");
     };
+    let judged = acceptance_committed_judged_revision(commit);
     fixture.work(
         session,
         &[
@@ -189,7 +191,7 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
             "--evidence",
             &format!("1={}", receipt.verifications[0].record_id),
             "--source-fingerprint",
-            commit,
+            &judged,
             "--attempt",
             "legacy-forward-completion",
             "--json",
@@ -202,7 +204,7 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
             work,
             "Prospective root check passed",
             "--source-fingerprint",
-            commit,
+            &judged,
             "--json",
         ],
     );

@@ -273,6 +273,11 @@ impl EngramHost<'_> {
         engram_check_fingerprint(command)
     }
 
+    /// Canonical identity of a registered check's already normalised argv.
+    pub(crate) fn normalized_check_fingerprint(command: &str) -> String {
+        engram_normalized_check_fingerprint(command)
+    }
+
     /// The existing launcher's arguments, without adding a recognition rule.
     pub(crate) fn launcher_arguments(command: &EngramCheckCommand) -> Option<Vec<String>> {
         engram_launcher_words(command)

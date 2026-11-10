@@ -1921,8 +1921,12 @@ fn newer_source_root_readback_cannot_be_stamped_with_the_old_journal_generation(
     let worktree = naming_worktree(&claimed.root);
     let named =
         request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
-    let basis = engram_execution_source_basis(&worktree).unwrap();
-    let foreign = engram_execution_source_basis(&claimed.root).unwrap();
+    let basis = claimed.capture_basis(&EngramBasisPlace::Workdir(
+        worktree.to_string_lossy().into_owned(),
+    ));
+    let foreign = claimed.capture_basis(&EngramBasisPlace::Workdir(
+        claimed.root.to_string_lossy().into_owned(),
+    ));
     let before = claimed.state.engram_root_capture(&claimed.session_id);
     assert!(
         before.stamp(Some(foreign)).is_none(),
@@ -2484,7 +2488,9 @@ fn source_root_review_obsolete_main_checkout_cannot_stamp_an_absent_projection()
     );
     assert!(
         capture
-            .stamp(engram_execution_source_basis(&claimed.root))
+            .stamp(Some(claimed.capture_basis(&EngramBasisPlace::Workdir(
+                claimed.root.to_string_lossy().into_owned()
+            ))))
             .is_none()
     );
 }
@@ -3039,7 +3045,9 @@ fn clearing_a_root_records_its_original_identity_and_stamps_workdir_captures_as_
     let captured = claimed
         .state
         .engram_root_capture(&claimed.session_id)
-        .stamp(engram_execution_source_basis(&claimed.root))
+        .stamp(Some(claimed.capture_basis(&EngramBasisPlace::Workdir(
+            claimed.root.to_string_lossy().into_owned(),
+        ))))
         .unwrap();
     assert_eq!(
         captured.source_root_state,
@@ -4859,7 +4867,9 @@ fn ordinary_opening_keeps_its_root(transition: &str) {
             record.engram.observed_opening().unwrap().clone(),
         )
     });
-    let before = content_revision_of(&worktree);
+    let before = owner_source_of(&claimed, &worktree);
+    let files_before =
+        crate::tests::engram_host_adapter::turn_checks::owner_sources::checkout_state(&worktree);
     let binding = opening.binding.clone();
     match transition {
         "clear" => {
@@ -4927,9 +4937,14 @@ fn ordinary_opening_keeps_its_root(transition: &str) {
         );
     });
     assert_eq!(
-        content_revision_of(&worktree),
+        owner_source_of(&claimed, &worktree),
         before,
         "naming metadata does not synthesize a content edit"
+    );
+    assert_eq!(
+        crate::tests::engram_host_adapter::turn_checks::owner_sources::checkout_state(&worktree),
+        files_before,
+        "naming metadata preserves the actual fixture checkout"
     );
     if matches!(transition, "pending" | "unknown") {
         assert_eq!(

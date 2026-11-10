@@ -55,44 +55,11 @@ const ACCEPTANCE_EVALUATION_UNMEASURED_SOURCE_NOTICE: &str = "The host could not
      content revision of the worktree this evaluation reads, so the evaluation declares no source \
      fingerprint: any source change reported on the run after it voids it.";
 
-/// At most this many threads of one host take acceptance evaluations' source
-/// revisions at once, abandoned ones included. Past it a request declares
+/// At most this many threads of one host capture acceptance source identities
+/// at once, abandoned ones included. Past it a request declares
 /// nothing rather than start another thread, so a worktree whose reads stall
 /// cannot pile up threads one request at a time.
 const ACCEPTANCE_SOURCE_CAPTURE_LIMIT: usize = 4;
-
-impl AppState {
-    /// The content revision at `place` (the worktree a workdir lies in, or
-    /// exactly a work's named source root), taken by the one function every
-    /// basis comes from, or `None` when it cannot be taken within the freeze
-    /// budget ([`bounded_content_revision_capture`]).
-    fn acceptance_evaluation_source_revision(&self, place: &EngramBasisPlace) -> Option<String> {
-        self.acceptance_evaluation_source_basis(place)
-            .map(|basis| basis.source_revision)
-    }
-
-    /// The whole source basis at `place`, taken as
-    /// [`Self::acceptance_evaluation_source_revision`] takes its revision.
-    fn acceptance_evaluation_source_basis(
-        &self,
-        place: &EngramBasisPlace,
-    ) -> Option<EngramExecutionSourceBasis> {
-        let live = self
-            .inner
-            .lock()
-            .expect("state mutex poisoned")
-            .acceptance_source_captures_live
-            .clone();
-        let place = place.clone();
-        bounded_content_revision_capture(
-            &live,
-            &self.capture_lifetime,
-            ACCEPTANCE_SOURCE_CAPTURE_LIMIT,
-            REVIEW_FREEZE_TIMEOUT,
-            move || engram_place_source_basis(&place),
-        )
-    }
-}
 
 /// The notices of one request answer as one text, or none.
 fn acceptance_evaluation_notices<const N: usize>(notices: [Option<String>; N]) -> Option<String> {
@@ -2127,27 +2094,14 @@ impl AppState {
                  and report this; the parent must request a new evaluation"
             )));
         }
-        // Off the lock and within the budget: the capture reads the whole
-        // worktree.
-        let current = place.and_then(|place| self.acceptance_evaluation_source_revision(&place));
-        match current {
-            Some(current) if current == requested => {}
-            Some(current) => {
-                return Err(ApiError::conflict(format!(
-                    "the worktree changed while it was evaluated: the evaluation was requested \
-                     at {requested} and the worktree now holds {current}, so these verdicts may \
-                     not describe it. This is final for this evaluator: do not submit again. \
-                     Finish and report this; the parent must request a new evaluation"
-                )));
-            }
-            None => {
-                eprintln!(
-                    "acceptance evaluation> the revision of {child}'s worktree could not be taken \
-                     again; the submission declares no source fingerprint"
-                );
-                declared.source_fingerprint = None;
-            }
-        }
+        // A historical content fingerprint cannot be recaptured by this host.
+        // Fresh submissions retain the existing unavailable-source behavior.
+        // Open writes bypass this preparation and replay their original argv.
+        eprintln!(
+            "acceptance evaluation> {child}'s historical source capture is retired; \
+             the submission declares no source fingerprint"
+        );
+        declared.source_fingerprint = None;
         Ok(declared)
     }
 

@@ -399,14 +399,14 @@ fn restore_local_only_root(claimed: &EOCheckedTurn, label: &str, worktree: &FsPa
     let runtime = claimed.record(|record| record.runtime.clone());
     {
         let mut inner = claimed.state.inner.lock().unwrap();
-        // Preserve the fixture's existing real-content capture seam across
+        // Preserve the fixture's explicit owner replies across
         // the actual reload; persisted state deliberately omits test hooks.
         let capture = inner
-            .test_engram_source_capture
+            .test_observation_source_owner
             .clone()
-            .expect("the ordinary fixture owns its real-content capture seam");
+            .expect("the ordinary fixture owns its source-owner replies");
         *inner = restored;
-        inner.test_engram_source_capture = Some(capture);
+        inner.test_observation_source_owner = Some(capture);
     }
     claimed.record_mut(|record| {
         record.runtime = runtime;

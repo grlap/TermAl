@@ -1,10 +1,5 @@
-// Owns the tests of the committed-input switch (src/ordinary_commit_input.rs):
-// that host and launcher defaults are independent, that off it leaves the content revision
-// untouched, and that on it gives a clean root its HEAD commit and a root that
-// is not clean a typed not-clean outcome and no basis. Does not own the
-// content revision's own tests (src/tests/content_revision.rs) or those of
-// where a basis is taken (src/tests/engram_source_roots.rs,
-// src/tests/engram_turn_observations.rs). New module.
+// Historical committed-input compatibility and retirement of local content
+// capture. Complete identities for new records come from the Engram owner.
 use super::*;
 
 /// Removes the directories it owns when dropped, on success and on an
@@ -44,54 +39,6 @@ fn not_clean(root: &FsPath) -> Vec<SourceRevisionDirtyPath> {
     match source_revision(root, true).expect("the outcome should be taken") {
         SourceRevision::NotClean { dirty_paths } => dirty_paths,
         taken => panic!("a root that is not clean should have no revision: {taken:?}"),
-    }
-}
-
-#[test]
-fn the_launcher_selects_automatically_while_the_host_source_default_stays_off() {
-    assert!(
-        !ORDINARY_COMMIT_INPUT_DEFAULT,
-        "ordinary host measurements retain content-v1"
-    );
-    let launcher = fs::read_to_string(
-        FsPath::new(env!("CARGO_MANIFEST_DIR"))
-            .join("scripts")
-            .join("test-launcher.mjs"),
-    )
-    .expect("the launcher should be readable");
-    let declared = launcher
-        .lines()
-        .filter(|line| line.contains("const ORDINARY_COMMIT_INPUT_DEFAULT"))
-        .collect::<Vec<_>>();
-    assert_eq!(declared.len(), 1, "the launcher declares the switch once");
-    assert_eq!(
-        declared[0].trim_end(),
-        "export const ORDINARY_COMMIT_INPUT_DEFAULT = true;",
-        "launcher selection is independent of ordinary host measurements"
-    );
-}
-
-#[test]
-fn with_the_switch_off_the_revision_is_the_content_revision() {
-    let mut cleanup = RemoveDirsOnDrop(Vec::new());
-    let root = repository(&mut cleanup);
-    // Not clean, on purpose: off, that changes nothing.
-    fs::write(root.join("untracked.txt"), "untracked\n").unwrap();
-    let (canonical, expected) = content_revision(&root).unwrap();
-    assert!(expected.starts_with("content-v1:"), "{expected}");
-    assert_eq!(
-        source_revision(&root, false).unwrap(),
-        SourceRevision::Taken {
-            root: canonical,
-            revision: expected.clone(),
-        }
-    );
-    let place = workdir_place(&root);
-    let basis =
-        engram_place_source_basis_with(&place, false).expect("a content revision gives a basis");
-    assert_eq!(basis.source_revision, expected);
-    if !ORDINARY_COMMIT_INPUT_DEFAULT {
-        assert_eq!(engram_place_source_basis(&place), Some(basis));
     }
 }
 

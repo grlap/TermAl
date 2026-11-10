@@ -65,43 +65,21 @@ fn permanent_source_refusal_settles_once(
     let local_runs = observe_declared_failure(&mut fixture);
     configure(&fixture.turn.root);
 
-    // Exercise the production bounded thread path too. The functional RPC
-    // fixture below has a separate scripted capture seam so its 250ms RPC
-    // deadline never becomes an assertion about local Git scheduling.
-    let capture = fixture
-        .turn
-        .state
-        .inner
-        .lock()
-        .unwrap()
-        .test_engram_source_capture
-        .take()
-        .unwrap();
-    let root = fixture.turn.root.to_string_lossy().into_owned();
-    let common = engram_source_root_common_dir(&fixture.turn.root).unwrap();
-    for place in [
-        EngramBasisPlace::Workdir(root.clone()),
-        EngramBasisPlace::Named {
-            root,
-            common_dir_key: engram_exact_path_key(&common),
-        },
-    ] {
-        let refusal = fixture
-            .turn
-            .state
-            .engram_source_capture_within(&place, DEADLOCK_GUARD)
-            .expect_err("the bounded capture must preserve the definitive cause");
-        assert!(refusal.to_string().contains(reason));
-    }
+    // Inject a historical refusal into the real closing path.
+    let historical = if reason == "filters" {
+        SourceBasisRefusal::ConfiguredGitFilters
+    } else {
+        SourceBasisRefusal::UnsupportedGitlinks
+    };
     fixture
         .turn
         .state
         .inner
         .lock()
         .unwrap()
-        .test_engram_source_capture = Some(capture);
+        .test_engram_source_capture = Some(Arc::new(move |_, _| Err(historical)));
 
-    // Count the real fixture capture, not a synthetic refusal. The fixture
+    // Count application of the retained historical refusal. The fixture
     // clock keeps unrelated RPC deadlines independent of local Git latency.
     let captures = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     {
@@ -258,13 +236,6 @@ fn add_gitlink(root: &FsPath) {
             "child",
         ],
     );
-    assert!(
-        matches!(
-            engram_execution_source_capture_with(root, false),
-            Err(SourceBasisRefusal::UnsupportedGitlinks)
-        ),
-        "the real content capture must refuse gitlinks"
-    );
 }
 
 fn settle_closing(fixture: &ReportingTurn) {
@@ -294,6 +265,15 @@ fn settle_closing(fixture: &ReportingTurn) {
 #[test]
 fn closing_gitlink_reports_declared_verdict_without_source_or_credit() {
     let mut fixture = ReportingTurn::new("closing-gitlink-audit", true, ReplyMode::Recorded, false);
+    fixture
+        .turn
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_source_capture = Some(Arc::new(|_, _| {
+        Err(SourceBasisRefusal::UnsupportedGitlinks)
+    }));
     add_gitlink(&fixture.turn.root);
     let local_runs = observe_declared_failure(&mut fixture);
     let check = fixture.turn.record(|record| {
@@ -384,6 +364,15 @@ fn closing_gitlink_reports_declared_verdict_without_source_or_credit() {
 #[test]
 fn closing_gitlink_gap_cannot_reuse_an_older_measured_baseline() {
     let mut fixture = ReportingTurn::new("closing-gitlink-gap", true, ReplyMode::Recorded, false);
+    fixture
+        .turn
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_source_capture = Some(Arc::new(|_, _| {
+        Err(SourceBasisRefusal::UnsupportedGitlinks)
+    }));
     let before = fixture.turn.record(|record| {
         record
             .engram
@@ -416,7 +405,17 @@ fn closing_gitlink_gap_cannot_reuse_an_older_measured_baseline() {
         &fixture.turn.root,
         &["update-index", "--force-remove", "child"],
     );
-    assert_eq!(fixture.turn.revision(), before.source_revision);
+    fixture
+        .turn
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_source_capture = None;
+    assert_eq!(
+        fixture.turn.revision(),
+        serde_json::to_value(&before.source_id).unwrap()
+    );
     fixture.reader = ClaudeReaderOn::new(&fixture.turn, new_claude_turn_ownership());
     for frame in [
         task_notification(),
@@ -434,8 +433,8 @@ fn closing_gitlink_gap_cannot_reuse_an_older_measured_baseline() {
         "the later measurable close must not compare against the pre-gap endpoint"
     );
     assert_eq!(
-        occurrence(&measured)["source_change"]["sighting"]["source_basis"]["source_revision"],
-        before.source_revision
+        occurrence(&measured)["source_change"]["sighting"]["source_basis"]["source_id"],
+        serde_json::to_value(&before.source_id).unwrap()
     );
     let sighting = fixture.observation();
     assert_eq!(occurrence(&sighting)["kind"], "source_sighting");
@@ -475,48 +474,71 @@ fn closing_gitlink_after_scope_moves_cannot_publish_source_free_facts() {
 
 #[test]
 fn closing_missing_workdir_does_not_inherit_enclosing_repository_refusal() {
+    use crate::tests::engram_source_command::source_envelope;
+    use crate::tests::engram_source_owner::{source_owner_output, source_owner_reply};
     let fixture = ReportingTurn::new(
         "closing-missing-nested-workdir",
         true,
         ReplyMode::Recorded,
         false,
     );
-    let head = run_git_test_command_output(&fixture.turn.root, &["rev-parse", "HEAD"]);
-    run_git_test_command(
-        &fixture.turn.root,
-        &[
-            "update-index",
-            "--add",
-            "--cacheinfo",
-            "160000",
-            head.trim(),
-            "child",
-        ],
-    );
     let missing = fixture.turn.root.join("absent-worktree");
+    let enclosing = fs::canonicalize(&fixture.turn.root).unwrap();
+    let captures = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = captures.clone();
+    fixture
+        .turn
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_observation_source_owner = Some(Arc::new(move |_, _, args, _, _| {
+        if args[0] == "--version" {
+            return Ok(source_owner_reply(args));
+        }
+        counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let root = FsPath::new(&args[2]);
+        let unavailable = fs::canonicalize(root).unwrap() == enclosing;
+        Ok(source_owner_output(
+            if unavailable { 1 } else { 0 },
+            serde_json::to_vec(&source_envelope(
+                root,
+                if unavailable { "unavailable" } else { "clean" },
+            ))
+            .unwrap(),
+        ))
+    }));
+    let observe = |path: &FsPath| {
+        fixture.turn.state.engram_observation_source_capture(
+            &fixture.turn.session_id,
+            &EngramBasisPlace::Workdir(path.to_string_lossy().into_owned()),
+            DEADLOCK_GUARD,
+        )
+    };
+    assert!(matches!(
+        observe(&fixture.turn.root),
+        Err(EngramObservationSourceRefusal::OwnerUnavailable)
+    ));
+    let before_missing = captures.load(std::sync::atomic::Ordering::SeqCst);
     assert!(!missing.exists());
-    assert!(
-        test_runs_git_common_dir(&missing).is_none(),
-        "source naming must validate the session directory before ancestor normalization"
-    );
-    assert!(
-        engram_execution_source_capture_with(&fixture.turn.root, false).is_err(),
-        "the enclosing repository really refuses capture"
-    );
-    assert!(
-        matches!(
-            engram_execution_source_capture_with(&missing, false),
-            Ok(None)
-        ),
-        "transient workdir absence must not become a permanent refusal"
+    assert!(test_runs_git_common_dir(&missing).is_none());
+    assert!(matches!(
+        observe(&missing),
+        Err(EngramObservationSourceRefusal::OwnerUnavailable)
+    ));
+    assert_eq!(
+        captures.load(std::sync::atomic::Ordering::SeqCst),
+        before_missing,
+        "a missing workdir cannot ask the owner to measure its enclosing repository"
     );
 
-    // Once the nested workspace exists, it is measured on its own and a
-    // normal subdirectory shares that workspace's source, not its ancestor's.
     fs::create_dir(&missing).unwrap();
-    run_git_test_command(&missing, &["init", "--quiet"]);
-    let nested = engram_execution_source_capture_with(&missing, false)
-        .unwrap()
+    init_git_document_test_repo(&missing);
+    fs::write(missing.join("input.txt"), "nested source\n").unwrap();
+    run_git_test_command(&missing, &["add", "input.txt"]);
+    run_git_test_command(&missing, &["commit", "--quiet", "-m", "nested fixture"]);
+    let nested = observe(&missing)
+        .unwrap_or_else(|_| panic!("nested owner input"))
         .unwrap();
     assert_eq!(
         nested.workspace_id,
@@ -524,9 +546,9 @@ fn closing_missing_workdir_does_not_inherit_enclosing_repository_refusal() {
     );
     let subdirectory = missing.join("src");
     fs::create_dir(&subdirectory).unwrap();
-    assert_eq!(
-        engram_execution_source_capture_with(&subdirectory, false).unwrap(),
-        Some(nested)
-    );
+    let subdirectory_basis = observe(&subdirectory)
+        .unwrap_or_else(|_| panic!("subdirectory owner input"))
+        .unwrap();
+    assert_eq!(subdirectory_basis, nested);
     retire_reporting_hosts(fixture, Vec::new());
 }

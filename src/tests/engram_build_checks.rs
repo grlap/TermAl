@@ -40,7 +40,7 @@ fn complete_command(
 
 // Closing source measurement and check facts have separate meanings: a
 // matching sighting is not proof that the build ran against that revision.
-fn one_build(request: &Value, revision: &str, outcome: &str) {
+fn one_build(request: &Value, revision: &Value, outcome: &str) {
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(
         checks.len(),
@@ -54,7 +54,7 @@ fn one_build(request: &Value, revision: &str, outcome: &str) {
         "no automatic source verification"
     );
     assert_eq!(
-        request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"],
+        &request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_id"],
         revision
     );
     assert!(request.get("verification_evidence").is_none());
@@ -86,16 +86,16 @@ fn finish_observation(turn: &EOCheckedTurn) -> Value {
     request
 }
 
-fn assert_native_capture(turn: &EOCheckedTurn, revision: &str) {
+fn assert_native_capture(turn: &EOCheckedTurn, revision: &Value) {
     let check = diagnostic(turn);
-    let (root, _) = content_revision(&turn.root).unwrap();
+    let root = fs::canonicalize(&turn.root).unwrap();
     for capture in [&check.start_basis, &check.end.as_ref().unwrap().end_basis] {
         let basis = capture
             .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
             .expect("the real diagnostic capture settles")
             .expect("the source was measured");
         assert_eq!(basis.workspace_id, root.to_string_lossy());
-        assert_eq!(basis.source_revision, revision);
+        assert_eq!(&serde_json::to_value(basis.source_id).unwrap(), revision);
     }
     assert_eq!(
         check
@@ -330,7 +330,7 @@ fn engram_build_changed_source_cannot_acquire_passing_credit() {
         .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
         .unwrap()
         .unwrap();
-    assert_ne!(start.source_revision, end.source_revision);
+    assert_ne!(start.source_id, end.source_id);
     let request = finish_observation(&turn);
     assert!(request.get("verification_evidence").is_none());
     assert!(

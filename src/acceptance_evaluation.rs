@@ -743,8 +743,7 @@ struct AcceptanceEvaluationTask {
     /// (`acceptance_obligation_assessment.rs`).
     obligation_assessments: Vec<AcceptanceObligationAssessment>,
     /// The source revision this evaluation judges: the host's measured
-    /// revision of the task's source root, which the evaluation declares
-    /// (`acceptance_evaluation_source_revision`). Engram refuses a citation
+    /// label of the task's configured owner identity. Engram refuses a citation
     /// of a verification record from any other revision for a bound
     /// criterion, so the briefs mark such records context only. `None` when
     /// the source is unmeasured.
@@ -2160,7 +2159,7 @@ fn render_same_session_acceptance_brief_with_index_detail(
     detail: AcceptanceOmissionDetail,
     index_detail: AcceptanceOmissionDetail,
 ) -> String {
-    // The value is host-measured ("content-v1:" and hex), never tracker text.
+    // Retained historical declarations are host-owned, never tracker free text.
     let source = source_fingerprint
         .map(|fingerprint| format!(", source_fingerprint {fingerprint}"))
         .unwrap_or_default();

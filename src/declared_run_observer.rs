@@ -279,19 +279,31 @@ impl AppState {
         let declaration = start.declaration.clone();
         let source_owner = start.source.source_owner.clone();
         #[cfg(test)]
-        let source_capture = self.inner.lock().expect("state mutex poisoned").test_declared_run_source.clone();
-        let after = bounded_content_revision_capture(&live, &self.capture_lifetime,
-            ENGRAM_TURN_BASIS_CAPTURE_LIMIT, deadline.saturating_duration_since(std::time::Instant::now()),
-            move || {
-                let capture = || {
-                    #[cfg(test)]
-                    if let Some(capture) = source_capture {
-                        return capture(&declaration, &source_owner, deadline);
-                    }
-                    declared_run_source(&declaration, &source_owner, deadline)
-                };
-                Some(capture().map_err(|error| format!("{error:#}").chars().take(2048).collect::<String>()))
-            });
+        let source_capture = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .test_declared_run_source
+            .clone();
+        let after =
+            bounded_source_capture(
+                &live,
+                &self.capture_lifetime,
+                ENGRAM_TURN_BASIS_CAPTURE_LIMIT,
+                deadline.saturating_duration_since(std::time::Instant::now()),
+                move || {
+                    let capture = || {
+                        #[cfg(test)]
+                        if let Some(capture) = source_capture {
+                            return capture(&declaration, &source_owner, deadline);
+                        }
+                        declared_run_source(&declaration, &source_owner, deadline)
+                    };
+                    Some(capture().map_err(|error| {
+                        format!("{error:#}").chars().take(2048).collect::<String>()
+                    }))
+                },
+            );
         let (after, source_refusal) = match after {
             Some(Ok(source)) => (Some(source), None),
             Some(Err(reason)) => (None, Some(reason)),
@@ -731,9 +743,18 @@ impl AppState {
         let capture_session = session_id.to_owned();
         let capture_pending = pending.clone();
         #[cfg(test)]
-        let snapshot_capture = self.inner.lock().expect("state mutex poisoned").test_declared_run_snapshot.clone();
-        let snapshot = bounded_content_revision_capture(&live, &self.capture_lifetime,
-            ENGRAM_TURN_BASIS_CAPTURE_LIMIT, deadline.saturating_duration_since(now()), move || {
+        let snapshot_capture = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .test_declared_run_snapshot
+            .clone();
+        let snapshot = bounded_source_capture(
+            &live,
+            &self.capture_lifetime,
+            ENGRAM_TURN_BASIS_CAPTURE_LIMIT,
+            deadline.saturating_duration_since(now()),
+            move || {
                 let owner_capture = || {
                     capture_state.capture_declared_run_opening_with_owner(
                         &capture_session, &capture_pending, deadline, engram_source_owner_run)

@@ -735,7 +735,7 @@ live_row!(measured_edit_then_revert_to_checked_commit_accepts, {
     let original = fs::read(matrix.fixture.root.join("README.md")).unwrap();
     matrix.begin("Measure an actual changed endpoint.");
     matrix.edit("measured changed content\n");
-    let changed_revision = content_revision(&matrix.fixture.root).unwrap().1;
+    let changed_source = serde_json::to_value(matrix.source_id_now()).unwrap();
     matrix.close();
     matrix.settle();
     let measured = matrix.fixture.work(
@@ -750,7 +750,8 @@ live_row!(measured_edit_then_revert_to_checked_commit_accepts, {
     assert!(
         originals.iter().any(
             |(_, object)| object["accounting"]["kind"] == "source_change"
-                && object.to_string().contains(&changed_revision)
+                && object["occurrence"]["source_change"]["sighting"]["source_basis"]["source_id"]
+                    == changed_source
         ),
         "the stored history must contain the actual changed endpoint"
     );

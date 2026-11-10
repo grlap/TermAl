@@ -8,6 +8,7 @@
 //! per-turn gating itself. New module, not a split.
 
 use super::*;
+use crate::tests::engram_host_adapter::turn_checks::owner_sources::EOOwnerSources;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Harness {
@@ -226,6 +227,7 @@ struct HarnessTurn {
     state: AppState,
     session_id: String,
     root: PathBuf,
+    sources: EOOwnerSources,
     /// The Claude prompt the runtime was last asked to run.
     claude_prompt: Mutex<Option<ClaudePromptCommand>>,
     transport: Arc<ScriptedEngramControlTransport>,
@@ -262,6 +264,32 @@ impl HarnessTurn {
         let session_id =
             create_test_project_session(&state, harness.agent(), &project_id, &workdir);
         enable_test_project_engram(&state, &project_id, &root);
+        let sources = EOOwnerSources::default();
+        let owner_binary = crate::tests::engram_source_owner::source_owner_fixture_binary(
+            state.test_temp_root.as_ref().unwrap().path(),
+        );
+        {
+            let mut inner = state.inner.lock().unwrap();
+            inner
+                .projects
+                .iter_mut()
+                .find(|project| project.id == project_id)
+                .unwrap()
+                .engram
+                .as_mut()
+                .unwrap()
+                .binary_path = Some(owner_binary.to_string_lossy().into_owned());
+            let replies = sources.clone();
+            inner.test_observation_source_owner = Some(Arc::new(move |_, _, args, _, _| {
+                if args[0] == "--version" {
+                    return Ok(crate::tests::engram_source_owner::source_owner_reply(args));
+                }
+                Ok(crate::tests::engram_source_owner::source_owner_output(
+                    0,
+                    serde_json::to_vec(&replies.envelope(FsPath::new(&args[2]))).unwrap(),
+                ))
+            }));
+        }
         fs::write(
             root.join(".engram-project"),
             "github.com/example/source-root\n",
@@ -364,6 +392,7 @@ impl HarnessTurn {
             state,
             session_id,
             root,
+            sources,
             claude_prompt: Mutex::new(None),
             transport,
             sent: received,
@@ -700,6 +729,7 @@ impl HarnessTurn {
     fn edit(&self) {
         fs::write(self.root.join("README.md"), "edited by the ordinary turn\n")
             .expect("the tracked file should change");
+        self.sources.advance(&self.root, "README.md");
     }
 }
 

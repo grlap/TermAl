@@ -44,8 +44,17 @@ impl AppState {
                 &self.inner.lock().expect("state mutex poisoned"), session,
             ).map_err(anyhow::Error::msg)?;
             let root = match place {
-                EngramBasisPlace::Workdir(workdir) => engram_worktree_root_path(FsPath::new(workdir)),
-                EngramBasisPlace::Named { root, common_dir_key } => {
+                EngramBasisPlace::Workdir(workdir) => {
+                    let workdir = FsPath::new(workdir);
+                    if !fs::metadata(workdir).is_ok_and(|metadata| metadata.is_dir()) {
+                        bail!("observation workdir is unavailable");
+                    }
+                    engram_worktree_root_path(workdir)
+                }
+                EngramBasisPlace::Named {
+                    root,
+                    common_dir_key,
+                } => {
                     let path = FsPath::new(root);
                     let canonical = fs::canonicalize(path)?;
                     if engram_exact_path_key(&canonical) != engram_exact_path_key(path)

@@ -151,6 +151,9 @@ fn clearing_a_new_generation_does_not_overwrite_the_opening_turns_first_seal() {
 fn naming_owner_unavailable_never_falls_back_to_local_git() {
     let label = "owner-unavailable";
     let turn = EOCheckedTurn::idle(label, true);
+    // The historical reader excludes machine Git configuration. Keep this
+    // fixture's checkout normalization consistent with its positive control.
+    run_git_test_command(&turn.root, &["config", "core.autocrlf", "false"]);
     let worktree = naming_worktree(&turn.root);
     turn.state
         .inner
@@ -158,11 +161,12 @@ fn naming_owner_unavailable_never_falls_back_to_local_git() {
         .unwrap()
         .test_observation_source_owner =
         Some(Arc::new(|_, _, args, _, _| Ok(source_owner_reply(args))));
-    // The old local capture can measure this root, but naming must not use it.
+    // Historical clean-commit diagnostics can measure this root; naming must not use them.
     assert!(
-        engram_place_source_basis(&EngramBasisPlace::Workdir(
-            worktree.to_string_lossy().into_owned()
-        ))
+        engram_place_source_basis_with(
+            &EngramBasisPlace::Workdir(worktree.to_string_lossy().into_owned()),
+            true
+        )
         .is_some()
     );
     let named = request_naming(&turn, label, Some(&worktree), vec![naming_claim(label)]).unwrap();

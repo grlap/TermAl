@@ -14,6 +14,10 @@ use super::*;
 mod repository_seed;
 use repository_seed::{EORepositorySeedScope, prepare_eo_repository};
 
+#[path = "eo_source_owner_fixture.rs"]
+pub(crate) mod owner_sources;
+use owner_sources::EOOwnerSources;
+
 #[path = "engram_ordinary_opening.rs"]
 mod ordinary_opening;
 
@@ -759,10 +763,11 @@ impl Drop for EOCaptureWorkerGate {
 
 /// An ordinary root turn whose facts are reported after provider execution.
 /// The transport exposes work services and observation receipts, never grants.
-pub(super) struct EOCheckedTurn {
-    pub(super) state: AppState,
-    pub(super) session_id: String,
-    pub(super) root: PathBuf,
+pub(crate) struct EOCheckedTurn {
+    pub(super) sources: EOOwnerSources,
+    pub(crate) state: AppState,
+    pub(crate) session_id: String,
+    pub(crate) root: PathBuf,
     pub(super) transport: Arc<ScriptedEngramControlTransport>,
     observations: Mutex<mpsc::Receiver<Value>>,
     pub(super) _runtime_rx: Arc<Mutex<mpsc::Receiver<CodexRuntimeCommand>>>,
@@ -842,7 +847,7 @@ impl EOCheckedTurn {
 
     // Naming and durability tests need the same real state/work-service
     // owner before any provider handoff. There is no admission or grant.
-    pub(super) fn idle(label: &str, claimed: bool) -> Self {
+    pub(crate) fn idle(label: &str, claimed: bool) -> Self {
         Self::prepare_in(label, claimed, None, false)
     }
 
@@ -880,11 +885,7 @@ impl EOCheckedTurn {
         } else {
             state.select_test_scripted_engram_budget_clock();
         }
-        // Capture real contents independently of the scripted RPC budget.
-        state.inner.lock().unwrap().test_engram_source_capture =
-            Some(Arc::new(|place, _budget| {
-                engram_place_source_capture(place)
-            }));
+        let sources = EOOwnerSources::default();
         let root = state
             .test_temp_root
             .as_ref()
@@ -901,8 +902,7 @@ impl EOCheckedTurn {
         let workdir = normalize_user_facing_path(&workdir);
         let session = create_test_project_session(&state, Agent::Codex, &project, &workdir);
         enable_test_project_engram(&state, &project, &root);
-        // Naming exercises the full owner protocol independently of these
-        // older ordinary-observation fixtures' historical content seam.
+        // All fresh source facts arrive through the configured owner protocol.
         let owner_binary = super::engram_source_owner::source_owner_fixture_binary(
             state.test_temp_root.as_ref().unwrap().path(),
         );
@@ -917,17 +917,14 @@ impl EOCheckedTurn {
                 .as_mut()
                 .unwrap()
                 .binary_path = Some(owner_binary.to_string_lossy().into_owned());
-            inner.test_observation_source_owner = Some(Arc::new(|_, _, args, _, _| {
+            let replies = sources.clone();
+            inner.test_observation_source_owner = Some(Arc::new(move |_, _, args, _, _| {
                 if args[0] == "--version" {
                     return Ok(super::engram_source_owner::source_owner_reply(args));
                 }
                 Ok(super::engram_source_owner::source_owner_output(
                     0,
-                    serde_json::to_vec(&super::engram_source_command::source_envelope(
-                        FsPath::new(&args[2]),
-                        "clean",
-                    ))
-                    .unwrap(),
+                    serde_json::to_vec(&replies.envelope(FsPath::new(&args[2]))).unwrap(),
                 ))
             }));
         }
@@ -996,6 +993,7 @@ impl EOCheckedTurn {
             root,
             transport,
             Arc::new(Mutex::new(runtime_rx)),
+            sources,
         );
         turn.host = Some(Arc::new(EOFixtureHost::of(&turn.state)));
         if named {
@@ -1030,6 +1028,7 @@ impl EOCheckedTurn {
         root: PathBuf,
         transport: Arc<ScriptedEngramControlTransport>,
         runtime_rx: Arc<Mutex<mpsc::Receiver<CodexRuntimeCommand>>>,
+        sources: EOOwnerSources,
     ) -> Self {
         let (sent, received) = mpsc::channel();
         transport
@@ -1044,6 +1043,7 @@ impl EOCheckedTurn {
             session_id,
             root,
             transport,
+            sources,
             observations: Mutex::new(received),
             _runtime_rx: runtime_rx,
             host: None,
@@ -1195,8 +1195,9 @@ impl EOCheckedTurn {
         }
     }
 
-    fn change_readme(&self, content: &str) {
+    pub(super) fn change_readme(&self, content: &str) {
         fs::write(self.root.join("README.md"), content).unwrap();
+        self.sources.advance(&self.root, "README.md");
     }
 
     pub(super) fn record<T>(&self, read: impl FnOnce(&SessionRecord) -> T) -> T {
@@ -1244,8 +1245,15 @@ impl EOCheckedTurn {
         }
     }
 
-    pub(super) fn revision(&self) -> String {
-        content_revision(&self.root).unwrap().1
+    pub(super) fn revision(&self) -> Value {
+        serde_json::to_value(self.sources.get(&self.root)).unwrap()
+    }
+
+    pub(super) fn capture_basis(&self, place: &EngramBasisPlace) -> EngramExecutionSourceBasis {
+        self.state
+            .engram_observation_source_capture(&self.session_id, place, DEADLOCK_GUARD)
+            .unwrap_or_else(|_| panic!("the fixture owner must supply a complete source basis"))
+            .expect("the fixture owner supplied a measured basis")
     }
 
     fn finished_check(
@@ -1903,10 +1911,10 @@ fn a_change_before_a_check_is_measured_without_claiming_verification() {
         .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
         .unwrap()
         .unwrap();
-    assert_eq!(start.source_revision, revision);
+    assert_eq!(serde_json::to_value(&start.source_id).unwrap(), revision);
     let request = turn.finish();
     assert_eq!(
-        request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"],
+        request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_id"],
         revision
     );
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
@@ -1936,13 +1944,13 @@ fn a_later_source_change_is_not_attributed_to_the_earlier_check() {
         .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
         .unwrap()
         .unwrap();
-    assert_eq!(end.source_revision, tested);
+    assert_eq!(serde_json::to_value(&end.source_id).unwrap(), tested);
     turn.change_readme("changed after the test\n");
     let changed = turn.revision();
     assert_ne!(changed, tested);
     let request = turn.finish();
     assert_eq!(
-        request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"],
+        request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_id"],
         changed
     );
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
@@ -1977,12 +1985,12 @@ fn source_changes_during_a_check_keep_its_result_without_verification_credit() {
         .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
         .unwrap()
         .unwrap();
-    assert_eq!(start.source_revision, before);
-    assert_ne!(start.source_revision, end.source_revision);
+    assert_eq!(serde_json::to_value(&start.source_id).unwrap(), before);
+    assert_ne!(start.source_id, end.source_id);
     let request = turn.finish();
     assert_eq!(
-        request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"],
-        end.source_revision
+        request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_id"],
+        serde_json::to_value(&end.source_id).unwrap()
     );
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(checks.len(), 1);
@@ -3637,14 +3645,19 @@ fn late_file_tracking_does_not_invent_a_source_change_after_an_unchanged_check()
     // Ordinary observation writes no baseline of its own. Install a measured
     // passive baseline of the actual content, as
     // `install_passive_measured_baseline` (engram_turn_observations.rs) does.
-    let measured = engram_place_source_basis(&EngramBasisPlace::Workdir(
-        turn.root.to_string_lossy().into_owned(),
-    ))
-    .unwrap();
+    let measured = turn
+        .state
+        .engram_observation_source_capture(
+            &turn.session_id,
+            &EngramBasisPlace::Workdir(turn.root.to_string_lossy().into_owned()),
+            DEADLOCK_GUARD,
+        )
+        .unwrap_or_else(|_| panic!("the configured fixture owner supplies the baseline"))
+        .unwrap();
     let baseline = EngramRuntimeCheckpointBasis {
         binding: turn.record(|record| record.engram.work_binding.clone().unwrap()),
         endpoint: EngramMeasuredBaseline {
-            source_id: None,
+            source_id: measured.source_id,
             workspace_id: measured.workspace_id,
             source_revision: measured.source_revision,
             observed_at: unadmitted_observation_timestamp(),
@@ -4509,12 +4522,14 @@ fn a_session_in_a_subdirectory_captures_its_worktree_without_verification_credit
             .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
             .unwrap()
             .unwrap()
-            .source_revision,
+            .source_id
+            .map(|source| serde_json::to_value(source).unwrap())
+            .unwrap(),
         revision
     );
     let request = turn.finish();
     assert_eq!(
-        request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"],
+        request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_id"],
         revision
     );
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();

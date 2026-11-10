@@ -2,6 +2,25 @@
 // Uses the real planner and canonical recovery owner, never a manufactured route.
 use super::*;
 
+// These fixtures start clean. Reclamation must preserve their checkout and
+// Git entry; this is a filesystem assertion, never a source identity producer.
+fn reclamation_checkout(root: &FsPath) -> String {
+    let status = run_git_test_command_output(
+        root,
+        &[
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--ignore-submodules=none",
+        ],
+    );
+    assert!(
+        status.is_empty(),
+        "reclamation leaves the fixture checkout clean"
+    );
+    run_git_test_command_output(root, &["rev-parse", "HEAD"])
+}
+
 fn stale_owner_with_reader(
     label: &str,
     proof: &str,
@@ -59,7 +78,7 @@ fn assert_peer_retirement(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot,
     let before = claimed.transport.requests().len();
     let root = PathBuf::from(&entry.root);
     let git_before = fs::read(root.join(".git")).unwrap();
-    let revision_before = content_revision(&root).unwrap().1;
+    let checkout_before = reclamation_checkout(&root);
     claimed.state.run_engram_root_reclamation_pass(plan);
     let requests = claimed.transport.requests();
     let reads = requests[before..].iter()
@@ -87,8 +106,11 @@ fn assert_peer_retirement(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot,
     assert_eq!(inner.engram_work_naming_history[0].retirements[0].id, notice_id);
     drop(inner);
     assert_eq!(fs::read(root.join(".git")).unwrap(), git_before);
-    assert_eq!(content_revision(&root).unwrap().1, revision_before);
-    assert!(matches!(claimed._runtime_rx.lock().unwrap().try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+    assert_eq!(reclamation_checkout(&root), checkout_before);
+    assert!(matches!(
+        claimed._runtime_rx.lock().unwrap().try_recv(),
+        Err(std::sync::mpsc::TryRecvError::Empty)
+    ));
 }
 
 #[test]
@@ -187,7 +209,7 @@ fn named_root_reclamation_canonical_read_first_keeps_selection_loss_without_seco
         EngramRootReclamationRoute::Current(claimed.session_id.clone()));
     let root = PathBuf::from(&entry.root);
     let git_before = fs::read(root.join(".git")).unwrap();
-    let revision_before = content_revision(&root).unwrap().1;
+    let checkout_before = reclamation_checkout(&root);
     let before = claimed.transport.requests().len();
     let (target, fence) = {
         let inner = claimed.state.inner.lock().unwrap();
@@ -234,6 +256,9 @@ fn named_root_reclamation_canonical_read_first_keeps_selection_loss_without_seco
     assert!(inner.engram_work_naming_history.iter().all(|history| history.retirements.is_empty()));
     drop(inner);
     assert_eq!(fs::read(root.join(".git")).unwrap(), git_before);
-    assert_eq!(content_revision(&root).unwrap().1, revision_before);
-    assert!(matches!(claimed._runtime_rx.lock().unwrap().try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+    assert_eq!(reclamation_checkout(&root), checkout_before);
+    assert!(matches!(
+        claimed._runtime_rx.lock().unwrap().try_recv(),
+        Err(std::sync::mpsc::TryRecvError::Empty)
+    ));
 }

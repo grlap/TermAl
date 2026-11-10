@@ -185,7 +185,7 @@ fn engram_node_force_exit_keeps_source_and_runtime_owner_fences() {
                 .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
                 .unwrap()
                 .unwrap();
-            assert_ne!(start.source_revision, end.source_revision);
+            assert_ne!(start.source_id, end.source_id);
             assert!(
                 observation["occurrence"]["observed_checks"][0]
                     .get("source_basis")

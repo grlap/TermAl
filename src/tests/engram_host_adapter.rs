@@ -34,7 +34,7 @@ mod uncertain_begin;
 mod turn_observations;
 
 #[path = "engram_turn_checks.rs"]
-mod turn_checks;
+pub(crate) mod turn_checks;
 
 use self::turn_checks::{
     EOCheckedTurn, SIZE_TEST, assert_ordinary_observation_has_no_native_credit,

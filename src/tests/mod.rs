@@ -55,7 +55,6 @@ mod capture_shutdown_regressions;
 mod codex_terminal_reset;
 mod codex_thread_recovery;
 mod codex_threads;
-mod content_revision;
 mod conversation_markers;
 mod coordination_board_routes;
 mod coordination_instructions;
@@ -82,6 +81,7 @@ mod delegation_wait;
 mod delegation_worker;
 mod delegation_worker_handoff;
 mod delegations;
+mod source_capture;
 // Also mounts initial_state_snapshot.rs and state_diff_broadcast.rs, sharing
 // the snapshot-cache fixtures.
 mod deferred_state_snapshot;

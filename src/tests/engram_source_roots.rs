@@ -130,11 +130,11 @@ fn naming_from_a_lost_session_workdir_cannot_inherit_the_enclosing_repository() 
 }
 
 #[test]
-fn a_missing_session_directory_cannot_capture_a_clean_enclosing_repository() {
+fn historical_clean_commit_capture_refuses_a_missing_session_directory() {
     let mut cleanup = RemoveDirsOnDrop(Vec::new());
     let project = project(&mut cleanup);
     assert!(
-        engram_execution_source_capture_with(&project.root, false)
+        engram_execution_source_capture_with(&project.root, true)
             .unwrap()
             .is_some(),
         "the clean enclosing repository supplies a real source basis"
@@ -143,7 +143,7 @@ fn a_missing_session_directory_cannot_capture_a_clean_enclosing_repository() {
     assert!(!missing.exists());
     assert!(
         matches!(
-            engram_execution_source_capture_with(&missing, false),
+            engram_execution_source_capture_with(&missing, true),
             Ok(None)
         ),
         "a missing session must not receive that enclosing repository's basis"
@@ -249,27 +249,24 @@ fn a_worktree_outside_the_project_folder_is_refused() {
 }
 
 #[test]
-fn a_named_root_is_measured_on_exactly_its_own_path() {
+fn historical_clean_commit_capture_uses_exactly_the_named_root() {
     let mut cleanup = RemoveDirsOnDrop(Vec::new());
     let project = project(&mut cleanup);
     let (root, common_dir_key) = validate(&project.worktree, &project).unwrap();
-    let basis =
-        engram_named_root_source_basis(&root, &common_dir_key).expect("a present root has a basis");
+    let basis = engram_named_root_source_basis_with(&root, &common_dir_key, true)
+        .expect("the historical clean-commit path has a basis");
     assert_eq!(basis.workspace_id, root);
-    let (_, main_revision) = content_revision(&project.root).unwrap();
     fs::write(
         project.worktree.join("tracked.txt"),
         "changed in the worktree\n",
     )
     .unwrap();
-    let moved = engram_named_root_source_basis(&root, &common_dir_key).unwrap();
-    assert_ne!(
-        moved.source_revision, basis.source_revision,
-        "an edit there moves it"
-    );
-    assert_ne!(moved.source_revision, main_revision);
     assert!(
-        engram_named_root_source_basis(&root, "c:/another/repository/.git").is_none(),
+        engram_named_root_source_basis_with(&root, &common_dir_key, true).is_none(),
+        "an edit in the named root cannot borrow the clean main checkout's commit"
+    );
+    assert!(
+        engram_named_root_source_basis_with(&root, "c:/another/repository/.git", true).is_none(),
         "a root that now belongs to another repository has no basis"
     );
 }
@@ -284,10 +281,10 @@ fn a_named_root_without_its_git_entry_has_no_basis_and_never_main() {
     fs::remove_file(project.worktree.join(".git")).unwrap();
     assert!(engram_named_root_absent(&root));
     assert!(
-        engram_named_root_source_basis(&root, &common_dir_key).is_none(),
+        engram_named_root_source_basis_with(&root, &common_dir_key, true).is_none(),
         "a root that lost its .git is not measured"
     );
-    let walked = engram_execution_source_basis(&project.worktree)
+    let walked = engram_execution_source_basis_with(&project.worktree, true)
         .expect("the ancestor walk finds main, which is why a named root never takes it");
     assert_eq!(walked.workspace_id, root_key(&project.root));
 }
@@ -299,12 +296,15 @@ fn a_named_root_that_was_removed_has_no_basis() {
     let (root, common_dir_key) = validate(&project.worktree, &project).unwrap();
     fs::remove_dir_all(&project.worktree).unwrap();
     assert!(engram_named_root_absent(&root));
-    assert!(engram_named_root_source_basis(&root, &common_dir_key).is_none());
+    assert!(engram_named_root_source_basis_with(&root, &common_dir_key, true).is_none());
     assert!(
-        engram_place_source_basis(&EngramBasisPlace::Named {
-            root,
-            common_dir_key
-        })
+        engram_place_source_basis_with(
+            &EngramBasisPlace::Named {
+                root,
+                common_dir_key
+            },
+            true
+        )
         .is_none()
     );
 }
@@ -335,12 +335,12 @@ fn a_named_root_replaced_by_a_link_to_another_tree_has_no_basis() {
     let mut cleanup = RemoveDirsOnDrop(Vec::new());
     let project = project(&mut cleanup);
     let (root, common_dir_key) = validate(&project.worktree, &project).unwrap();
-    assert!(engram_named_root_source_basis(&root, &common_dir_key).is_some());
+    assert!(engram_named_root_source_basis_with(&root, &common_dir_key, true).is_some());
     fs::remove_dir_all(&project.worktree).unwrap();
     link_directory(&project.worktree, &project.root);
 
     assert!(
-        engram_named_root_source_basis(&root, &common_dir_key).is_none(),
+        engram_named_root_source_basis_with(&root, &common_dir_key, true).is_none(),
         "the link's target is not the named root"
     );
     assert!(
@@ -849,7 +849,7 @@ fn only_a_lookup_that_says_missing_makes_a_root_absent() {
 }
 
 #[test]
-fn a_bounded_closing_capture_measures_a_gone_root_by_its_seal() {
+fn historical_bounded_closing_capture_measures_a_gone_root_by_its_seal() {
     let mut cleanup = RemoveDirsOnDrop(Vec::new());
     let project = project(&mut cleanup);
     let (root, common_dir_key) = validate(&project.worktree, &project).unwrap();
@@ -860,7 +860,12 @@ fn a_bounded_closing_capture_measures_a_gone_root_by_its_seal() {
     let sealed = (root.clone(), "content-v1:sealed".to_owned());
     let state = test_app_state();
     let live = state
-        .engram_turn_end_basis_within(&place, Some(&sealed), Duration::from_secs(60))
+        .engram_historical_turn_end_basis_within(
+            &place,
+            Some(&sealed),
+            true,
+            Duration::from_secs(60),
+        )
         .expect("a live root is captured");
     assert_ne!(
         live.source_revision, "content-v1:sealed",
@@ -869,7 +874,12 @@ fn a_bounded_closing_capture_measures_a_gone_root_by_its_seal() {
 
     fs::remove_dir_all(&project.worktree).unwrap();
     assert_eq!(
-        state.engram_turn_end_basis_within(&place, Some(&sealed), Duration::from_secs(60)),
+        state.engram_historical_turn_end_basis_within(
+            &place,
+            Some(&sealed),
+            true,
+            Duration::from_secs(60)
+        ),
         Some(EngramExecutionSourceBasis {
             source_id: None,
             source_root_generation: None,

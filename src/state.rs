@@ -1875,7 +1875,7 @@ struct StateInner {
     /// carries what such a request left open.
     acceptance_evaluation_submissions_in_flight: HashSet<String>,
     /// Threads taking an acceptance evaluation's source revision that are
-    /// still alive, abandoned ones included (`bounded_content_revision_capture`).
+    /// still alive, abandoned ones included (`bounded_source_capture`).
     /// Memory only, one count for the host.
     acceptance_source_captures_live: Arc<std::sync::atomic::AtomicUsize>,
     /// Threads taking a turn's begin or closing source basis that are still

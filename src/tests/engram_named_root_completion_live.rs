@@ -155,6 +155,17 @@ impl CompletionFixture {
         self.command(session_id, args, true)
     }
 
+    pub(super) fn source_id_now(&self, session: &str, root: &FsPath) -> EngramSourceId {
+        let deadline = std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET;
+        let owner = self
+            .live
+            .state
+            .source_owner_metadata_until(session, deadline)
+            .expect("the live fixture pins its configured source owner");
+        engram_source_id_until(&owner, root, deadline)
+            .expect("the configured owner captures the complete current source identity")
+    }
+
     fn record<T>(&self, session_id: &str, read: impl FnOnce(&SessionRecord) -> T) -> T {
         let inner = self.live.state.inner.lock().expect("state mutex poisoned");
         read(
@@ -968,7 +979,7 @@ fn recovered_claim_check_in_a_newly_named_root_completes_without_an_edit() {
             "--json",
         ],
     );
-    let before = content_revision(&worktree).unwrap().1;
+    let before = fixture.source_id_now(&second, &worktree);
     fixture.begin(&second, "Run the real check without changing source.");
     let closing_turn = fixture.record(&second, |record| {
         record
@@ -989,7 +1000,7 @@ fn recovered_claim_check_in_a_newly_named_root_completes_without_an_edit() {
         "the stored basis matches the complete prepared basis"
     );
     assert_eq!(stored["check_kind"], "test");
-    assert_eq!(content_revision(&worktree).unwrap().1, before);
+    assert!(fixture.source_id_now(&second, &worktree) == before);
     assert!(
         worktree.join(".git").is_file(),
         "naming never removes the worktree"
@@ -1172,6 +1183,6 @@ fn recovered_claim_check_in_a_newly_named_root_completes_without_an_edit() {
     assert!(notices[0].published);
     drop(inner);
     assert!(worktree.join(".git").is_file());
-    assert_eq!(content_revision(&worktree).unwrap().1, before);
+    assert!(fixture.source_id_now(&second, &worktree) == before);
     assert_no_live_turn_gate(&fixture.live.transport);
 }

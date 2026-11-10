@@ -18,18 +18,23 @@ fn build_evaluation_args(work: &str, shown: &Value, id: &str, revision: &str) ->
         "--evidence".into(),
         format!("1={id}"),
         "--source-fingerprint".into(),
-        revision.into(),
+        acceptance_committed_judged_revision(revision),
         "--attempt".into(),
         format!("build-admission-{id}"),
         "--json".into(),
     ]
 }
 
+enum BuildEvaluationRefusal<'a> {
+    NoPassedRegisteredCheck,
+    CitationMismatch(&'a str),
+}
+
 fn rejected_build_evaluation(
     fixture: &CompletionFixture,
     args: &[String],
     citation: &str,
-    mismatch: &str,
+    expected: BuildEvaluationRefusal<'_>,
 ) {
     let session = &fixture.live.session_id;
     let (actor, context) = {
@@ -60,6 +65,18 @@ fn rejected_build_evaluation(
     let refusal: Value = serde_json::from_slice(&output.stderr)
         .or_else(|_| serde_json::from_slice(&output.stdout))
         .unwrap_or_else(|_| panic!("structured refusal required"));
+    let mismatch = match expected {
+        BuildEvaluationRefusal::NoPassedRegisteredCheck => {
+            // Registered-input freshness is required before citation admission.
+            assert_eq!(refusal["error"]["code"], "work_completion_refused");
+            assert_eq!(
+                refusal["error"]["details"]["reason"],
+                "no registered check at the evaluated cut tested the declared commit; run a passing check on the intended current commit"
+            );
+            return;
+        }
+        BuildEvaluationRefusal::CitationMismatch(mismatch) => mismatch,
+    };
     assert_eq!(
         refusal["error"]["code"], "acceptance_evaluation_refused",
         "<refusal details withheld>"
@@ -159,7 +176,7 @@ fn engram_build_live_producer_admits_actual_build_and_refuses_failed_or_test_onl
                 "--json",
             ],
         );
-        let source = content_revision(&fixture.root).unwrap().1;
+        let source = fixture.source_id_now(session, &fixture.root);
         fixture.begin(session, "Run the actual Cargo build.");
         let (body, receipt) =
             fixture.historical_registered_check(session, &fixture.root, "cargo build --offline");
@@ -189,7 +206,12 @@ fn engram_build_live_producer_admits_actual_build_and_refuses_failed_or_test_onl
         let shown = fixture.work(session, &["show", work, "--json"]);
         let args = build_evaluation_args(work, &shown, id, revision);
         if fails {
-            rejected_build_evaluation(&fixture, &args, id, "passed_verification_required");
+            rejected_build_evaluation(
+                &fixture,
+                &args,
+                id,
+                BuildEvaluationRefusal::NoPassedRegisteredCheck,
+            );
         } else {
             let evaluated = fixture.work(
                 session,
@@ -198,7 +220,10 @@ fn engram_build_live_producer_admits_actual_build_and_refuses_failed_or_test_onl
             assert_eq!(evaluated["evaluation"]["passed"], 1, "<evaluated withheld>");
             assert_eq!(evaluated["evaluation"]["verdicts_total"], 1);
             assert_eq!(evaluated["evaluation"]["verdicts_omitted"], 0);
-            assert_eq!(evaluated["evaluation"]["source_fingerprint"], *revision);
+            assert_eq!(
+                evaluated["evaluation"]["source_fingerprint"],
+                acceptance_committed_judged_revision(revision)
+            );
             let verdicts = evaluated["evaluation"]["verdicts"].as_array().unwrap();
             assert_eq!(verdicts.len(), 1);
             assert_eq!(verdicts[0]["position"], 1);
@@ -217,15 +242,18 @@ fn engram_build_live_producer_admits_actual_build_and_refuses_failed_or_test_onl
                 &fixture,
                 &build_evaluation_args(work, &shown, &test, revision),
                 &test,
-                "bound_verification_mismatch",
+                BuildEvaluationRefusal::CitationMismatch("bound_verification_mismatch"),
             );
         }
         finish_live_root(&fixture.live.state, session);
         fixture.wait_for_reports(session);
-        assert_eq!(
-            content_revision(&fixture.root).unwrap().1,
-            source,
+        assert!(
+            fixture.source_id_now(session, &fixture.root) == source,
             "the actual command did not mutate its named source"
+        );
+        assert!(
+            fixture.object(id) == stored,
+            "evaluation never rewrites the Build record"
         );
         assert_no_live_turn_gate(&fixture.live.transport);
     }

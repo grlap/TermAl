@@ -283,7 +283,13 @@ fn engram_collapse_whitespace(line: &str) -> String {
 /// The check fingerprint an author pins with `--bind N=test:FINGERPRINT`:
 /// the lowercase hex SHA-256 of the normalised command line's UTF-8 bytes.
 fn engram_check_fingerprint(check: &EngramCheckCommand) -> String {
-    sha256_hex(check.normalized.as_bytes())
+    engram_normalized_check_fingerprint(&check.normalized)
+}
+
+/// The same command identity for an explicit registered check whose kind is
+/// outside ordinary command recognition (for example, the full gate's lint).
+fn engram_normalized_check_fingerprint(normalized: &str) -> String {
+    sha256_hex(normalized.as_bytes())
 }
 
 /// Splits a command line into words the way a shell would for the cases

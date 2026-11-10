@@ -218,6 +218,7 @@ struct EngramVerificationRecordRun {
 enum EngramVerificationRecordCheckKind {
     Test,
     Build,
+    Lint,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -327,8 +328,8 @@ enum EngramVerificationRecordPending {
     NoConnection,
     /// Historical progress only; current routing does not emit this reason.
     AwaitingNamingBinding,
-    /// A stage is neither a test nor a build check; the record is not built
-    /// until someone decides how it is recorded.
+    /// A stage is neither a test, build nor admitted lint check; the record
+    /// is not built until someone decides how it is recorded.
     UnclassifiedStages { stages: Vec<String> },
     /// The run's checkout was not clean after it. The producer admits only a
     /// clean post-run input today, so nothing is sent.
@@ -658,8 +659,9 @@ fn engram_verification_record_is_build(argv: &[String]) -> bool {
 /// ARGV`, the classifier checkpoint verification applies, which takes `cargo
 /// test`, `npx vitest`, Node's `--test` runner and the launcher itself): a
 /// test there is a Test. Else a true build command (`cargo check`, `cargo
-/// build`, `tsc`) is a Build. Else the launcher's agreed test-stage rule over
-/// the run's own request (`engram_launcher_test_stages`; a live run's
+/// build`, `tsc`) is a Build. The full gate's reserved `fmt` stage admits
+/// only the exact check-only Cargo formatter argv as Lint. Else the launcher's
+/// agreed test-stage rule over the run's own request (`engram_launcher_test_stages`; a live run's
 /// `engram-live` stage, as `engram_check_showed_passing_tests` counts it), or
 /// the sender's own launcher stage table
 /// (`ENGRAM_VERIFICATION_RECORD_LAUNCHER_TEST_STAGES`), makes it a Test. A stage none of these takes has no kind: the record is
@@ -671,17 +673,21 @@ fn engram_verification_record_check_kind(
     stage: &str,
     argv: &[String],
     test_stages: &[String],
-) -> Option<EngramVerificationKind> {
+) -> Option<EngramVerificationRecordCheckKind> {
+    if mode == EngramVerificationRecordMode::Full && stage == "fmt" {
+        return engram_verification_record_is_lint(argv)
+            .then_some(EngramVerificationRecordCheckKind::Lint);
+    }
     let focused: Vec<String> = ["scripts/test-launcher.mjs", "focused", "--"]
         .into_iter()
         .map(str::to_owned)
         .chain(argv.iter().cloned())
         .collect();
     if !argv.is_empty() && engram_is_test_command("node", &focused) {
-        return Some(EngramVerificationKind::Test);
+        return Some(EngramVerificationRecordCheckKind::Test);
     }
     if engram_verification_record_is_build(argv) {
-        return Some(EngramVerificationKind::Build);
+        return Some(EngramVerificationRecordCheckKind::Build);
     }
     // A focused command is not a native test because a client labels it one.
     // Unsupported suites need the host's captured declaration and artifact.
@@ -691,7 +697,15 @@ fn engram_verification_record_check_kind(
     let stage_rule = test_stages.iter().any(|name| name == stage)
         || (mode == EngramVerificationRecordMode::Live && stage == "engram-live")
         || ENGRAM_VERIFICATION_RECORD_LAUNCHER_TEST_STAGES.contains(&stage);
-    stage_rule.then_some(EngramVerificationKind::Test)
+    stage_rule.then_some(EngramVerificationRecordCheckKind::Test)
+}
+
+/// Explicit registered lint admission is deliberately narrower than ordinary
+/// test/build recognition: no formatter write, extra arguments or wrapper.
+fn engram_verification_record_is_lint(argv: &[String]) -> bool {
+    matches!(argv, [program, subcommand, flag]
+        if engram_program_name(program) == "cargo"
+            && subcommand == "fmt" && flag == "--check")
 }
 
 /// Launcher stage ids this sender alone records as tests when neither their
@@ -717,7 +731,7 @@ fn engram_verification_record_stage_argv(
     Ok((name, argv))
 }
 
-/// The stages of a run that are neither a test nor a build check
+/// The stages of a run that are neither a test, build nor admitted lint check
 /// (`engram_verification_record_check_kind`), in results order.
 fn engram_verification_record_unclassified_stages(request: &Value, results: &Value) -> Vec<String> {
     let mode = engram_verification_record_mode(request);
@@ -818,9 +832,9 @@ fn engram_verification_record_run_command(
     command
 }
 
-/// One stage of terminal results as a check; a stage that is neither a test
-/// nor a build check (`engram_verification_record_check_kind`) fails the
-/// build of the whole record rather than leaving it out.
+/// One stage of terminal results as a check; a stage that is neither a test,
+/// build nor admitted lint check (`engram_verification_record_check_kind`)
+/// fails the build of the whole record rather than leaving it out.
 fn engram_verification_record_check(
     stage: &Value,
     planned: &HashMap<String, Vec<String>>,
@@ -835,10 +849,9 @@ fn engram_verification_record_check(
         TestRunStageState::Running => EngramVerificationRecordCheckOutcome::Indeterminate,
     };
     let Some(kind) = engram_verification_record_check_kind(mode, &name, &argv, test_stages) else {
-        return Err(format!("stage {name} is neither a test nor a build check"));
+        return Err(format!("stage {name} is neither a test, build nor admitted lint check"));
     };
-    let command = engram_verification_record_check_command(&argv, kind)
-        .ok_or_else(|| format!("stage {name} names no command"))?;
+    let command = engram_verification_record_command_text(&argv);
     let exit = stage.get("code").and_then(Value::as_i64);
     let outcome_word = match outcome {
         EngramVerificationRecordCheckOutcome::Passed => "passed",
@@ -851,7 +864,7 @@ fn engram_verification_record_check(
         None => format!("{name}: {outcome_word}"),
     };
     let mut refs = Vec::new();
-    let command_ref = format!("command:{}", command.normalized);
+    let command_ref = format!("command:{command}");
     if command_ref.len() <= ENGRAM_CHECK_REF_MAX_BYTES {
         refs.push(command_ref);
     }
@@ -860,12 +873,9 @@ fn engram_verification_record_check(
     }
     Ok(EngramVerificationRecordCheck {
         stage: name,
-        check_kind: match command.kind {
-            EngramVerificationKind::Test => EngramVerificationRecordCheckKind::Test,
-            EngramVerificationKind::Build => EngramVerificationRecordCheckKind::Build,
-        },
-        check_fingerprint: EngramHost::check_fingerprint(&command),
-        command: command.normalized.clone(),
+        check_kind: kind,
+        check_fingerprint: EngramHost::normalized_check_fingerprint(&command),
+        command,
         started_at: test_run_str(stage, "started"),
         completed_at: test_run_str(stage, "ended"),
         outcome,

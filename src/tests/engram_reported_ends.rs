@@ -1050,6 +1050,7 @@ fn another_checking_session(owner: &EOCheckedTurn, worktree: &FsPath) -> EOCheck
         owner.root.clone(),
         transport,
         owner._runtime_rx.clone(),
+        owner.sources.clone(),
     );
     other.host = owner.host.clone();
     // Naming the shared worktree is what associates S2 with its claim.

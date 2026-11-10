@@ -507,8 +507,7 @@ fn acceptance_does_not_fall_back_to_workdir_when_the_authoritative_root_has_no_s
     assert!(state.inner.lock().unwrap().delegations.is_empty());
 }
 
-/// The parent's workdir as a committed Git worktree, so a content revision
-/// can be taken on it. The fixture's tracker home is this same directory, and
+/// The parent's workdir as a committed Git worktree for source-owner fixtures. The fixture's tracker home is this same directory, and
 /// the scripted tracker writes its store and its argument log there while the
 /// request runs; they are ignored, as a real store outside the repository
 /// never shows in its revision.
@@ -959,84 +958,27 @@ fn submit_declaring(
 }
 
 #[test]
-fn acceptance_submit_declares_the_requested_revision_while_the_worktree_still_holds_it() {
-    let mut expected = String::new();
-    let args = submit_declaring(
-        |root| {
-            expected = content_revision(root).unwrap().1;
-            expected.clone()
-        },
-        true,
-        |_| {},
-    )
-    .unwrap();
-    let at = args
-        .iter()
-        .position(|arg| arg == "--source-fingerprint")
-        .expect("the confirmed fingerprint is declared");
-    assert_eq!(args[at + 1], expected);
-    assert_eq!(
-        args[at + 2],
-        "--model",
-        "after the verdicts, before the model"
-    );
-    assert!(
-        !args.iter().any(|arg| arg.starts_with("--source-workspace")),
-        "no workspace is declared, so a peer worktree matches too"
-    );
-}
-
-#[test]
-fn acceptance_submit_refuses_when_the_worktree_moved_on_while_it_was_evaluated() {
-    let (state, project, parent, root) = fixture();
-    install_store(&state, &project, &root);
-    make_workdir_a_worktree(&root);
-    let workdir = root.to_string_lossy().into_owned();
-    let (delegation, child) =
-        install_evaluator_delegation(&state, &parent, Some(&project), &workdir, 2);
-    let requested = content_revision(&root).unwrap().1;
-    update_evaluation_target(&state, &delegation, |target| {
-        target.source_fingerprint = Some(requested.clone());
-    });
-    fs::write(root.join("judged.txt"), "changed under the evaluator\n").unwrap();
-    let (calls, run) = scripted_runner(Vec::new());
-    let error = state
-        .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run)
-        .unwrap_err();
-    assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(
-        error.message.contains("changed while it was evaluated"),
-        "{}",
-        error.message
-    );
-    assert!(error.message.contains(&requested), "{}", error.message);
-    // Final for the evaluator, in the refusal and in the tool it reads.
-    assert!(
-        error.message.contains("do not submit again"),
-        "{}",
-        error.message
-    );
-    assert!(
-        !error.message.contains("nothing was sent"),
-        "{}",
-        error.message
-    );
-    assert!(
-        TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_DESCRIPTION
-            .contains("worktree changed while it was evaluated, do not submit again")
-    );
-    // Refused before anything runs or is written.
-    assert!(calls.lock().unwrap().is_empty());
-    let inner = state.inner.lock().unwrap();
-    let index = inner.find_delegation_index(&delegation).unwrap();
-    assert!(matches!(
-        inner.delegations[index]
-            .acceptance_evaluation
-            .as_ref()
-            .unwrap()
-            .submission,
-        AcceptanceEvaluationSubmission::None
-    ));
+fn fresh_legacy_targets_do_not_recreate_retired_content_fingerprints() {
+    for edit in [false, true] {
+        let args = submit_declaring(
+            |_| format!("content-v1:{}", "a".repeat(64)),
+            true,
+            |root| {
+                if edit {
+                    fs::write(root.join("judged.txt"), "changed under the evaluator\n").unwrap();
+                }
+            },
+        )
+        .unwrap();
+        assert!(
+            !args.iter().any(|arg| arg == "--source-fingerprint"),
+            "a historical declaration cannot be recaptured or converted: {args:?}"
+        );
+        assert!(
+            !args.iter().any(|arg| arg == "--source-id-file"),
+            "no current owner object was supplied by this historical target"
+        );
+    }
 }
 
 #[test]
@@ -1051,36 +993,65 @@ fn acceptance_submit_declares_nothing_when_the_revision_cannot_be_taken_again() 
 }
 
 #[test]
-fn acceptance_submit_replays_an_open_write_unchanged_after_the_worktree_moved() {
-    let (state, project, parent, root) = fixture();
-    install_store(&state, &project, &root);
-    make_workdir_a_worktree(&root);
-    let workdir = root.to_string_lossy().into_owned();
-    let (delegation, child) =
-        install_evaluator_delegation(&state, &parent, Some(&project), &workdir, 2);
-    let requested = content_revision(&root).unwrap().1;
-    update_evaluation_target(&state, &delegation, |target| {
-        target.source_fingerprint = Some(requested.clone());
-    });
-    // Both sends lose their response: the write stays open, its outcome
-    // unknown.
-    let (first_calls, run) = scripted_runner(vec![response_lost(), response_lost()]);
-    let _ = state.submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run);
-    let sent = first_calls.lock().unwrap()[0].clone();
-    assert!(sent.contains(&requested), "{sent:?}");
-
-    // The worktree moves on. Only a receipt resolves the open write, so the
-    // same verdicts resend its stored arguments rather than being refused.
-    fs::write(root.join("judged.txt"), "changed after the send\n").unwrap();
-    let (calls, run) = scripted_runner(vec![Ok(cli_output(true, &evaluate_receipt(true), ""))]);
-    state
-        .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run)
-        .expect("an open write is replayed, not refused");
-    assert_eq!(
-        calls.lock().unwrap()[0],
-        sent,
-        "the stored arguments, unchanged"
-    );
+fn acceptance_submit_replays_a_stored_legacy_write_unchanged_after_the_worktree_moved() {
+    for uncertain in [false, true] {
+        let (state, project, parent, root) = fixture();
+        install_store(&state, &project, &root);
+        make_workdir_a_worktree(&root);
+        let (delegation, child) = install_evaluator_delegation(
+            &state,
+            &parent,
+            Some(&project),
+            &root.to_string_lossy(),
+            2,
+        );
+        let requested = format!("content-v1:{}", "a".repeat(64));
+        update_evaluation_target(&state, &delegation, |target| {
+            target.source_fingerprint = Some(requested.clone());
+        });
+        // Explicit historical persisted input: creating a new declaration no
+        // longer captures this basis, but replay must preserve old bytes.
+        let (authority, target, model, in_flight) = state
+            .acceptance_evaluation_submit_context(&child, &two_verdicts())
+            .unwrap();
+        let args = acceptance_evaluation_cli_args(
+            &target.connection,
+            &authority.target,
+            &two_verdicts(),
+            model.as_deref(),
+        )
+        .unwrap();
+        let original = AcceptanceEvaluationOpenWrite {
+            source_payload: None,
+            verdicts_digest: acceptance_evaluation_payload_digest(
+                &acceptance_evaluation_verdict_args(&two_verdicts()),
+            ),
+            args: args.clone(),
+        };
+        let digest = original.digest().unwrap();
+        update_evaluation_target(&state, &delegation, |target| {
+            target.submission = if uncertain {
+                unconfirmed_with(&digest, "the historical response was lost", original)
+            } else {
+                pending_with(&digest, original)
+            };
+        });
+        state
+            .commit_locked(&mut state.inner.lock().unwrap())
+            .unwrap();
+        drop(in_flight);
+        assert!(args.contains(&requested));
+        fs::write(root.join("judged.txt"), "changed after the stored send\n").unwrap();
+        let (calls, run) = scripted_runner(vec![Ok(cli_output(true, &evaluate_receipt(true), ""))]);
+        state
+            .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run)
+            .expect("the original stored write replays without recapture");
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![args],
+            "exact historical argv, one send"
+        );
+    }
 }
 
 #[test]

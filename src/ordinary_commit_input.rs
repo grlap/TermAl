@@ -1,20 +1,12 @@
-// Owns the host's switch for the ordinary committed-input flow
-// (`ORDINARY_COMMIT_INPUT_DEFAULT`) and the source revision it selects: with
-// the switch on, a clean worktree root has the revision `git-commit:<HEAD>`
-// and one that is not clean has a typed not-clean outcome carrying the paths
-// Git reported, never a revision and never a content revision instead.
-// Does not own the content revision taken while the switch is off
-// (`content_revision` in src/content_revision.rs), the launcher's side of the
-// flow (`ORDINARY_COMMIT_INPUT_DEFAULT` and `commitInputOutcome` in
-// scripts/test-launcher.mjs), the committed-input record a run writes
-// (src/test_run_committed_input.rs), or when a basis is taken and what its
-// absence means (src/engram_source_roots.rs, src/engram_turn_observations.rs).
-// New module. Reuses review_freeze.rs's pinned Git runner.
+// Historical clean-commit capture and local Git diagnostics. New source
+// measurements use the configured Engram owner and keep its complete source_id.
+// The retired content-revision selection returns unavailable; it never falls
+// back to a clean commit or reconstructs a historical content fingerprint.
+// Reuses review_freeze.rs's pinned Git runner.
 
-/// Whether ordinary host source measurements use committed input. The
-/// launcher's same-named switch selects run input independently; enabling it
-/// does not enable this host default. While this is off, ordinary host source
-/// measurements retain content revisions.
+/// Historical selector retained by legacy callers. False now means unavailable;
+/// it does not request or manufacture a content revision.
+#[cfg(test)]
 const ORDINARY_COMMIT_INPUT_DEFAULT: bool = false;
 
 /// The scheme of a committed source revision. It never equals a content
@@ -23,6 +15,7 @@ const COMMITTED_SOURCE_REVISION_SCHEME: &str = "git-commit";
 
 /// At most this many dirty paths are named in a log line; the outcome itself
 /// keeps them all.
+#[cfg(test)]
 const SOURCE_REVISION_NOT_CLEAN_SHOWN: usize = 8;
 
 /// One entry `git status --porcelain=v1 -z` reported on a root that is not
@@ -38,9 +31,9 @@ struct SourceRevisionDirtyPath {
 /// The source revision of a worktree root: a revision with the canonical root
 /// it was taken on, or, with the switch on, the paths that keep it from one.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg(test)]
 enum SourceRevision {
-    /// A revision: a content revision with the switch off, `git-commit:<HEAD>`
-    /// with it on.
+    /// A historical clean-commit revision, `git-commit:<HEAD>`.
     Taken { root: PathBuf, revision: String },
     /// With the switch on, a root Git reports changes in, tracked or
     /// untracked and not ignored. It has no revision.
@@ -50,7 +43,7 @@ enum SourceRevision {
 }
 
 /// The source revision of the worktree at `root`, which must be a worktree
-/// root. With `ordinary_commit_input` off it is exactly [`content_revision`].
+/// root. With `ordinary_commit_input` off the retired capture is unavailable.
 /// With it on, it is the commit HEAD names when Git reports the worktree clean
 /// (`status` with every untracked file listed, paths the repository-scoped
 /// standard excludes ignore left out, and submodules never ignored), else
@@ -58,15 +51,16 @@ enum SourceRevision {
 /// Fails on a non-root checkout, filters, an unreadable or non-SHA-1 HEAD,
 /// an uninitialized or off-pin submodule, and HEAD movement. Git status is
 /// the dirt verdict: assume-unchanged and skip-worktree edits can be invisible.
+#[cfg(test)]
 fn source_revision(root: &FsPath, ordinary_commit_input: bool) -> Result<SourceRevision> {
     if !ordinary_commit_input {
-        let (root, revision) = content_revision(root)?;
-        return Ok(SourceRevision::Taken { root, revision });
+        bail!("legacy content revision capture is no longer supported");
     }
     let git = ReviewFreezeGit::new(root)?;
     capture_committed_source_revision(&git)
 }
 
+#[cfg(test)]
 fn capture_committed_source_revision(git: &ReviewFreezeGit) -> Result<SourceRevision> {
     let (head, dirty_paths) = committed_source_status(git)?;
     if !dirty_paths.is_empty() {
@@ -214,6 +208,7 @@ fn source_revision_dirty_paths(status: &[u8]) -> Result<Vec<SourceRevisionDirtyP
 
 /// Why a not-clean root has no revision, for a log line: the first few paths
 /// and how many more there are.
+#[cfg(test)]
 fn source_revision_not_clean_reason(dirty_paths: &[SourceRevisionDirtyPath]) -> String {
     let shown = dirty_paths
         .iter()

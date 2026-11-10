@@ -340,6 +340,7 @@ export function requiredStages(platform = process.platform, env = process.env, n
     ? ["-c", "exec scripts/test-rust.sh"]
     : ["scripts/test-rust.sh"];
   return [
+    { name: "fmt", command: "cargo", args: ["fmt", "--check"] },
     { name: "cargo-check", command: "cargo", args: ["check"] },
     {
       name: "typescript",
@@ -1558,7 +1559,7 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
         throw new Error("stage must contain a command and string arguments");
       }
       stage.cwd = stageDirectory(request.root, stage.cwd);
-      stage.command = request.needsCargo && stage.name === "cargo-check"
+      stage.command = request.needsCargo && ["fmt", "cargo-check"].includes(stage.name)
         ? cargo
         : executable(stage.command, stage.cwd, childEnv);
       executables[stage.name] = stage.command;

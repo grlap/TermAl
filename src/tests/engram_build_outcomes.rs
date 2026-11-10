@@ -11,7 +11,7 @@ fn summary(turn: &EOCheckedTurn) -> String {
 fn rejected_terminal(
     turn: &EOCheckedTurn,
     request: &Value,
-    revision: &str,
+    revision: &Value,
     code: i64,
     reason: &str,
 ) {
@@ -146,7 +146,7 @@ fn engram_build_outcome_typed_yield_and_foreign_key_do_not_end_the_owned_attempt
     assert_eq!(owned.len(), 1, "one exact owned occurrence: {request:#}");
     assert_eq!(owned[0]["observed_result"], "failed");
     assert_eq!(
-        request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"],
+        request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_id"],
         revision
     );
     assert!(summary(&turn).contains("exited 101"));

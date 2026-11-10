@@ -1173,7 +1173,7 @@ include!("delegation_mcp_durability_pending.rs");
 include!("delegation_mcp_review_freeze.rs");
 include!("review_freeze.rs");
 include!("capture_lifetime.rs");
-include!("content_revision.rs");
+include!("source_capture.rs");
 include!("ordinary_commit_input.rs");
 include!("engram_source_id.rs");
 include!("engram_source_command.rs");

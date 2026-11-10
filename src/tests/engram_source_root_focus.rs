@@ -148,10 +148,7 @@ fn assert_named_sighting(
     assert_eq!(basis["workspace_id"].as_str(), Some(root));
     assert_eq!(basis["source_root_generation"], generation);
     assert_eq!(basis["source_root_state"], "named");
-    assert_eq!(
-        basis["source_revision"].as_str(),
-        Some(content_revision_of(FsPath::new(root)).as_str())
-    );
+    assert_eq!(basis["source_id"], owner_source_of(turn, FsPath::new(root)));
     assert!(request.get("verification_evidence").is_none());
     assert_recorded_turn(turn, turn_ref);
 }

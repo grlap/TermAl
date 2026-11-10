@@ -1,9 +1,12 @@
-// Historical source capture still used by acceptance. Filesystem capture runs off the state lock and
-// cannot authorize delivery or create a control obligation.
+// Historical clean-commit capture and legacy basis readers. Filesystem capture
+// runs off the state lock and cannot authorize delivery or create a control obligation.
 
+#[cfg(test)]
 const ENGRAM_SOURCE_BASIS_MAX_BYTES: usize = 512;
 
-type EngramSourceCapture = std::result::Result<Option<EngramExecutionSourceBasis>, SourceBasisRefusal>;
+#[cfg(test)]
+type EngramSourceCapture =
+    std::result::Result<Option<EngramExecutionSourceBasis>, SourceBasisRefusal>;
 
 #[cfg(test)]
 fn engram_turn_end_basis(
@@ -33,7 +36,7 @@ fn engram_execution_source_basis(workdir: &FsPath) -> Option<EngramExecutionSour
 }
 
 /// [`engram_execution_source_basis`] with the committed-input switch given
-/// ([`source_revision`]). Off, the basis is the content revision. On, a clean
+/// ([`source_revision`]). Off, the retired content capture is unavailable. On, a clean
 /// worktree's is its HEAD commit, and one that is not clean has none, logged
 /// with the paths Git reported, exactly as a revision that cannot be taken.
 #[cfg(test)]
@@ -44,6 +47,7 @@ fn engram_execution_source_basis_with(
     engram_execution_source_capture_with(workdir, ordinary_commit_input).ok().flatten()
 }
 
+#[cfg(test)]
 fn engram_execution_source_capture_with(
     workdir: &FsPath,
     ordinary_commit_input: bool,
@@ -94,6 +98,7 @@ fn engram_execution_source_capture_with(
 /// The basis of a workspace frozen at worktree `root`. Engram refuses a basis
 /// field over 512 bytes, and with it the whole report, so a root that long
 /// leaves the report without a basis, and logged, rather than refused.
+#[cfg(test)]
 fn engram_bounded_source_basis(
     workdir: &FsPath,
     root: &FsPath,
@@ -145,7 +150,7 @@ impl AppState {
             .engram_turn_basis_captures_live
             .clone();
         let place = place.clone();
-        bounded_content_revision_capture(
+        bounded_source_capture(
             &live,
             &self.capture_lifetime,
             ENGRAM_TURN_BASIS_CAPTURE_LIMIT,
@@ -155,16 +160,17 @@ impl AppState {
         .unwrap_or(Ok(None))
     }
 
-    /// The closing basis of a turn at `place` (`engram_turn_end_basis`), on
+    /// The historical closing basis at `place` (`engram_turn_end_basis`), on
     /// its own thread and waited for at most `budget`: the capture and, when
     /// it fails, the check that a sealed root is gone both touch the file
     /// system, so both stay inside the bound. Past the budget, or at the
     /// capture limit, there is no basis.
     #[cfg(test)]
-    fn engram_turn_end_basis_within(
+    fn engram_historical_turn_end_basis_within(
         &self,
         place: &EngramBasisPlace,
         sealed: Option<&(String, String)>,
+        ordinary_commit_input: bool,
         budget: Duration,
     ) -> Option<EngramExecutionSourceBasis> {
         let live = self
@@ -175,13 +181,17 @@ impl AppState {
             .clone();
         let place = place.clone();
         let sealed = sealed.cloned();
-        bounded_content_revision_capture(
+        bounded_source_capture(
             &live,
             &self.capture_lifetime,
             ENGRAM_TURN_BASIS_CAPTURE_LIMIT,
             budget,
             move || {
-                engram_turn_end_basis(&place, sealed.as_ref(), engram_place_source_basis(&place))
+                engram_turn_end_basis(
+                    &place,
+                    sealed.as_ref(),
+                    engram_place_source_basis_with(&place, ordinary_commit_input),
+                )
             },
         )
     }

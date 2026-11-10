@@ -138,15 +138,13 @@ impl EngramControlTransport for ObservationProducer {
                     |row| row.get(0),
                 )
                 .unwrap();
-            raw.contains(&key)
-                && match occurrence["kind"].as_str() {
-                    Some("source_sighting") => raw.contains(
-                        occurrence["source_basis"]["source_revision"]
-                            .as_str()
-                            .unwrap(),
-                    ),
-                    _ => raw.contains(occurrence["host_turn_ref"].as_str().unwrap()),
-                }
+            let saved: PersistedSessionRecord = serde_json::from_str(&raw).unwrap();
+            saved.engram_unadmitted_reports.iter().any(|report| {
+                report
+                    .envelopes
+                    .iter()
+                    .any(|envelope| envelope.request == wire)
+            })
         };
         let attempt = {
             let mut requests = self.attempts.lock().unwrap();
@@ -261,13 +259,9 @@ struct ReportingTurn {
 }
 
 fn install_reporting_source_capture(state: &AppState) {
-    // The functional protocol fixture measures the real repository contents,
-    // but does not assert that local Git/filesystem I/O finishes within the
-    // unrelated 250ms scripted RPC cap. Absence/backoff has its own controlled
-    // test; production bounded capture is unchanged.
-    state.inner.lock().unwrap().test_engram_source_capture = Some(Arc::new(|place, _budget| {
-        engram_place_source_capture(place)
-    }));
+    // Recorder tests use the configured owner's explicit samples. Legacy
+    // refusal cases install their historical capture input separately.
+    state.inner.lock().unwrap().test_engram_source_capture = None;
 }
 
 /// Restarts a reporting fixture's host from its persisted state, as a new
@@ -310,6 +304,12 @@ fn restart_reporting_state(
         None => construct(),
     };
     install_reporting_source_capture(&state);
+    state.inner.lock().unwrap().test_observation_source_owner = old
+        .inner
+        .lock()
+        .unwrap()
+        .test_observation_source_owner
+        .clone();
     state.run_post_listen_boot().unwrap();
     state
 }
@@ -399,15 +399,14 @@ impl ReportingTurn {
         // turn grant to manufacture a baseline.
         let prior = historical_baseline
             .then(|| {
-                let basis = engram_place_source_basis(&EngramBasisPlace::Workdir(
+                let basis = turn.capture_basis(&EngramBasisPlace::Workdir(
                     turn.record(|record| record.session.workdir.clone()),
-                ))
-                .unwrap();
+                ));
                 turn.record(|record| record.engram.work_binding.clone())
                     .map(|binding| EngramRuntimeCheckpointBasis {
                         binding,
                         endpoint: EngramMeasuredBaseline {
-                            source_id: None,
+                            source_id: basis.source_id,
                             workspace_id: basis.workspace_id,
                             source_revision: basis.source_revision,
                             observed_at: unadmitted_observation_timestamp(),
@@ -574,8 +573,8 @@ fn adopted_edit_reaches_accounted_observation_with_exact_end_binding_and_basis()
     let change = &occurrence(&observed)["source_change"];
     assert_eq!(change["detection"], "content_comparison");
     assert_eq!(
-        change["baseline"]["source_revision"],
-        before.source_revision
+        change["baseline"]["source_id"],
+        serde_json::to_value(&before.source_id).unwrap()
     );
     assert_eq!(
         change["baseline"]["observed_at"], before.observed_at,
@@ -601,7 +600,7 @@ fn adopted_edit_reaches_accounted_observation_with_exact_end_binding_and_basis()
             .unwrap();
     assert!(through >= sighting_at);
     assert!(through.with_timezone(&chrono::Utc) <= chrono::Utc::now());
-    assert_eq!(change["sighting"]["source_basis"]["source_revision"], after);
+    assert_eq!(change["sighting"]["source_basis"]["source_id"], after);
     assert_eq!(observed.receipt["accounting"]["kind"], "source_change");
     assert_eq!(
         observed.request["policy_basis"]["mode"],

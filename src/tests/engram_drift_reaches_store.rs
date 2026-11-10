@@ -47,7 +47,7 @@ fn assert_baseline_is_the_recorded_sighting(
         serde_json::to_value(&baseline.endpoint).unwrap(),
         json!({
             "workspace_id": basis["workspace_id"],
-            "source_revision": basis["source_revision"],
+            "source_id": basis["source_id"],
             "observed_at": sighting["occurrence"]["observed_at"],
         })
     );
@@ -164,8 +164,9 @@ fn successive_ordinary_turns_compare_against_the_previous_recorded_sighting() {
                 "changed between ordinary turns\n",
             )
             .unwrap();
+            turn.sources.advance(&worktree, "README.md");
         }
-        let revision = content_revision_of(&worktree);
+        let revision = owner_source_of(&turn, &worktree);
         assert_eq!(
             turn.record(|record| record.engram.runtime_checkpoint.clone()),
             previous
@@ -188,26 +189,22 @@ fn successive_ordinary_turns_compare_against_the_previous_recorded_sighting() {
                     "the first turn has no baseline"
                 );
                 assert!(change.get("baseline").is_none());
-                assert_eq!(
-                    change["sighting"]["source_basis"]["source_revision"],
-                    revision
-                );
+                assert_eq!(change["sighting"]["source_basis"]["source_id"], revision);
                 assert_eq!(
                     PathBuf::from(change["workspace_id"].as_str().unwrap()),
                     workspace
                 );
             }
-            Some(baseline) if baseline.endpoint.source_revision != revision => {
+            Some(baseline)
+                if serde_json::to_value(&baseline.endpoint.source_id).unwrap() != revision =>
+            {
                 assert_eq!(change["detection"], "content_comparison");
                 assert_eq!(
                     change["baseline"],
                     serde_json::to_value(&baseline.endpoint).unwrap(),
                     "compared with exactly the previous turn's recorded sighting"
                 );
-                assert_eq!(
-                    change["sighting"]["source_basis"]["source_revision"],
-                    revision
-                );
+                assert_eq!(change["sighting"]["source_basis"]["source_id"], revision);
             }
             Some(_) => assert!(
                 change.is_null(),
@@ -216,7 +213,10 @@ fn successive_ordinary_turns_compare_against_the_previous_recorded_sighting() {
         }
         wait_for_observation_delivery(&turn);
         let recorded = assert_baseline_is_the_recorded_sighting(&turn, &turn_ref);
-        assert_eq!(recorded.endpoint.source_revision, revision);
+        assert_eq!(
+            serde_json::to_value(&recorded.endpoint.source_id).unwrap(),
+            revision
+        );
         assert_ne!(
             Some(&recorded),
             previous.as_ref(),
@@ -238,9 +238,13 @@ fn a_seeded_baseline_is_compared_once_then_replaced_by_the_recorded_sighting() {
                 "changed after the historical measurement\n",
             )
             .unwrap();
+            turn.sources.advance(&worktree, "README.md");
         }
-        let current = content_revision_of(&worktree);
-        assert_eq!(historical.endpoint.source_revision != current, changed);
+        let current = owner_source_of(&turn, &worktree);
+        assert_eq!(
+            serde_json::to_value(&historical.endpoint.source_id).unwrap() != current,
+            changed
+        );
 
         turn.begin("Observe the current source without editing.");
         let first_ref = observed_turn_ref(&turn);
@@ -255,10 +259,7 @@ fn a_seeded_baseline_is_compared_once_then_replaced_by_the_recorded_sighting() {
                 serde_json::to_value(&historical.endpoint).unwrap(),
                 "the first turn compares with the seeded baseline"
             );
-            assert_eq!(
-                change["sighting"]["source_basis"]["source_revision"],
-                current
-            );
+            assert_eq!(change["sighting"]["source_basis"]["source_id"], current);
             assert_eq!(
                 PathBuf::from(change["workspace_id"].as_str().unwrap()),
                 fs::canonicalize(&worktree).unwrap()
@@ -286,7 +287,10 @@ fn a_seeded_baseline_is_compared_once_then_replaced_by_the_recorded_sighting() {
             first, historical,
             "the seeded baseline is used once, then replaced"
         );
-        assert_eq!(first.endpoint.source_revision, current);
+        assert_eq!(
+            serde_json::to_value(&first.endpoint.source_id).unwrap(),
+            current
+        );
 
         turn.begin("Observe the same source again.");
         let second_ref = observed_turn_ref(&turn);
@@ -298,7 +302,7 @@ fn a_seeded_baseline_is_compared_once_then_replaced_by_the_recorded_sighting() {
         wait_for_observation_delivery(&turn);
         let second = assert_baseline_is_the_recorded_sighting(&turn, &second_ref);
         assert_ne!(second, first);
-        assert_eq!(content_revision_of(&worktree), current);
+        assert_eq!(owner_source_of(&turn, &worktree), current);
         assert_restored_baseline(&turn, &second);
     }
 }
@@ -371,6 +375,7 @@ fn a_lost_observation_reply_cannot_hold_an_ordinary_provider_handoff() {
         "source before a lost observation reply\n",
     )
     .unwrap();
+    turn.sources.advance(&worktree, "README.md");
     turn.transport
         .named_roots
         .lock()

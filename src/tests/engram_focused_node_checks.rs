@@ -1030,7 +1030,7 @@ fn engram_node_changed_source_and_stale_owner_do_not_acquire_verification() {
         .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
         .unwrap()
         .unwrap();
-    assert_ne!(start.source_revision, end.source_revision);
+    assert_ne!(start.source_id, end.source_id);
     assert!(observation.get("verification_evidence").is_none());
     assert!(
         observation["occurrence"]["observed_checks"][0]

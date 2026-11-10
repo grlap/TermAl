@@ -931,31 +931,34 @@ test("disk space warning permits the exact full-gate floor and does not block a 
   });
 });
 
-test("required stages preserve the TermAl five-gate order and direct JavaScript entrypoints", () => {
+test("required stages preserve the TermAl six-gate order and direct JavaScript entrypoints", () => {
   for (const platform of ["win32", "linux"]) {
     const stages = requiredStages(platform, { ...process.env, ProgramFiles: "C:\\Program Files" });
     assert.deepEqual(stages.map(({ name }) => name), [
+      "fmt",
       "cargo-check",
       "typescript",
       "fingerprint-tests",
       "rust-tests",
       "vitest",
     ]);
-    assert.deepEqual([stages[0].command, ...stages[0].args], ["cargo", "check"]);
-    assert.deepEqual(stages[1].args, ["node_modules/typescript/bin/tsc", "--noEmit"]);
-    assert.equal(stages[1].cwd, "ui");
-    assert.deepEqual(stages[2].args, [
+    assert.deepEqual([stages[0].command, ...stages[0].args], ["cargo", "fmt", "--check"]);
+    assert.deepEqual([stages[1].command, ...stages[1].args], ["cargo", "check"]);
+    assert.deepEqual(stages[2].args, ["node_modules/typescript/bin/tsc", "--noEmit"]);
+    assert.equal(stages[2].cwd, "ui");
+    assert.deepEqual(stages[3].args, [
       "--test",
       "--test-force-exit",
       `--test-timeout=${HELPER_TEST_HANG_GUARD_MS}`,
       ...helperTestFiles,
     ]);
-    assert.match([stages[3].command, ...stages[3].args].join(" "), platform === "win32"
+    assert.match([stages[4].command, ...stages[4].args].join(" "), platform === "win32"
       ? /Git[\\/]bin[\\/]bash\.exe.*-c.*scripts\/test-rust\.sh/u
       : /^sh scripts\/test-rust\.sh$/u);
-    assert.deepEqual(stages[4].args, ["node_modules/vitest/vitest.mjs", "run"]);
-    assert.equal(stages[4].cwd, "ui");
+    assert.deepEqual(stages[5].args, ["node_modules/vitest/vitest.mjs", "run"]);
+    assert.equal(stages[5].cwd, "ui");
     assert.deepEqual(stages.map(({ durationReport }) => durationReport), [
+      undefined,
       undefined,
       undefined,
       "node-test-events",
@@ -967,6 +970,38 @@ test("required stages preserve the TermAl five-gate order and direct JavaScript 
     /test-rust\.sh.*root_recovery_live.*--ignored.*--test-threads=1/u);
   }
 });
+
+for (const formatted of [false, true]) {
+  test(`full gate Rust prefix: ${formatted ? "formatted source reaches cargo-check" : "unformatted source fails fmt without rewriting"}`, async (t) => {
+    const directory = join(projectRoot, ".tmp", "launcher-format");
+    mkdirSync(directory, { recursive: true });
+    await repository(t, async (root, env) => {
+      writeFileSync(join(root, "Cargo.toml"),
+        '[package]\nname = "format-fixture"\nversion = "0.1.0"\nedition = "2024"\n');
+      fs.appendFileSync(join(root, ".gitignore"), "/target/\n");
+      mkdirSync(join(root, "src"));
+      const source = formatted ? "pub fn answer() -> u32 {\n    42\n}\n" : "pub fn answer()->u32{42}\n";
+      const path = join(root, "src", "lib.rs");
+      writeFileSync(path, source);
+      const before = readFileSync(path);
+      // Prepare Cargo's own lockfile before source admission. Only build
+      // output is ignored; the lockfile and Rust source remain measured.
+      execFileSync(env.TERMAL_TEST_CARGO?.trim() || "cargo", ["generate-lockfile", "--offline"],
+        { cwd: root, env, windowsHide: true });
+      // Run the maintained prefix against a real dependency-free Rust crate.
+      // The positive control distinguishes formatting failure from setup failure.
+      const runDir = await createRun({ root, full: true, needsCargo: true,
+        stages: requiredStages(process.platform, env).slice(0, 2) }, env);
+      const result = await executeRun(runDir, env);
+      assert.deepEqual(result.stages.map(({ name, state }) => ({ name, state })), [
+        { name: "fmt", state: formatted ? "passed" : "failed" },
+        { name: "cargo-check", state: formatted ? "passed" : "unrun" },
+      ], result.error);
+      assert.equal(result.state, formatted ? "passed" : "failed", result.error);
+      assert.deepEqual(readFileSync(path), before, "the format stage must never rewrite Rust");
+    }, fixtureEnv, directory);
+  });
+}
 
 test("full plan prerequisites cover every maintained helper and direct UI entrypoint", () => {
   const files = new Set(requiredFiles(projectRoot));
@@ -1244,7 +1279,7 @@ test("explicit Cargo and Rust toolchain selections are preserved and recorded", 
     ].join("");
     const runDir = await createRun({
       root,
-      stages: [{ name: "cargo-check", command: "cargo", args: ["-e", assertion] }],
+      stages: ["fmt", "cargo-check"].map((name) => ({ name, command: "cargo", args: ["-e", assertion] })),
       needsCargo: true,
     }, env);
     const result = await executeRun(runDir, env);
@@ -1254,6 +1289,7 @@ test("explicit Cargo and Rust toolchain selections are preserved and recorded", 
       source: "TERMAL_TEST_CARGO",
     });
     assert.equal(result.stages[0].command[0], process.execPath);
+    assert.equal(result.stages[1].command[0], process.execPath);
   });
 });
 

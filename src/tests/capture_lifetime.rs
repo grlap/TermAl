@@ -62,7 +62,7 @@ fn shutdown_kills_inflight_git_and_joins_an_abandoned_capture_before_root_cleanu
     let (release_tx, release_rx) = mpsc::channel();
     let attempted_later_git = Arc::new(AtomicBool::new(false));
     let attempted = attempted_later_git.clone();
-    let revision: Option<String> = bounded_content_revision_capture(
+    let revision: Option<String> = bounded_source_capture(
         &live,
         &state.capture_lifetime,
         1,
@@ -156,7 +156,11 @@ fn shutdown_kills_inflight_git_and_joins_an_abandoned_capture_before_root_cleanu
 
 #[test]
 fn acceptance_source_capture_is_cancelled_by_the_same_host_lifetime() {
-    let state = test_app_state();
+    let turn = super::engram_host_adapter::turn_checks::EOCheckedTurn::idle(
+        "acceptance-capture-lifetime",
+        true,
+    );
+    let state = turn.state.clone();
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let release_rx = Arc::new(Mutex::new(release_rx));
@@ -173,11 +177,10 @@ fn acceptance_source_capture_is_cancelled_by_the_same_host_lifetime() {
             .unwrap();
     }));
     let measuring = state.clone();
-    let source = std::thread::spawn(move || {
-        measuring.acceptance_evaluation_source_basis(&EngramBasisPlace::Workdir(
-            measuring.default_workdir.clone(),
-        ))
-    });
+    let owner = turn.session_id.clone();
+    let place = EngramBasisPlace::Workdir(turn.root.to_string_lossy().into_owned());
+    let source =
+        std::thread::spawn(move || measuring.acceptance_shared_source_capture(&owner, &place));
     started_rx.recv_timeout(TEST_PHASE_DEADLOCK_GUARD).unwrap();
     state.trigger_shutdown_signal();
     assert!(source.join().unwrap().is_none());

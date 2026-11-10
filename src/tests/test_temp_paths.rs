@@ -13,7 +13,7 @@ fn fixture_git_discovery_stops_before_the_enclosing_checkout() {
         engram_worktree_root_path(&root),
         fs::canonicalize(root.path()).unwrap()
     );
-    assert!(content_revision(&root).is_err());
+    assert!(ReviewFreezeGit::new(&root).is_err());
     run_git_test_command(&root, &["init", "--quiet"]);
     let nested = root.join("nested");
     fs::create_dir(&nested).unwrap();

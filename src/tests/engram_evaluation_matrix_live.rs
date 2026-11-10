@@ -769,15 +769,7 @@ impl Matrix {
     }
 
     fn source_id_now(&self) -> EngramSourceId {
-        let deadline = std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET;
-        let owner = self
-            .fixture
-            .live
-            .state
-            .source_owner_metadata_until(&self.holder, deadline)
-            .expect("the live matrix pins its actual source owner");
-        engram_source_id_until(&owner, &self.fixture.root, deadline)
-            .expect("the actual owner captures the complete current identity")
+        self.fixture.source_id_now(&self.holder, &self.fixture.root)
     }
 
     fn evaluate(&self, check: &ActualCheck, during: impl FnOnce()) -> (String, Value) {

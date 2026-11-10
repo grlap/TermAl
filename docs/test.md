@@ -63,19 +63,28 @@ The maintained full gate is one launcher invocation:
 node scripts/test-launcher.mjs full
 ```
 
-It runs, in fail-fast order, `cargo check`, TypeScript `--noEmit`, the review
-fingerprint and launcher fixtures, the native Git Bash Rust wrapper, and the
-full Vitest suite. Fingerprinting, Cargo and Rust stay rooted at the repository;
+It runs six stages, in fail-fast order: `cargo fmt --check`, `cargo check`,
+TypeScript `--noEmit`, the review fingerprint and launcher fixtures, the native
+Git Bash Rust wrapper, and the full Vitest suite. Fingerprinting, Cargo and Rust stay rooted at the repository;
 TypeScript and Vitest execute with `ui/` as their real working directory so
 relative source and fixture paths retain the same semantics as `cd ui`. On
 every platform, the effective Cargo is `TERMAL_TEST_CARGO` when explicitly set,
 otherwise `cargo` resolved from `PATH`; that same executable is used by the
-compile check and passed to `scripts/test-rust.sh`. On Windows, TypeScript and
-Vitest use their JavaScript entrypoints rather than `.cmd` shims. All commands,
+format check, compile check and passed to `scripts/test-rust.sh`. The format
+stage checks Rust using the repository's toolchain and configuration; it never
+rewrites source files. Missing rustfmt or unformatted Rust fails that stage
+before `cargo check`. Coverage follows Cargo/rustfmt's target and module
+discovery; files pulled in only with `include!` are not traversed. On Windows,
+TypeScript and Vitest use their JavaScript entrypoints rather than `.cmd` shims. All commands,
 working directories and required files are preflighted, and a missing
 prerequisite leaves every stage explicitly unrun.
 
-Before those five stages, the full launcher prepares private UI dependencies
+In a registered full run, the exact `cargo fmt --check` stage is a Lint check,
+including when it fails. It grants no Test or Build credit. A stage that never
+runs stays `not_run` in the run body and mints no verification record. Ordinary
+command recognition and admission of Lint-only evaluations are unchanged.
+
+Before those six stages, the full launcher prepares private UI dependencies
 with `npm ci --include=dev --no-audit --no-fund` in the candidate's `ui/`
 directory, using its tracked `package.json` and `package-lock.json`. A fresh
 worktree needs no manual dependency setup. An existing installation is reused

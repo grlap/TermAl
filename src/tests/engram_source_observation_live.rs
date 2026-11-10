@@ -41,6 +41,7 @@ fn source_observation_live_gitlink_reports_outcome_and_declared_check_only() {
     )
     .unwrap();
     let head = run_git_test_command_output(&fixture.root, &["rev-parse", "HEAD"]);
+    fixture.source_id_now(session, &fixture.root);
     run_git_test_command(
         &fixture.root,
         &[
@@ -52,10 +53,16 @@ fn source_observation_live_gitlink_reports_outcome_and_declared_check_only() {
             "child",
         ],
     );
-    assert!(matches!(
-        engram_execution_source_capture_with(&fixture.root, false),
-        Err(SourceBasisRefusal::UnsupportedGitlinks)
-    ));
+    let source_deadline = std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET;
+    let source_owner = fixture
+        .live
+        .state
+        .source_owner_metadata_until(session, source_deadline)
+        .expect("the live fixture pins its configured source owner");
+    assert!(
+        engram_source_id_until(&source_owner, &fixture.root, source_deadline).is_err(),
+        "the owner cannot measure the uninitialized child"
+    );
     fixture.begin(
         session,
         "Observe the declared result while submodule measurement is unavailable.",
@@ -290,8 +297,9 @@ fn between_turn_observation_makes_the_earlier_check_stale() {
             engram_source_id_until(&owner, &fixture.root, deadline).unwrap()
         };
         let before = source_now();
-        let (body, receipt) =
-            fixture.historical_registered_check(session, &fixture.root, "cargo test --offline");
+        let (registration, frozen) =
+            fixture.prepare_registered_check(session, &fixture.root, "cargo test --offline", true);
+        let (body, receipt) = fixture.record_registered_check(registration, frozen);
         let verification = &receipt.verifications[0].record_id;
         let original_check = fixture.object(verification);
         assert!(
@@ -391,9 +399,12 @@ fn between_turn_observation_makes_the_earlier_check_stale() {
         let acceptance = shown["acceptance_basis"].as_i64().unwrap().to_string();
         let evidence = shown["evidence_basis"].as_i64().unwrap().to_string();
         let citation = format!("1={verification}");
-        // This deliberately retained historical record is compared through
-        // the legacy CLI alternative, independently of the new source facts.
-        let legacy_changed = content_revision(&fixture.root).unwrap().1;
+        let declared = AcceptanceSourcePayload {
+            source_id: changed.clone(),
+            source_file: None,
+        }
+        .publish(&fixture.home.join("evaluation-sources"))
+        .unwrap();
         let refused = refused_evaluation(
             &fixture,
             session,
@@ -412,36 +423,76 @@ fn between_turn_observation_makes_the_earlier_check_stale() {
                 "1=Try the earlier native check at changed source",
                 "--evidence",
                 &citation,
-                "--source-fingerprint",
-                &legacy_changed,
+                "--source-id-file",
+                declared.path().to_str().unwrap(),
                 "--attempt",
                 "old-check",
                 "--json",
             ],
         );
         assert_eq!(
-            refused["error"]["code"], "acceptance_evaluation_refused",
+            refused["error"]["code"], "work_completion_refused",
             "<refused withheld>"
         );
-        let cause = &refused["error"]["details"]["cause"];
-        assert_eq!(cause["kind"], "citation", "<refused withheld>");
-        assert_eq!(cause["mismatch"], "wrong_source", "<refused withheld>");
-        assert_eq!(cause["citation"], *verification);
-        let EngramVerificationRecordInput::Commit { commit } = &body.input else {
-            panic!("historical evaluation witness requires its retained Commit record");
-        };
-        assert_eq!(cause["checked_revision"], *commit);
-        assert_eq!(cause["judged_revision"], legacy_changed);
-        assert_eq!(cause["remedy"], "run_current_check_and_evaluate");
+        assert_eq!(
+            refused["error"]["details"]["reason"],
+            "no registered check at the evaluated cut tested the declared commit; run a passing check on the intended current commit"
+        );
+        assert!(
+            matches!(&body.input, EngramVerificationRecordInput::SourceId { source_id }
+            if source_id == &before),
+            "the native check retains its entire original identity"
+        );
+        assert!(
+            fixture.object(verification) == original_check,
+            "the refused evaluation leaves the original check unchanged"
+        );
         assert_no_live_turn_gate(&fixture.live.transport);
     }
 }
 
 fn unnamed_source_interval(fixture: &CompletionFixture, session: &str, work: &str) {
     let binding = fixture.claim_binding(session);
+    // A canonical claim read alone does not select the host's work association.
+    // Bind the real held claim without naming a root or seeding a checkpoint.
+    let association = EngramRootIntentAssociation::validate(
+        &fixture.store(),
+        &binding.work_id,
+        &binding.claim_id,
+        Some(binding.claim_fence),
+        Some(&binding),
+    )
+    .unwrap();
+    let target = fixture.target(session);
+    let deadline = fixture.live.state.engram_budget_clock().now() + target.settings.call_timeout();
+    let target = fixture
+        .live
+        .state
+        .bind_fresh_engram_source_root_until(target, &association, deadline)
+        .unwrap();
+    assert!(fixture.record(session, |record| {
+        record.engram.work_binding.as_ref() == Some(&binding)
+            && record.engram.runtime_checkpoint.is_none()
+    }));
+    let canonical = fixture.canonical_read(session, &binding);
+    assert_eq!(canonical.named_root, EngramNamedRootState::None);
+    let fence = EngramRootReadFence::capture(&fixture.live.state.inner.lock().unwrap());
+    fixture
+        .live
+        .state
+        .reconcile_engram_named_root_with_route_classified_until(
+            session,
+            Some(&binding),
+            Some(canonical.named_root),
+            &fence,
+            Some(&target.connection),
+            fixture.live.state.engram_budget_clock().now() + target.settings.call_timeout(),
+        )
+        .unwrap_or_else(|_| panic!("the real unnamed-root authority reconciles"));
     assert_eq!(
-        fixture.canonical_read(session, &binding).named_root,
-        EngramNamedRootState::None
+        fixture.live.state.engram_root_capture(session),
+        EngramRootCapture::Unnamed,
+        "the claimed workdir is canonically unnamed before provider handoff"
     );
     fixture.begin(
         session,
@@ -492,6 +543,25 @@ fn unnamed_source_interval(fixture: &CompletionFixture, session: &str, work: &st
         .unwrap();
     finish_live_root(&fixture.live.state, session);
     fixture.wait_for_reports(session);
+    assert!(
+        source_now() == before,
+        "the unnamed check leaves its full source identity unchanged"
+    );
+    assert!(
+        fixture.record(session, |record| {
+            record
+                .engram
+                .runtime_checkpoint
+                .as_ref()
+                .is_some_and(|checkpoint| {
+                    checkpoint.binding == binding
+                        && checkpoint.endpoint.source_id.as_ref() == Some(&before)
+                        && checkpoint.source_root_generation.is_none()
+                        && checkpoint.source_root_state.is_none()
+                })
+        }),
+        "the acknowledged unnamed sighting establishes the original full baseline"
+    );
     fs::write(
         fixture.root.join("README.md"),
         "new unnamed source between turns\n",

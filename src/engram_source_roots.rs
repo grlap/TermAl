@@ -1356,6 +1356,7 @@ fn engram_lookup_says_missing(kind: std::io::ErrorKind) -> bool {
 
 /// The source basis at `place`, under the committed-input switch as it stands
 /// ([`ORDINARY_COMMIT_INPUT_DEFAULT`]).
+#[cfg(test)]
 fn engram_place_source_basis(place: &EngramBasisPlace) -> Option<EngramExecutionSourceBasis> {
     engram_place_source_basis_with(place, ORDINARY_COMMIT_INPUT_DEFAULT)
 }
@@ -1363,6 +1364,7 @@ fn engram_place_source_basis(place: &EngramBasisPlace) -> Option<EngramExecution
 /// The source basis at `place` with the committed-input switch given
 /// ([`source_revision`]). A root that is not clean while the switch is on has
 /// no basis, logged with its paths, as any basis that cannot be taken.
+#[cfg(test)]
 fn engram_place_source_basis_with(
     place: &EngramBasisPlace,
     ordinary_commit_input: bool,
@@ -1375,6 +1377,7 @@ fn engram_place_source_capture(place: &EngramBasisPlace) -> EngramSourceCapture 
     engram_place_source_capture_with(place, ORDINARY_COMMIT_INPUT_DEFAULT)
 }
 
+#[cfg(test)]
 fn engram_place_source_capture_with(
     place: &EngramBasisPlace,
     ordinary_commit_input: bool,
@@ -1397,7 +1400,7 @@ fn engram_place_source_capture_with(
 /// by a link (a symbolic link, or a Windows junction) to another tree of the
 /// same repository has no basis, checked before that tree is read and again
 /// on the root the capture took. The root must still belong to the repository
-/// it was named in (`common_dir_key`), and `content_revision` refuses a path
+/// it was named in (`common_dir_key`), and the historical capture refuses a path
 /// that is not its own worktree's root.
 #[cfg(test)]
 fn engram_named_root_source_basis(
@@ -1418,6 +1421,7 @@ fn engram_named_root_source_basis_with(
     engram_named_root_source_capture_with(root, common_dir_key, ordinary_commit_input).ok().flatten()
 }
 
+#[cfg(test)]
 fn engram_named_root_source_capture_with(
     root: &str,
     common_dir_key: &str,

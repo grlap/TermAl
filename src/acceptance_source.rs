@@ -715,7 +715,7 @@ impl AppState {
         };
         let place = place.clone();
         let state = self.clone();
-        bounded_content_revision_capture(
+        bounded_source_capture(
             &live,
             &self.capture_lifetime,
             ACCEPTANCE_SOURCE_CAPTURE_LIMIT,
@@ -727,6 +727,9 @@ impl AppState {
                         common_dir_key,
                     } => (root, common_dir_key),
                     EngramBasisPlace::Workdir(workdir) => {
+                        if !fs::metadata(&workdir).is_ok_and(|metadata| metadata.is_dir()) {
+                            return None;
+                        }
                         let root =
                             fs::canonicalize(engram_worktree_root_path(FsPath::new(&workdir)))
                                 .ok()?;

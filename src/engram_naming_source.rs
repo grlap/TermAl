@@ -24,10 +24,16 @@ impl AppState {
         let target = target.clone();
         let root = root.to_owned();
         let common_dir_key = common_dir_key.to_owned();
-        bounded_content_revision_capture(
-            &live, &self.capture_lifetime, ENGRAM_TURN_BASIS_CAPTURE_LIMIT, budget,
-            move || state.engram_naming_source_basis_until(&target, &root, &common_dir_key, deadline)
-                .ok(),
+        bounded_source_capture(
+            &live,
+            &self.capture_lifetime,
+            ENGRAM_TURN_BASIS_CAPTURE_LIMIT,
+            budget,
+            move || {
+                state
+                    .engram_naming_source_basis_until(&target, &root, &common_dir_key, deadline)
+                    .ok()
+            },
         )
     }
 

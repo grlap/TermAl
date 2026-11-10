@@ -14,7 +14,7 @@ import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
 import { testTempDirectory } from "./test-temp-root.mjs";
 
 const launcher = fileURLToPath(new URL("./test-launcher.mjs", import.meta.url));
-const names = ["cargo-check", "typescript", "fingerprint-tests", "rust-tests", "vitest"];
+const names = ["fmt", "cargo-check", "typescript", "fingerprint-tests", "rust-tests", "vitest"];
 const bindings = (resolved) => Object.fromEntries(names.map((name) => [name, resolved[name]]));
 
 const mac = {
@@ -24,6 +24,7 @@ const mac = {
   runDir: "/Users/runner/TermAl/.git/worktrees/wt-ref/review-runs/test-mac",
   reporterUrl: "file:///Users/runner/TermAl/.tmp/wt-ref/scripts/node-test-duration-reporter.mjs",
   executables: bindings({
+    fmt: "/Users/runner/.cargo/bin/cargo",
     "cargo-check": "/Users/runner/.cargo/bin/cargo",
     typescript: "/opt/homebrew/bin/node",
     "fingerprint-tests": "/opt/homebrew/bin/node",
@@ -40,6 +41,7 @@ const windows = {
   runDir: "F:\\GitHub\\TermAl\\.git\\worktrees\\wt-ref\\review-runs\\test-win",
   reporterUrl: "file:///F:/GitHub/TermAl/.tmp/wt-ref/scripts/node-test-duration-reporter.mjs",
   executables: bindings({
+    fmt: "C:\\Users\\runner\\.cargo\\bin\\cargo.exe",
     "cargo-check": "C:\\Users\\runner\\.cargo\\bin\\cargo.exe",
     typescript: "C:\\Program Files\\nodejs\\node.exe",
     "fingerprint-tests": "C:\\Program Files\\nodejs\\node.exe",
@@ -54,6 +56,8 @@ test("full gate plan: a Mac run's stages and entries use that run's values and P
   const plan = fullGatePlan(mac);
   assert.deepEqual(plan.stages, requiredStages("darwin", {}, mac.node));
   assert.deepEqual(plan.entries.map(({ name }) => name), names);
+  assert.deepEqual(entry(plan, "fmt"),
+    { name: "fmt", command: ["/Users/runner/.cargo/bin/cargo", "fmt", "--check"], cwd: mac.root });
   assert.deepEqual(entry(plan, "cargo-check"),
     { name: "cargo-check", command: ["/Users/runner/.cargo/bin/cargo", "check"], cwd: mac.root });
   assert.deepEqual(entry(plan, "rust-tests"),

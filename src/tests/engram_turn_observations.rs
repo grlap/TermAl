@@ -10,10 +10,8 @@ mod source_observations;
 #[path = "engram_source_root_naming.rs"]
 mod source_root_naming;
 
-fn content_revision_of(root: &FsPath) -> String {
-    content_revision(root)
-        .expect("the real content revision is available")
-        .1
+fn owner_source_of(turn: &EOCheckedTurn, root: &FsPath) -> Value {
+    serde_json::to_value(turn.sources.get(root)).unwrap()
 }
 
 fn observed_turn_ref(turn: &EOCheckedTurn) -> String {
@@ -84,11 +82,16 @@ fn install_passive_measured_baseline(
     // (named generation and state) the next sighting is taken in; a root that
     // is unnamed or not yet confirmed carries none, as its sighting does.
     let measured = {
+        let measured = turn
+            .state
+            .engram_observation_source_capture(
+                &turn.session_id,
+                &EngramBasisPlace::Workdir(root.to_string_lossy().into_owned()),
+                DEADLOCK_GUARD,
+            )
+            .unwrap_or_else(|_| panic!("the configured fixture owner supplies the baseline"))
+            .unwrap();
         let inner = turn.state.inner.lock().unwrap();
-        let measured = engram_place_source_basis(&EngramBasisPlace::Workdir(
-            root.to_string_lossy().into_owned(),
-        ))
-        .unwrap();
         engram_turn_root_capture_locked(&inner, &turn.session_id)
             .stamp(Some(measured.clone()))
             .unwrap_or(measured)
@@ -96,7 +99,7 @@ fn install_passive_measured_baseline(
     let baseline = EngramRuntimeCheckpointBasis {
         binding: turn.record(|record| record.engram.work_binding.clone().unwrap()),
         endpoint: EngramMeasuredBaseline {
-            source_id: None,
+            source_id: measured.source_id,
             workspace_id: measured.workspace_id,
             source_revision: measured.source_revision,
             observed_at: unadmitted_observation_timestamp(),
@@ -260,6 +263,7 @@ fn ordinary_delegation_child(label: &str, isolated: bool) -> EOCheckedTurn {
         root,
         parent.transport.clone(),
         parent._runtime_rx.clone(),
+        parent.sources.clone(),
     );
     turn.host = parent.host.clone();
     // The association is explicit scripted fixture input for closing facts.
@@ -282,8 +286,11 @@ fn actual_delegation_children_report_their_measured_workspace_without_native_cre
     ] {
         let turn = ordinary_delegation_child(label, isolated);
         let historical = install_passive_measured_baseline(&turn, &turn.root);
-        let before = content_revision_of(&turn.root);
-        assert_eq!(historical.endpoint.source_revision, before);
+        let before = owner_source_of(&turn, &turn.root);
+        assert_eq!(
+            serde_json::to_value(&historical.endpoint.source_id).unwrap(),
+            before
+        );
         if edit {
             fs::create_dir_all(turn.root.join("src")).unwrap();
             fs::write(
@@ -291,13 +298,18 @@ fn actual_delegation_children_report_their_measured_workspace_without_native_cre
                 "// actual isolated child edit\n",
             )
             .unwrap();
+            turn.sources.advance(&turn.root, "src/lib.rs");
             turn.record_mut(|record| {
                 record
                     .active_turn_file_changes
                     .insert("src/lib.rs".into(), WorkspaceFileChangeKind::Modified);
             });
         }
-        let after = content_revision_of(&turn.root);
+        let after = owner_source_of(&turn, &turn.root);
+        let files_before_close =
+            crate::tests::engram_host_adapter::turn_checks::owner_sources::checkout_state(
+                &turn.root,
+            );
         let turn_ref = observed_turn_ref(&turn);
         let request = turn.finish();
         assert_ordinary_observation_has_no_native_credit(&turn, &request);
@@ -311,7 +323,7 @@ fn actual_delegation_children_report_their_measured_workspace_without_native_cre
                 change["baseline"],
                 serde_json::to_value(&historical.endpoint).unwrap()
             );
-            assert_eq!(change["sighting"]["source_basis"]["source_revision"], after);
+            assert_eq!(change["sighting"]["source_basis"]["source_id"], after);
             assert_eq!(
                 PathBuf::from(change["workspace_id"].as_str().unwrap()),
                 fs::canonicalize(&turn.root).unwrap()
@@ -332,7 +344,14 @@ fn actual_delegation_children_report_their_measured_workspace_without_native_cre
         }
         wait_for_observation_delivery(&turn);
         assert_eq!(
-            content_revision_of(&turn.root),
+            crate::tests::engram_host_adapter::turn_checks::owner_sources::checkout_state(
+                &turn.root
+            ),
+            files_before_close,
+            "closing the child must preserve actual tracked and untracked source state"
+        );
+        assert_eq!(
+            owner_source_of(&turn, &turn.root),
             after,
             "closing the actual child must not write host artifacts into its source root"
         );
@@ -367,7 +386,7 @@ fn actual_delegation_children_report_their_measured_workspace_without_native_cre
             serde_json::to_value(&replaced.endpoint).unwrap(),
             json!({
                 "workspace_id": sighting["occurrence"]["source_basis"]["workspace_id"],
-                "source_revision": after,
+                "source_id": after,
                 "observed_at": sighting["occurrence"]["observed_at"],
             }),
             "the replacing baseline is exactly the child's recorded sighting"
@@ -386,8 +405,12 @@ fn public_delete_keeps_an_actual_changed_child_until_its_ordinary_report_is_sett
         "// edit before public Delete\n",
     )
     .unwrap();
-    let changed_revision = content_revision_of(&turn.root);
-    assert_ne!(changed_revision, baseline.endpoint.source_revision);
+    turn.sources.advance(&turn.root, "src/lib.rs");
+    let changed_revision = owner_source_of(&turn, &turn.root);
+    assert_ne!(
+        changed_revision,
+        serde_json::to_value(&baseline.endpoint.source_id).unwrap()
+    );
 
     let before_delete = turn.record(|record| {
         (
@@ -540,7 +563,7 @@ fn public_delete_keeps_an_actual_changed_child_until_its_ordinary_report_is_sett
         serde_json::to_value(&baseline.endpoint).unwrap()
     );
     assert_eq!(
-        change["sighting"]["source_basis"]["source_revision"],
+        change["sighting"]["source_basis"]["source_id"],
         changed_revision
     );
     wait_for_observation_delivery(&turn);
@@ -597,13 +620,9 @@ fn a_worktree_root_over_engrams_basis_bound_leaves_the_report_without_a_basis() 
 fn ordinary_source_comparison_uses_actual_contents_and_retains_its_exact_endpoint() {
     for (edit, watcher) in [(false, false), (false, true), (true, false), (true, true)] {
         let turn = begin_with_passive_measured_baseline("ordinary-source-endpoint");
-        let before = content_revision_of(&turn.root);
+        let before = owner_source_of(&turn, &turn.root);
         if edit {
-            fs::write(
-                turn.root.join("README.md"),
-                "changed during the ordinary turn\n",
-            )
-            .unwrap();
+            turn.change_readme("changed during the ordinary turn\n");
         }
         if watcher {
             turn.record_mut(|record| {
@@ -612,7 +631,7 @@ fn ordinary_source_comparison_uses_actual_contents_and_retains_its_exact_endpoin
                     .insert("README.md".into(), WorkspaceFileChangeKind::Modified);
             });
         }
-        let after = content_revision_of(&turn.root);
+        let after = owner_source_of(&turn, &turn.root);
         let request = turn.finish();
         assert_ordinary_observation_has_no_native_credit(&turn, &request);
         assert_eq!(request["occurrence"]["outcome"], "succeeded");
@@ -620,8 +639,8 @@ fn ordinary_source_comparison_uses_actual_contents_and_retains_its_exact_endpoin
         if edit {
             assert_ne!(before, after);
             assert_eq!(change["detection"], "content_comparison");
-            assert_eq!(change["baseline"]["source_revision"], before);
-            assert_eq!(change["sighting"]["source_basis"]["source_revision"], after);
+            assert_eq!(change["baseline"]["source_id"], before);
+            assert_eq!(change["sighting"]["source_basis"]["source_id"], after);
             assert_eq!(
                 PathBuf::from(change["workspace_id"].as_str().unwrap()),
                 fs::canonicalize(&turn.root).unwrap()
@@ -631,8 +650,9 @@ fn ordinary_source_comparison_uses_actual_contents_and_retains_its_exact_endpoin
             )
             .unwrap();
             fs::write(turn.root.join("later.txt"), "after the observed endpoint\n").unwrap();
-            assert_ne!(after, content_revision_of(&turn.root));
-            assert_eq!(change["sighting"]["source_basis"]["source_revision"], after);
+            turn.sources.advance(&turn.root, "later.txt");
+            assert_ne!(after, owner_source_of(&turn, &turn.root));
+            assert_eq!(change["sighting"]["source_basis"]["source_id"], after);
         } else {
             assert_eq!(before, after);
             assert!(
@@ -662,11 +682,7 @@ fn ordinary_terminal_callbacks_report_their_actual_outcome_once() {
                 record.active_turn_generation,
             )
         });
-        fs::write(
-            turn.root.join("README.md"),
-            "changed before the terminal callback\n",
-        )
-        .unwrap();
+        turn.change_readme("changed before the terminal callback\n");
         match terminal {
             "success" => {
                 turn.state
@@ -904,6 +920,8 @@ fn a_named_ordinary_turn_measures_the_worktree_and_ignores_a_main_checkout_edit(
             turn.root.join("README.md")
         };
         fs::write(&path, "changed in one checkout\n").unwrap();
+        turn.sources
+            .advance(if edit_named { &worktree } else { &turn.root }, "README.md");
         turn.record_mut(|record| {
             record.active_turn_file_changes.insert(
                 path.to_string_lossy().into_owned(),
@@ -919,8 +937,8 @@ fn a_named_ordinary_turn_measures_the_worktree_and_ignores_a_main_checkout_edit(
                 named.root.unwrap()
             );
             assert_eq!(
-                change["sighting"]["source_basis"]["source_revision"],
-                content_revision_of(&worktree)
+                change["sighting"]["source_basis"]["source_id"],
+                owner_source_of(&turn, &worktree)
             );
             assert_eq!(
                 change["sighting"]["source_basis"]["source_root_generation"],
@@ -965,6 +983,7 @@ fn a_name_given_during_an_ordinary_turn_keeps_the_opening_cut_and_applies_next_t
         "changed only in the next named turn\n",
     )
     .unwrap();
+    turn.sources.advance(&worktree, "README.md");
     let request = turn.finish();
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
     assert_eq!(

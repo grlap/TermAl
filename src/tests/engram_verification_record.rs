@@ -22,6 +22,9 @@ mod declared;
 #[path = "engram_verification_source_projection.rs"]
 mod source_projection;
 
+#[path = "engram_verification_fmt.rs"]
+mod fmt;
+
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 const SESSION: &str = "session-record";
 const STARTED: &str = "2026-10-30T10:00:00.000Z";
@@ -94,7 +97,8 @@ fn store() -> EngramAuthorityStoreKey {
     }
 }
 
-/// TermAl's own full gate, as the launcher plans it (`requiredStages`).
+/// The historical five-stage gate retained by the sender's existing controls.
+/// The `fmt` module exercises the current six-stage request as well.
 fn commit_request(root: &FsPath) -> Value {
     json!({
         "root": root.to_string_lossy(),
@@ -986,7 +990,7 @@ fn the_record_matches_the_producers_own_request_fixture() {
             assert!(registration.declared.is_none());
             assert_eq!(
                 engram_verification_record_body(&registration, &request, &results).unwrap_err(),
-                "stage focused is neither a test nor a build check"
+                "stage focused is neither a test, build nor admitted lint check"
             );
             continue;
         }
@@ -1651,8 +1655,8 @@ fn stage_kinds_follow_the_actual_argv_then_the_stage_rule() {
         engram_verification_record_check_kind(mode, stage, &argv, &stages)
     };
     let full_gate = ["rust-tests", "vitest"];
-    let test = Some(EngramVerificationKind::Test);
-    let build = Some(EngramVerificationKind::Build);
+    let test = Some(EngramVerificationRecordCheckKind::Test);
+    let build = Some(EngramVerificationRecordCheckKind::Build);
 
     // Every stage is first read by its argv, as a focused launcher command:
     // Node's own test runner, Vitest and cargo tests, in any mode.

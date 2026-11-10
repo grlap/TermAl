@@ -1451,13 +1451,14 @@ fn a_write_after_the_terminal_read_does_not_rewrite_the_carried_artifact() {
     turn.state.poll_engram_carried_runs();
     run_own_command(&turn, &worktree, "edit", "sed -i s/a/b/ README.md");
     fs::write(worktree.join("README.md"), "changed after the run\n").unwrap();
+    turn.sources.advance(&worktree, "README.md");
     let place = turn.record(|record| record.engram.observed_source_root().unwrap().place());
-    let revision = engram_place_source_basis(&place).unwrap().source_revision;
+    let revision = serde_json::to_value(turn.capture_basis(&place).source_id).unwrap();
     let digest = engram_terminal_record_digest(&run).unwrap();
     let observation = turn.finish();
     assert_ordinary_observation_has_no_native_credit(&turn, &observation);
     assert_eq!(
-        observation["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"],
+        observation["occurrence"]["source_change"]["sighting"]["source_basis"]["source_id"],
         revision,
         "the real source write belongs to the ordinary turn: {observation:#}"
     );
@@ -1693,10 +1694,11 @@ fn a_terminal_record_changed_after_the_first_terminal_read_refuses_the_gate() {
 fn an_unreported_source_change_is_measured_separately_from_a_carried_artifact() {
     let (turn, worktree) = ordinary_carried_turn("carried-moved");
     let place = turn.record(|record| record.engram.observed_source_root().unwrap().place());
-    let before = engram_place_source_basis(&place).unwrap().source_revision;
+    let before = serde_json::to_value(turn.capture_basis(&place).source_id).unwrap();
     ordinary_launch_gate(&turn, &worktree, false);
     fs::write(worktree.join("README.md"), "changed behind the host\n").unwrap();
-    let after = engram_place_source_basis(&place).unwrap().source_revision;
+    turn.sources.advance(&worktree, "README.md");
+    let after = serde_json::to_value(turn.capture_basis(&place).source_id).unwrap();
     assert_ne!(before, after);
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     let digest = engram_terminal_record_digest(&run).unwrap();
@@ -1707,7 +1709,7 @@ fn an_unreported_source_change_is_measured_separately_from_a_carried_artifact() 
     turn.state.poll_engram_carried_runs();
     let observation = turn.finish();
     assert_eq!(
-        observation["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"],
+        observation["occurrence"]["source_change"]["sighting"]["source_basis"]["source_id"],
         after
     );
     let checks = observation["occurrence"]["observed_checks"]

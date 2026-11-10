@@ -362,13 +362,14 @@ fn a_real_edit_after_the_registered_launcher_check_is_still_refused() {
         "Check current content, then make a real source edit.",
     );
     let (body, receipt) = run_historical_check(&fixture, session, &fixture.root);
-    let before = content_revision(&fixture.root).unwrap().1;
+    let original_check = fixture.object(&receipt.verifications[0].record_id);
+    let before = fixture.source_id_now(session, &fixture.root);
     fs::write(
         fixture.root.join("README.md"),
         "real content written after the registered check\n",
     )
     .unwrap();
-    assert_ne!(content_revision(&fixture.root).unwrap().1, before);
+    assert!(fixture.source_id_now(session, &fixture.root) != before);
     let EngramVerificationRecordInput::Commit { commit } = &body.input else {
         panic!("registered Git input required");
     };
@@ -424,18 +425,17 @@ fn a_real_edit_after_the_registered_launcher_check_is_still_refused() {
     );
     let refusal: Value = serde_json::from_slice(&output.stderr).unwrap();
     eprintln!("PINNED_LAUNCHER_EDIT_REFUSAL <details withheld>");
-    assert_eq!(refusal["error"]["code"], "acceptance_evaluation_refused");
+    assert_eq!(refusal["error"]["code"], "work_completion_refused");
     assert_eq!(
-        refusal["error"]["details"]["cause"]["mismatch"],
-        "source_moved_after_check"
+        refusal["error"]["details"]["reason"],
+        format!(
+            "registered root {} is dirty; commit or revert the changes and run a check on the intended commit",
+            body.registration.root.workspace_id
+        )
     );
-    assert_eq!(
-        refusal["error"]["details"]["cause"]["checked_revision"],
-        judged
-    );
-    assert_eq!(
-        refusal["error"]["details"]["cause"]["judged_revision"],
-        judged
+    assert!(
+        fixture.object(&receipt.verifications[0].record_id) == original_check,
+        "the source refusal never rewrites the original registered check"
     );
     // Keep the real refusal above, then prove useful work in the next turn can
     // obtain and use a new native record after the accounted source change.
@@ -483,7 +483,7 @@ fn a_real_edit_after_the_registered_launcher_check_is_still_refused() {
         "PINNED_LAUNCHER_LATER_CHECK {}",
         json!({
             "evaluation": evaluated, "receipt": receipt, "judged_revision": judged,
-            "previous_refusal": refusal["error"]["details"]["cause"]["mismatch"],
+            "previous_refusal": refusal["error"]["code"],
         })
     );
 }

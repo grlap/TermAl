@@ -1936,10 +1936,23 @@ fn restored_closing_capture_survives_a_source_measurement_longer_than_the_rpc_ca
     let hold = cap * 2;
     // This retained delay models slow source I/O, not an ordering barrier.
     // The actual root-read barrier above orders installation of this hook.
-    restarted.inner.lock().unwrap().test_engram_source_capture =
-        Some(Arc::new(move |place, _budget| {
-            std::thread::sleep(hold);
-            engram_place_source_capture(place)
+    let source_owner = restarted
+        .inner
+        .lock()
+        .unwrap()
+        .test_observation_source_owner
+        .clone()
+        .unwrap();
+    restarted
+        .inner
+        .lock()
+        .unwrap()
+        .test_observation_source_owner =
+        Some(Arc::new(move |binary, cwd, args, deadline, limit| {
+            if args[0] != "--version" {
+                std::thread::sleep(hold);
+            }
+            source_owner(binary, cwd, args, deadline, limit)
         }));
     read.release();
     let sent = fixture.observation();
