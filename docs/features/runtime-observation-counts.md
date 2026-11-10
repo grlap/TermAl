@@ -7,9 +7,9 @@ call Engram, enqueue delivery, persist state or retry an envelope. It never
 returns report/session ids, timestamps, request or receipt bodies, source
 identities, connection settings or error text.
 
-The response has `total` and `byWire` objects. `byWire` has five fixed buckets:
-`contentV1`, `sourceId`, `sourceFree`, `mixed` and `unknown`. Every counter
-object contains these numeric fields:
+The response has `total` and `byWire` objects. `byWire` has three fixed buckets:
+`sourceId`, `sourceFree` and `unknown`. Every counter object contains these
+numeric fields:
 
 - `reports`: retained reports, including empty reports.
 - `unsettledReports`: reports with at least one pending envelope.
@@ -17,9 +17,7 @@ object contains these numeric fields:
 - `envelopes`: retained envelopes.
 - `pending`, `recorded`, `refused`, `localFailure`: envelope delivery states.
 
-Report counts and envelope counts are grouped independently. A report with
-one legacy envelope and one owner-identity envelope is a `mixed` report;
-its two envelopes still count under their individual formats. Source-free
+Report counts and envelope counts are grouped independently. Source-free
 envelopes are neutral when grouping a report with a source format; a report
 containing only source-free envelopes is `sourceFree`. Any unknown
 envelope makes its report `unknown`. An empty report is also `unknown`.
@@ -29,9 +27,12 @@ the report.
 
 Wire classification examines known source metadata in `execution_observe`
 occurrences: source sightings, change endpoints, and optional check bases.
-Legacy `content-v1:` revisions and owner `source_id` values have separate
-buckets; combining both formats is `mixed`. Recognized occurrences without
-source metadata are `sourceFree`. Unsupported occurrences and missing or
+Only owner `source_id` values are a supported source format. Historical
+revision-form bodies remain readable and count as `unknown`, including when
+combined with an owner identity; they are never converted or rewritten.
+The retired `contentV1` and `mixed` diagnostic buckets are removed.
+Recognized occurrences without source metadata are `sourceFree`.
+Unsupported occurrences and missing or
 malformed source metadata are `unknown`. This is a wire census, not protocol
 admission: it does not revalidate identity contents or traverse source paths
 and changes. Arbitrary free text is never searched for source-like strings.

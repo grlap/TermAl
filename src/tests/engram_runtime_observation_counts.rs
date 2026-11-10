@@ -109,7 +109,7 @@ fn mixed_reports() -> Vec<EngramRuntimeObservationReport> {
 }
 
 #[test]
-fn mixed_wire_and_delivery_census_preserves_serialized_reports_without_payload_output() {
+fn census_counts_historical_formats_as_unknown_without_rewriting_reports() {
     let reports = mixed_reports();
     let bytes = serde_json::to_vec(&reports).unwrap();
     let reloaded: Vec<EngramRuntimeObservationReport> = serde_json::from_slice(&bytes).unwrap();
@@ -125,17 +125,6 @@ fn mixed_wire_and_delivery_census_preserves_serialized_reports_without_payload_o
             recorded: 2,
             refused: 1,
             local_failure: 2,
-        }
-    );
-    assert_eq!(
-        counts.by_wire.content_v1,
-        RuntimeObservationCounters {
-            reports: 1,
-            unsettled_reports: 1,
-            envelopes: 3,
-            pending: 2,
-            recorded: 1,
-            ..Default::default()
         }
     );
     assert_eq!(
@@ -161,22 +150,15 @@ fn mixed_wire_and_delivery_census_preserves_serialized_reports_without_payload_o
         }
     );
     assert_eq!(
-        counts.by_wire.mixed,
-        RuntimeObservationCounters {
-            reports: 2,
-            unsettled_reports: 1,
-            local_failure_reports: 1,
-            envelopes: 1,
-            local_failure: 1,
-            ..Default::default()
-        }
-    );
-    assert_eq!(
         counts.by_wire.unknown,
         RuntimeObservationCounters {
-            reports: 2,
-            envelopes: 1,
-            recorded: 1,
+            reports: 5,
+            unsettled_reports: 2,
+            local_failure_reports: 1,
+            envelopes: 5,
+            pending: 2,
+            recorded: 2,
+            local_failure: 1,
             ..Default::default()
         }
     );
@@ -218,10 +200,7 @@ fn mixed_wire_and_delivery_census_preserves_serialized_reports_without_payload_o
         .keys()
         .map(String::as_str)
         .collect();
-    assert_eq!(
-        wire_keys,
-        vec!["contentV1", "mixed", "sourceFree", "sourceId", "unknown"]
-    );
+    assert_eq!(wire_keys, vec!["sourceFree", "sourceId", "unknown"]);
 }
 
 #[test]
@@ -234,7 +213,7 @@ fn known_occurrences_inspect_only_their_source_metadata_and_classify_unknown_sha
         ),
         (
             json!({"kind":"observed_check","check":{"source_basis":legacy()}}),
-            ContentV1,
+            Unknown,
         ),
         (
             json!({"kind":"observed_check","check":{"source_basis":owner()}}),
@@ -246,7 +225,7 @@ fn known_occurrences_inspect_only_their_source_metadata_and_classify_unknown_sha
         ),
         (
             json!({"kind":"unadmitted_turn","observed_checks":[{"source_basis":legacy()}, {"source_basis":owner()}]}),
-            Mixed,
+            Unknown,
         ),
         (
             json!({"kind":"inter_turn_change","source_change":{"detection":"assumed_missing_baseline","sighting":{"source_basis":owner()}}}),
@@ -254,7 +233,7 @@ fn known_occurrences_inspect_only_their_source_metadata_and_classify_unknown_sha
         ),
         (
             json!({"kind":"source_sighting","source_basis":{"source_revision":"content-v1:old","source_id":owner()["source_id"]}}),
-            Mixed,
+            Unknown,
         ),
         (
             json!({"kind":"source_sighting","source_basis":{"source_revision":"git-commit:old"}}),
@@ -319,7 +298,7 @@ fn known_occurrences_inspect_only_their_source_metadata_and_classify_unknown_sha
 }
 
 #[test]
-fn real_builder_quiet_changed_turns_and_spillover_checks_keep_the_source_format() {
+fn real_builder_quiet_changed_turns_and_spillover_checks_preserve_custody() {
     let from = "2026-01-01T00:00:00Z";
     let through = "2026-01-01T00:00:02Z";
     let built_at = chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:03Z")
@@ -431,17 +410,12 @@ fn real_builder_quiet_changed_turns_and_spillover_checks_keep_the_source_format(
             let counts = runtime_observation_counts(std::iter::once(&retained));
             assert_eq!(counts.total.reports, 1);
             assert_eq!(counts.total.envelopes, 4);
-            assert_eq!(counts.by_wire.content_v1.reports, u64::from(!is_owner));
+            assert_eq!(counts.by_wire.unknown.reports, u64::from(!is_owner));
             assert_eq!(counts.by_wire.source_id.reports, u64::from(is_owner));
-            assert_eq!(
-                counts.by_wire.content_v1.envelopes,
-                2 * u64::from(!is_owner)
-            );
+            assert_eq!(counts.by_wire.unknown.envelopes, 2 * u64::from(!is_owner));
             assert_eq!(counts.by_wire.source_id.envelopes, 2 * u64::from(is_owner));
             assert_eq!(counts.by_wire.source_free.envelopes, 2);
             assert_eq!(counts.by_wire.source_free.reports, 0);
-            assert_eq!(counts.by_wire.mixed.reports, 0);
-            assert_eq!(counts.by_wire.unknown.reports, 0);
             assert!(
                 serde_json::to_vec(&retained).unwrap() == before,
                 "census changed real builder requests"
@@ -451,9 +425,7 @@ fn real_builder_quiet_changed_turns_and_spillover_checks_keep_the_source_format(
                 .push(envelope(json!({"kind":"future-occurrence"}), recorded()));
             let counts = runtime_observation_counts(std::iter::once(&retained));
             assert_eq!(counts.by_wire.unknown.reports, 1);
-            assert_eq!(counts.by_wire.content_v1.reports, 0);
             assert_eq!(counts.by_wire.source_id.reports, 0);
-            assert_eq!(counts.by_wire.mixed.reports, 0);
         }
     }
 }

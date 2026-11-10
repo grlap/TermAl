@@ -25,19 +25,15 @@ struct RuntimeObservationCounts {
 #[derive(Default, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RuntimeObservationWireCounts {
-    content_v1: RuntimeObservationCounters,
     source_id: RuntimeObservationCounters,
     source_free: RuntimeObservationCounters,
-    mixed: RuntimeObservationCounters,
     unknown: RuntimeObservationCounters,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RuntimeObservationWire {
-    ContentV1,
     SourceId,
     SourceFree,
-    Mixed,
     Unknown,
 }
 
@@ -50,8 +46,7 @@ impl RuntimeObservationWire {
             (Unknown, _) | (_, Unknown) => Unknown,
             (SourceFree, next) => next,
             (previous, SourceFree) => previous,
-            (left, right) if left == right => left,
-            _ => Mixed,
+            (SourceId, SourceId) => SourceId,
         }
     }
 }
@@ -59,10 +54,8 @@ impl RuntimeObservationWire {
 impl RuntimeObservationWireCounts {
     fn get_mut(&mut self, wire: RuntimeObservationWire) -> &mut RuntimeObservationCounters {
         match wire {
-            RuntimeObservationWire::ContentV1 => &mut self.content_v1,
             RuntimeObservationWire::SourceId => &mut self.source_id,
             RuntimeObservationWire::SourceFree => &mut self.source_free,
-            RuntimeObservationWire::Mixed => &mut self.mixed,
             RuntimeObservationWire::Unknown => &mut self.unknown,
         }
     }
@@ -98,39 +91,23 @@ fn runtime_observation_basis_wire(basis: &Value) -> RuntimeObservationWire {
     let Some(object) = basis.as_object() else {
         return Unknown;
     };
-    let revision = match object.get("source_revision") {
-        None => "",
-        Some(Value::String(revision)) => revision.as_str(),
+    // Any revision-form source is unsupported. Historical bodies remain intact
+    // in custody and contribute to unknown counts without a format fallback.
+    match object.get("source_revision") {
+        None => {}
+        Some(Value::String(revision)) if revision.is_empty() => {}
         _ => return Unknown,
-    };
-    let source = match object.get("source_id") {
-        None | Some(Value::Null) => false,
+    }
+    match object.get("source_id") {
         Some(Value::Object(source))
             if source.get("commit").is_some_and(Value::is_string)
                 && source.get("tree").is_some_and(Value::is_string)
                 && source.get("changes").is_some_and(Value::is_array)
                 && source.get("submodules").is_some_and(Value::is_array) =>
         {
-            true
+            SourceId
         }
-        _ => return Unknown,
-    };
-    let revision_wire = if revision.is_empty() {
-        SourceFree
-    } else if revision
-        .strip_prefix("content-v1:")
-        .is_some_and(|tail| !tail.is_empty())
-    {
-        ContentV1
-    } else {
-        Unknown
-    };
-    if source {
-        revision_wire.with_source(SourceId)
-    } else if revision.is_empty() {
-        Unknown
-    } else {
-        revision_wire
+        _ => Unknown,
     }
 }
 

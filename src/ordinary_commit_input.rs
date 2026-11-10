@@ -9,8 +9,7 @@
 #[cfg(test)]
 const ORDINARY_COMMIT_INPUT_DEFAULT: bool = false;
 
-/// The scheme of a committed source revision. It never equals a content
-/// revision's (`content-v1`), so a mix is visible in the string.
+/// The scheme used by retained committed source revisions.
 const COMMITTED_SOURCE_REVISION_SCHEME: &str = "git-commit";
 
 /// At most this many dirty paths are named in a log line; the outcome itself
