@@ -1,0 +1,42 @@
+## Result
+
+Status: completed
+
+Summary: No High findings. Proceed with the changes below.
+
+Findings:
+
+1. **Medium — Specify an executable Windows runner and handle spaces correctly.** Preserve argument boundaries on Windows.
+
+2. **Medium — Preserve setup operations that tests themselves observe.** Keep observable setup in each case.
+
+3. **Medium — SQLite templates need complete snapshots and recreated connection-local state.** Copy a complete snapshot and restore connection state.
+
+4. **Medium — Concurrent scale-test peak memory remains unmeasured.** Measure the concurrent peak.
+
+5. **Medium — Make a comparable fresh Windows baseline part of the measurement.** Compare fresh inputs.
+
+6. **Low — Unsupported timing flags should degrade visibly without failing passing test assertions.** Report unavailable timing separately.
+
+7. **Note — The merged filters preserve today's selection; failure granularity changes.** Keep the distinct failure locations visible.
+   - `src/work_service/update/tests.rs:1616`
+   - `src/work_service/read/tests.rs:42`
+   - `src/work_service/delete/tests.rs:73`
+   - `src/work_service/add/tests.rs:84`
+   - `src/work_service/list/tests.rs:95`
+
+   Stores are private, and this indented paragraph continues the preceding note.
+
+8. **Note — Runner scope and inherited environment need precise claims.** State which environment is inherited.
+
+9. **Note — Timing suffixes should not break existing counting; extract durations separately.** Keep counting independent of timings.
+
+Commands Run:
+
+- None for this restatement.
+
+Files Inspected:
+
+- None additionally; all evidence above comes from the completed review.
+
+Verdict: **proceed with the listed changes.**

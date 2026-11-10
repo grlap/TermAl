@@ -82,7 +82,7 @@ prerequisite leaves every stage explicitly unrun.
 In a registered full run, the exact `cargo fmt --check` stage is a Lint check,
 including when it fails. It grants no Test or Build credit. A stage that never
 runs stays `not_run` in the run body and mints no verification record. Ordinary
-command recognition and admission of Lint-only evaluations are unchanged.
+command recognition is unchanged. Lint does not meet a Test-bound criterion.
 
 Before those six stages, the full launcher prepares private UI dependencies
 with `npm ci --include=dev --no-audit --no-fund` in the candidate's `ui/`
@@ -1181,7 +1181,23 @@ Flutter/.NET credit is reserved to the original host-observed native route;
 a generic focused launcher registration cannot adopt a declaration or a
 later artifact as that execution's evidence.
 
-A successful arbitrary command, such as `node scripts/check-doc-links.mjs`,
+The exact focused argv `node scripts/check-doc-links.mjs`, with no arguments,
+is a registered Lint check. Run it from the named root with
+`node scripts/test-launcher.mjs focused --input commit -- node scripts/check-doc-links.mjs`.
+Both passing and failing outcomes are recorded as Lint; it creates no Test
+observation or Test/Build credit. No declaration or test artifact is needed.
+The launcher's resolved Node executable path (including `node.exe` on Windows)
+is accepted. Script-path variants, shell wrappers, renamed scripts and extra
+arguments are not this route. This requires a host build that implements this classification.
+
+The existing committed-input evaluation admission accepts an acknowledged,
+passing Lint-only record on the current clean named commit. It still requires
+the original binding, source, body/digest and host-observed receipt; a failed
+or unacknowledged record cannot admit the evaluation. This does not satisfy
+a criterion bound to Test verification, and requesting evaluation does not
+create an acknowledgement.
+
+A successful arbitrary command, such as `node scripts/check-doc-links-renamed.mjs`,
 can therefore leave a registered run at `pending: unclassified_stages`.
 TermAl builds no verification record for that run: waiting or repeating an
 evaluation request cannot make Engram acknowledge it. Evaluation refuses
@@ -1191,9 +1207,9 @@ decision reads the run's request and terminal results directly, including
 before the sender first examines it or if its progress file is missing;
 requesting evaluation does not prepare or send a record.
 
-There is currently no classified verification route for a documentation
-check that is neither a test nor a build. Do not label it as either one.
-The supported routes are actual recognized test/build commands, or a real
+Other documentation checkers have no classification merely because they read
+Markdown. Do not label them as tests or builds. Apart from the exact Lint
+route above, supported routes are actual recognized test/build commands, or a real
 test using [declared native verification](features/declared-test-commands.md#native-verification).
 The latter needs a committed `termal-tests.toml` entry, the exact declared
 command as the first tool action of a fresh turn, and a supported TRX or

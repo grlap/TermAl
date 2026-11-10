@@ -103,8 +103,8 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
             Some(DelegationResultSection::Findings) => finding_lines.push(line),
             Some(DelegationResultSection::Notes) => note_lines.push(line.to_owned()),
             Some(DelegationResultSection::FilesInspected) => {
-                if let Some(note) = parse_delegation_note_line(line) {
-                    files_inspected.push(note);
+                if let Some(path) = parse_delegation_inspected_path(line) {
+                    files_inspected.push(path);
                 }
             }
             Some(DelegationResultSection::Ignored) | None => {}
@@ -1028,6 +1028,27 @@ fn parse_delegation_note_line(line: &str) -> Option<String> {
     Some(text.to_owned())
 }
 
+fn parse_delegation_inspected_path(line: &str) -> Option<String> {
+    let text = normalize_delegation_result_list_item(line);
+    let path = if let Some(path) = text.strip_prefix('`').and_then(|s| s.strip_suffix('`')) {
+        path
+    } else if let Some((_, target)) = parse_markdown_link_location(text) {
+        target
+    } else {
+        if text.chars().any(char::is_whitespace) {
+            return None;
+        }
+        text
+    };
+    if path.is_empty()
+        || !(path.contains('/') || path.contains('\\') || path.contains('.'))
+        || is_delegation_no_findings_marker(path)
+    {
+        return None;
+    }
+    Some(path.to_owned())
+}
+
 fn parse_delegation_finding_line(line: &str) -> Option<DelegationFinding> {
     let text = normalize_delegation_result_list_item(line);
     if text.is_empty() || is_delegation_no_findings_marker(text) {
@@ -1196,6 +1217,25 @@ fn parse_delegation_review_actionable_finding_line(line: &str) -> Option<Delegat
     let text = normalize_delegation_result_list_item(line);
     if text.is_empty() || is_delegation_no_findings_marker(text) {
         return None;
+    }
+    // Ordinary explorers also put severity and title inside one bold span,
+    // without a source location: `1. **Medium — Title.** Details.`
+    if let Some((headline, details)) = text.strip_prefix("**").and_then(|s| s.split_once("**"))
+        && let Some((severity, title)) = split_delegation_review_location_and_message(headline)
+        && is_delegation_review_severity(severity)
+    {
+        let details = details.trim();
+        let (file, line) = leading_delegation_review_location(details).unwrap_or((None, None));
+        return Some(DelegationFinding {
+            severity: severity.to_owned(),
+            file,
+            line,
+            message: if details.is_empty() {
+                title.to_owned()
+            } else {
+                format!("{title} {details}")
+            },
+        });
     }
     let (severity, rest) = parse_delegation_review_severity(text)?;
     if let Some((headline, details)) = split_delegation_review_bold_headline(rest) {
@@ -1380,11 +1420,19 @@ fn parse_delegation_finding_location(location: &str) -> (Option<String>, Option<
 }
 
 fn normalize_delegation_result_list_item(line: &str) -> &str {
-    line.trim()
+    let text = line
+        .trim()
         .strip_prefix("- ")
         .or_else(|| line.trim().strip_prefix("* "))
         .unwrap_or_else(|| line.trim())
-        .trim()
+        .trim();
+    if let Some((number, item)) = text.split_once(". ")
+        && !number.is_empty()
+        && number.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return item.trim();
+    }
+    text
 }
 
 fn is_delegation_no_findings_marker(text: &str) -> bool {

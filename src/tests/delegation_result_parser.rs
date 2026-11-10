@@ -1,6 +1,64 @@
 use super::*;
 
 #[test]
+fn delegation_result_packet_parses_numbered_bold_explorer_findings() {
+    let parsed = parse_delegation_result_packet(include_str!(
+        "fixtures/explorer-numbered-bold-findings.txt"
+    ))
+    .expect("the explorer's result packet should parse");
+    assert_eq!(parsed.status, DelegationStatus::Completed);
+    assert_eq!(
+        parsed
+            .findings
+            .iter()
+            .map(|finding| finding.severity.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "Medium", "Medium", "Medium", "Medium", "Medium", "Low", "Note", "Note", "Note"
+        ]
+    );
+    assert_eq!(
+        parsed.findings[0].message,
+        "Specify an executable Windows runner and handle spaces correctly. Preserve argument boundaries on Windows."
+    );
+    assert_eq!(
+        parsed.findings[8].message,
+        "Timing suffixes should not break existing counting; extract durations separately. Keep counting independent of timings."
+    );
+    assert!(
+        parsed
+            .findings
+            .iter()
+            .all(|finding| finding.file.is_none() && finding.line.is_none())
+    );
+    assert!(
+        parsed.files_inspected.is_empty(),
+        "the no-additional-files explanation and verdict are not paths"
+    );
+}
+
+#[test]
+fn delegation_result_packet_keeps_paths_without_collecting_file_list_prose() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\nStatus: completed\nSummary: Clean.\nFindings:\n- None\nFiles Inspected:\n\
+- src/state.rs\n- `src/path with spaces.rs`\n- [main](src/main.rs)\n- Cargo.toml\n\
+- None additionally; all evidence comes from the prior review.\nVerdict: **proceed.**\n\
+No further files were inspected.",
+    )
+    .unwrap();
+    assert!(parsed.findings.is_empty());
+    assert_eq!(
+        parsed.files_inspected,
+        vec![
+            "src/state.rs",
+            "src/path with spaces.rs",
+            "src/main.rs",
+            "Cargo.toml"
+        ]
+    );
+}
+
+#[test]
 fn delegation_result_packet_accepts_preamble_and_case_drift() {
     let parsed = parse_delegation_result_packet(
         "Done, here is the packet:\n\n## result\n\nstatus: completed\n\nsummary:\nReady.",

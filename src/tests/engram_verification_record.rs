@@ -25,6 +25,9 @@ mod source_projection;
 #[path = "engram_verification_fmt.rs"]
 mod fmt;
 
+#[path = "engram_verification_doc_links.rs"]
+mod doc_links;
+
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 const SESSION: &str = "session-record";
 const STARTED: &str = "2026-10-30T10:00:00.000Z";

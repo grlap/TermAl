@@ -892,7 +892,89 @@ fn a_sighted_request_without_a_registered_run_uses_the_complete_owner_identity()
 }
 
 #[test]
-fn an_unclassified_link_check_cannot_acknowledge_and_does_not_offer_a_wait() {
+fn acknowledged_doc_link_lint_admits_only_a_pass_on_the_clean_named_commit() {
+    for outcome in ["passed", "failed"] {
+        let (state, parent, _store, named_root) = named_root_parent();
+        let head = commit_named_root(&named_root);
+        acceptance_owner_reports(&state, &parent, &named_root, Vec::new(), Vec::new());
+        let transport =
+            install_sighting_transport(&state, &named_root, 1, json!({"state":"absent"}));
+        let root = worktree(&named_root);
+        let directory = test_runs_git_common_dir(&root)
+            .unwrap()
+            .join("review-runs")
+            .join(COMMITTED_RUN_ID);
+        fs::create_dir_all(&directory).unwrap();
+        let request_record = json!({
+            "runId":COMMITTED_RUN_ID, "root":test_run_display_path(&root),
+            "full":false, "owner":parent, "input":"commit", "detached":false,
+            "started":"2026-10-30T10:00:00.000Z", "creatorPid":std::process::id(),
+            "stages":[{"name":"focused", "command":"node", "args":["scripts/check-doc-links.mjs"]}],
+        });
+        let mut results = committed_results(outcome, input_record(&head, "clean"));
+        results["stages"][0]["name"] = json!("focused");
+        results["stages"][0]["command"] = json!(["node", "scripts/check-doc-links.mjs"]);
+        fs::write(directory.join("request.json"), request_record.to_string()).unwrap();
+        fs::write(directory.join("results.json"), results.to_string()).unwrap();
+        state
+            .register_test_run(
+                &parent,
+                RegisterTestRunRequest {
+                    run_id: COMMITTED_RUN_ID.to_owned(),
+                    run_directory: test_run_display_path(&directory),
+                },
+            )
+            .unwrap();
+        let registration = current_registration(&state);
+        if outcome == "passed" {
+            assert!(matches!(
+                decide(&state, &parent),
+                Err(AcceptanceCommittedInputRefusal::RecordNotAcknowledged { .. })
+            ));
+        }
+        let progress = json!({"state":"received", "receipt":{
+            "operation":RECORD_PRODUCER, "producer":RECORD_PRODUCER,
+            "verifications":[{"stage":"focused", "record_id":"a".repeat(32)}],
+            "run_outcome":outcome,
+        }});
+        host_observed(&state, &registration, &head, progress);
+        let frozen = engram_verification_record_frozen(&directory, COMMITTED_RUN_ID).unwrap();
+        let body = serde_json::to_value(&frozen.body).unwrap();
+        assert_eq!(body["checks"].as_array().unwrap().len(), 1);
+        assert_eq!(body["checks"][0]["check_kind"], "lint");
+        assert_eq!(body["checks"][0]["outcome"], outcome);
+        if outcome == "passed" {
+            assert_eq!(
+                decide(&state, &parent),
+                Ok(AcceptanceCommittedInputDecision::Admitted(
+                    AcceptanceCommittedInputAdmission {
+                        run_id: COMMITTED_RUN_ID.to_owned(),
+                        commit: head,
+                        native_source: None,
+                    }
+                ))
+            );
+            assert!(matches!(
+                request(&state, &parent).unwrap(),
+                AcceptanceEvaluationRequestResponse::Spawned { .. }
+            ));
+        } else {
+            assert!(matches!(
+                decide(&state, &parent),
+                Err(AcceptanceCommittedInputRefusal::NoEligibleRun { .. })
+            ));
+            refusal(
+                &state,
+                request(&state, &parent),
+                "a failed Lint record cannot admit",
+            );
+        }
+        assert_eq!(sighting_reads(&transport), 0);
+    }
+}
+
+#[test]
+fn an_unclassified_renamed_link_check_cannot_acknowledge_and_does_not_offer_a_wait() {
     let (state, parent, _store, named_root) = named_root_parent();
     let head = commit_named_root(&named_root);
     acceptance_owner_reports(&state, &parent, &named_root, Vec::new(), Vec::new());
@@ -903,12 +985,12 @@ fn an_unclassified_link_check_cannot_acknowledge_and_does_not_offer_a_wait() {
         .join("review-runs")
         .join(COMMITTED_RUN_ID);
     fs::create_dir_all(&directory).unwrap();
-    let command = json!(["node", "scripts/check-doc-links.mjs"]);
+    let command = json!(["node", "scripts/check-doc-links-renamed.mjs"]);
     let request_record = json!({
         "runId": COMMITTED_RUN_ID, "root": test_run_display_path(&root),
         "full": false, "owner": parent, "input": "commit", "detached": false,
         "started": "2026-10-30T10:00:00.000Z", "creatorPid": std::process::id(),
-        "stages": [{"name":"focused", "command":"node", "args":["scripts/check-doc-links.mjs"]}],
+        "stages": [{"name":"focused", "command":"node", "args":["scripts/check-doc-links-renamed.mjs"]}],
     });
     let mut results = committed_results("passed", input_record(&head, "clean"));
     results["stages"][0]["name"] = json!("focused");

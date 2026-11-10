@@ -660,7 +660,8 @@ fn engram_verification_record_is_build(argv: &[String]) -> bool {
 /// test`, `npx vitest`, Node's `--test` runner and the launcher itself): a
 /// test there is a Test. Else a true build command (`cargo check`, `cargo
 /// build`, `tsc`) is a Build. The full gate's reserved `fmt` stage admits
-/// only the exact check-only Cargo formatter argv as Lint. Else the launcher's
+/// only the exact check-only Cargo formatter argv as Lint. The exact focused
+/// doc-link checker is Lint too. Else the launcher's
 /// agreed test-stage rule over the run's own request (`engram_launcher_test_stages`; a live run's
 /// `engram-live` stage, as `engram_check_showed_passing_tests` counts it), or
 /// the sender's own launcher stage table
@@ -674,9 +675,11 @@ fn engram_verification_record_check_kind(
     argv: &[String],
     test_stages: &[String],
 ) -> Option<EngramVerificationRecordCheckKind> {
+    if engram_verification_record_is_lint(mode, stage, argv) {
+        return Some(EngramVerificationRecordCheckKind::Lint);
+    }
     if mode == EngramVerificationRecordMode::Full && stage == "fmt" {
-        return engram_verification_record_is_lint(argv)
-            .then_some(EngramVerificationRecordCheckKind::Lint);
+        return None;
     }
     let focused: Vec<String> = ["scripts/test-launcher.mjs", "focused", "--"]
         .into_iter()
@@ -702,10 +705,23 @@ fn engram_verification_record_check_kind(
 
 /// Explicit registered lint admission is deliberately narrower than ordinary
 /// test/build recognition: no formatter write, extra arguments or wrapper.
-fn engram_verification_record_is_lint(argv: &[String]) -> bool {
-    matches!(argv, [program, subcommand, flag]
+fn engram_verification_record_is_lint(
+    mode: EngramVerificationRecordMode,
+    stage: &str,
+    argv: &[String],
+) -> bool {
+    (mode == EngramVerificationRecordMode::Full
+        && stage == "fmt"
+        && matches!(argv, [program, subcommand, flag]
         if engram_program_name(program) == "cargo"
-            && subcommand == "fmt" && flag == "--check")
+            && subcommand == "fmt" && flag == "--check"))
+        || (mode == EngramVerificationRecordMode::Focused
+            && stage == "focused"
+            && matches!(argv, [program, script]
+                if engram_program_name(program) == "node"
+                    && ![".cmd", ".bat", ".ps1"].iter()
+                        .any(|suffix| program.to_ascii_lowercase().ends_with(suffix))
+                    && script == "scripts/check-doc-links.mjs"))
 }
 
 /// Launcher stage ids this sender alone records as tests when neither their
