@@ -717,11 +717,7 @@ fn acceptance_evaluation_open_write_notice_locked(
                 .as_ref()
                 .is_some_and(|target| {
                     target.judges(store, work_ref)
-                        && matches!(
-                            target.submission,
-                            AcceptanceEvaluationSubmission::Pending { .. }
-                                | AcceptanceEvaluationSubmission::Unconfirmed { .. }
-                        )
+                        && acceptance_evaluation_has_unknown_write(target)
                 })
     })?;
     Some(format!(
@@ -1775,7 +1771,7 @@ impl AppState {
                             .then(|| "the requested evaluator agent or model changed".to_owned()));
                     if let Some(reason) = reason {
                         if automatic {
-                            return Err(ApiError::conflict(format!("the confirmed refusal remains settled; automatic reuse is unavailable ({reason}). Finish and report it; the parent may explicitly request a fresh evaluator")));
+                            return Err(ApiError::conflict(format!("the prior attempt remains closed; automatic reuse is unavailable ({reason}). Finish and report it; the parent may explicitly request a fresh evaluator")));
                         }
                         reuse_notice = Some(format!("A fresh evaluator was selected: {reason}."));
                     } else {
@@ -1976,7 +1972,12 @@ impl AppState {
             return Err(ApiError::conflict("the submission must echo the exact attemptKey from its current host-authored brief; an earlier attempt cannot submit under this target"));
         }
         if let Some(refusal) = authority.target.attempt_history.as_ref().and_then(|h| h.refusal.as_ref()) {
-            return Err(ApiError::conflict(format!("this attempt was definitively refused: {}. Finish and report it; a fresh judgment requires a new host-authored brief", refusal.message)));
+            let disposition = if refusal.code == ACCEPTANCE_LOCAL_RETIREMENT_CODE {
+                "this attempt was retired locally"
+            } else {
+                "this attempt was definitively refused"
+            };
+            return Err(ApiError::conflict(format!("{disposition}: {}. Finish and report it; a fresh judgment requires a new host-authored brief", refusal.message)));
         }
         // Checked before anything is sent: the one re-submission a refusal
         // allowed cites only the records it named.
@@ -2115,7 +2116,8 @@ impl AppState {
         }
         // A historical content fingerprint cannot be recaptured by this host.
         // Fresh submissions retain the existing unavailable-source behavior.
-        // Open writes bypass this preparation and replay their original argv.
+        // Owner-backed open writes replay their original argv. Historical
+        // fingerprint writes are retired before this preparation is reached.
         eprintln!(
             "acceptance evaluation> {child}'s historical source capture is retired; \
              the submission declares no source fingerprint"
@@ -2182,6 +2184,7 @@ impl AppState {
             self.acceptance_evaluation_submit_context(child, &request)?;
         // Rationales are model text: never hand them to a shell shim.
         validate_work_read_target(&target)?;
+        self.retire_legacy_acceptance_submission(&authority)?;
         let declared = self.acceptance_evaluation_declared_target(child, &authority.target)?;
         let args = acceptance_evaluation_cli_args(
             &target.connection,

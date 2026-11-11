@@ -301,6 +301,35 @@ async fn parent_replays_the_ended_evaluators_original_write_and_recorded_repeats
     );
 }
 
+#[test]
+fn replay_receipt_repairs_both_retained_host_unavailable_wordings() {
+    for finding in [
+        ACCEPTANCE_UNCONFIRMED_RESULT_FINDING,
+        "Submission recording remains pending or unconfirmed; the retained write was preserved.",
+    ] {
+        let (state, parent, delegation, _, _) = retained_fixture();
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_delegation_index(&delegation).unwrap();
+            inner.delegations[index].result.as_mut().unwrap().findings[0].message = finding.into();
+        }
+        let (_, runner) = scripted_runner(vec![Ok(cli_output(true, &evaluate_receipt(true), ""))]);
+        state
+            .replay_acceptance_evaluation_with_runner(
+                &parent,
+                ReplayAcceptanceEvaluationRequest {
+                    delegation_id: delegation.clone(),
+                },
+                runner,
+            )
+            .unwrap();
+        let public = state.get_delegation_result(&parent, &delegation).unwrap();
+        assert_eq!(public.result.status, DelegationStatus::Completed);
+        assert!(public.result.findings.is_empty());
+        assert!(public.result.summary.contains("1 of 2 criteria passed"));
+    }
+}
+
 #[tokio::test]
 async fn replay_refuses_a_changed_payload_without_invoking_engram() {
     let (state, parent, delegation, root, _) = retained_fixture();
@@ -320,6 +349,85 @@ async fn replay_refuses_a_changed_payload_without_invoking_engram() {
     );
     assert_eq!(submission_of(&state, &delegation), before);
     assert!(!root.join("replay-sends.txt").exists());
+}
+
+#[test]
+fn parent_replay_retires_legacy_declarations_without_a_send_or_refused_judgment() {
+    for scheme in ["content-v1", "git-commit"] {
+        for equals_form in [false, true] {
+            let (state, parent, delegation, _, mut original) = retained_fixture();
+            let declaration = format!(
+                "{scheme}:{}",
+                "a".repeat(if scheme == "git-commit" { 40 } else { 64 }),
+            );
+            if equals_form {
+                original
+                    .args
+                    .push(format!("--source-fingerprint={declaration}"));
+            } else {
+                original
+                    .args
+                    .extend(["--source-fingerprint".into(), declaration.clone()]);
+            }
+            let digest = original.digest().unwrap();
+            let original_bytes = serde_json::to_vec(&original).unwrap();
+            update_evaluation_target(&state, &delegation, |target| {
+                target.source_fingerprint = Some(declaration.clone());
+                target.submission = unconfirmed_with(&digest, "historical response lost", original);
+            });
+            let (calls, runner) =
+                scripted_runner(vec![Ok(cli_output(true, &evaluate_receipt(true), ""))]);
+            let error = state
+                .replay_acceptance_evaluation_with_runner(
+                    &parent,
+                    ReplayAcceptanceEvaluationRequest {
+                        delegation_id: delegation.clone(),
+                    },
+                    runner,
+                )
+                .err()
+                .expect("historical declaration must retire locally");
+            assert_eq!(error.status, StatusCode::CONFLICT);
+            assert!(
+                error
+                    .message
+                    .contains("earlier tracker outcome remains unknown")
+            );
+            assert!(
+                calls.lock().unwrap().is_empty(),
+                "local retirement must not send"
+            );
+            let inner = state.inner.lock().unwrap();
+            let target = inner.delegations[inner.find_delegation_index(&delegation).unwrap()]
+                .acceptance_evaluation
+                .as_ref()
+                .unwrap();
+            assert!(matches!(
+                target.submission,
+                AcceptanceEvaluationSubmission::None
+            ));
+            let history = target.attempt_history.as_ref().unwrap();
+            assert!(history.refused_submissions.is_empty());
+            let retirement = history.refusal.as_ref().unwrap();
+            assert_eq!(retirement.code, ACCEPTANCE_LOCAL_RETIREMENT_CODE);
+            assert!(
+                serde_json::to_vec(&retirement.original).unwrap() == original_bytes,
+                "local retirement must preserve the exact original write"
+            );
+            drop(inner);
+            assert!(
+                state
+                    .replay_acceptance_evaluation_with_runner(
+                        &parent,
+                        ReplayAcceptanceEvaluationRequest {
+                            delegation_id: delegation.clone()
+                        },
+                        runner_must_not_run,
+                    )
+                    .is_err()
+            );
+        }
+    }
 }
 
 #[tokio::test]

@@ -1785,14 +1785,10 @@ struct DelegationAcceptanceEvaluation {
     /// which can no longer submit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     store: Option<EngramAuthorityStoreKey>,
-    /// The content revision of the worktree the evaluator reads, taken when
-    /// the evaluation was requested. The first submission takes it again and
-    /// declares it to the tracker as `--source-fingerprint` only when the two
-    /// agree (a later source change to this same revision then leaves the
-    /// evaluation fresh); when the second cannot be taken it declares none,
-    /// so this field is not proof of what was declared. Absent when it could
-    /// not be taken at the request, and on a record persisted before it was
-    /// kept; such an evaluation declares none, as before.
+    /// Historical declared source revision, kept without conversion. Fresh
+    /// commands do not emit the retired fingerprint flag. An open historical
+    /// write is retained in terminal attempt history instead of resent, with
+    /// its earlier tracker outcome explicitly unresolved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     source_fingerprint: Option<String>,
     /// Complete owner identity, private to the persisted host attempt.
@@ -1839,6 +1835,8 @@ struct DelegationAcceptanceEvaluation {
     rename_all_fields = "camelCase"
 )]
 enum AcceptanceEvaluationSubmission {
+    /// No active host write. Terminal history may still hold an unknown legacy
+    /// write retired locally; this state alone proves no tracker outcome.
     #[default]
     None,
     /// `payload_digest` names the arguments and any saved source object.
@@ -1865,7 +1863,7 @@ enum AcceptanceEvaluationSubmission {
 /// What an open write was sent as, kept so that its resend is the original
 /// whatever the host's settings have become since (a renamed developer,
 /// another model): the host's part of the command may drift, the write it must
-/// replay may not.
+/// replay may not. Retired legacy writes stay in terminal history instead.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AcceptanceEvaluationOpenWrite {

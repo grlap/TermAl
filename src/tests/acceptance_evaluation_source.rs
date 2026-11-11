@@ -1,5 +1,5 @@
 // New requests retain the owner's complete identity privately; historical
-// fingerprints remain readable and replayable without conversion. Does
+// fingerprints remain readable and retire locally without conversion. Does
 // not own the rest of the acceptance-evaluation tests, the fixtures and helpers
 // of which it uses from its parent module. New tests, placed in this child
 // module of src/tests/acceptance_evaluation.rs so that file stays within the
@@ -958,26 +958,34 @@ fn submit_declaring(
 }
 
 #[test]
-fn fresh_legacy_targets_do_not_recreate_retired_content_fingerprints() {
-    for edit in [false, true] {
-        let args = submit_declaring(
-            |_| format!("content-v1:{}", "a".repeat(64)),
-            true,
-            |root| {
-                if edit {
-                    fs::write(root.join("judged.txt"), "changed under the evaluator\n").unwrap();
-                }
-            },
-        )
-        .unwrap();
-        assert!(
-            !args.iter().any(|arg| arg == "--source-fingerprint"),
-            "a historical declaration cannot be recaptured or converted: {args:?}"
-        );
-        assert!(
-            !args.iter().any(|arg| arg == "--source-id-file"),
-            "no current owner object was supplied by this historical target"
-        );
+fn fresh_legacy_targets_do_not_send_retired_fingerprints() {
+    for scheme in ["content-v1", "git-commit"] {
+        for edit in [false, true] {
+            let args = submit_declaring(
+                |_| {
+                    format!(
+                        "{scheme}:{}",
+                        "a".repeat(if scheme == "git-commit" { 40 } else { 64 })
+                    )
+                },
+                true,
+                |root| {
+                    if edit {
+                        fs::write(root.join("judged.txt"), "changed under the evaluator\n")
+                            .unwrap();
+                    }
+                },
+            )
+            .unwrap();
+            assert!(
+                !args.iter().any(|arg| arg == "--source-fingerprint"),
+                "a historical declaration cannot be recaptured or converted"
+            );
+            assert!(
+                !args.iter().any(|arg| arg == "--source-id-file"),
+                "no current owner object was supplied by this historical target"
+            );
+        }
     }
 }
 
@@ -993,65 +1001,416 @@ fn acceptance_submit_declares_nothing_when_the_revision_cannot_be_taken_again() 
 }
 
 #[test]
-fn acceptance_submit_replays_a_stored_legacy_write_unchanged_after_the_worktree_moved() {
-    for uncertain in [false, true] {
-        let (state, project, parent, root) = fixture();
-        install_store(&state, &project, &root);
-        make_workdir_a_worktree(&root);
-        let (delegation, child) = install_evaluator_delegation(
-            &state,
-            &parent,
-            Some(&project),
-            &root.to_string_lossy(),
-            2,
-        );
-        let requested = format!("content-v1:{}", "a".repeat(64));
-        update_evaluation_target(&state, &delegation, |target| {
-            target.source_fingerprint = Some(requested.clone());
-        });
-        // Explicit historical persisted input: creating a new declaration no
-        // longer captures this basis, but replay must preserve old bytes.
-        let (authority, target, model, in_flight) = state
-            .acceptance_evaluation_submit_context(&child, &two_verdicts())
+fn retained_revision_submissions_retire_without_sending_or_rewriting_history() {
+    for scheme in ["content-v1", "git-commit"] {
+        for (uncertain, equals_form) in [(false, false), (false, true), (true, false), (true, true)]
+        {
+            let (state, project, parent, root) = fixture();
+            install_store(&state, &project, &root);
+            make_workdir_a_worktree(&root);
+            let (delegation, child) = install_evaluator_delegation(
+                &state,
+                &parent,
+                Some(&project),
+                &root.to_string_lossy(),
+                2,
+            );
+            let requested = format!(
+                "{scheme}:{}",
+                "a".repeat(if scheme == "git-commit" { 40 } else { 64 })
+            );
+            update_evaluation_target(&state, &delegation, |target| {
+                target.source_fingerprint = Some(requested.clone());
+            });
+            // Explicit historical persisted input, including the removed CLI flag.
+            let (authority, target, model, in_flight) = state
+                .acceptance_evaluation_submit_context(&child, &two_verdicts())
+                .unwrap();
+            let mut args = acceptance_evaluation_cli_args(
+                &target.connection,
+                &authority.target,
+                &two_verdicts(),
+                model.as_deref(),
+            )
             .unwrap();
-        let args = acceptance_evaluation_cli_args(
-            &target.connection,
-            &authority.target,
-            &two_verdicts(),
-            model.as_deref(),
-        )
-        .unwrap();
-        let original = AcceptanceEvaluationOpenWrite {
-            source_payload: None,
-            verdicts_digest: acceptance_evaluation_payload_digest(
-                &acceptance_evaluation_verdict_args(&two_verdicts()),
-            ),
-            args: args.clone(),
-        };
-        let digest = original.digest().unwrap();
-        update_evaluation_target(&state, &delegation, |target| {
-            target.submission = if uncertain {
-                unconfirmed_with(&digest, "the historical response was lost", original)
+            if equals_form {
+                args.push(format!("--source-fingerprint={requested}"));
             } else {
-                pending_with(&digest, original)
+                args.extend(["--source-fingerprint".to_owned(), requested.clone()]);
+            }
+            let original = AcceptanceEvaluationOpenWrite {
+                source_payload: None,
+                verdicts_digest: acceptance_evaluation_payload_digest(
+                    &acceptance_evaluation_verdict_args(&two_verdicts()),
+                ),
+                args: args.clone(),
             };
-        });
-        state
-            .commit_locked(&mut state.inner.lock().unwrap())
-            .unwrap();
-        drop(in_flight);
-        assert!(args.contains(&requested));
-        fs::write(root.join("judged.txt"), "changed after the stored send\n").unwrap();
-        let (calls, run) = scripted_runner(vec![Ok(cli_output(true, &evaluate_receipt(true), ""))]);
-        state
-            .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run)
-            .expect("the original stored write replays without recapture");
-        assert_eq!(
-            *calls.lock().unwrap(),
-            vec![args],
-            "exact historical argv, one send"
+            let digest = original.digest().unwrap();
+            let original_bytes = serde_json::to_vec(&original).unwrap();
+            update_evaluation_target(&state, &delegation, |target| {
+                target.submission = if uncertain {
+                    unconfirmed_with(&digest, "the historical response was lost", original)
+                } else {
+                    pending_with(&digest, original)
+                };
+            });
+            state
+                .commit_locked(&mut state.inner.lock().unwrap())
+                .unwrap();
+            drop(in_flight);
+            assert!(
+                args.iter()
+                    .any(|arg| arg == &requested || arg.ends_with(&format!("={requested}")))
+            );
+            fs::write(root.join("judged.txt"), "changed after the stored send\n").unwrap();
+            let (calls, run) =
+                scripted_runner(vec![Ok(cli_output(true, &evaluate_receipt(true), ""))]);
+            let error = state
+                .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run)
+                .err()
+                .expect("a retained revision submission is retired locally");
+            assert_eq!(error.status, StatusCode::CONFLICT);
+            assert!(
+                error
+                    .message
+                    .contains("earlier tracker outcome remains unknown")
+            );
+            assert!(calls.lock().unwrap().is_empty(), "retired input was sent");
+            let stored = {
+                let inner = state.inner.lock().unwrap();
+                inner.delegations[inner.find_delegation_index(&delegation).unwrap()]
+                    .acceptance_evaluation
+                    .as_ref()
+                    .unwrap()
+                    .clone()
+            };
+            assert!(matches!(
+                stored.submission,
+                AcceptanceEvaluationSubmission::None
+            ));
+            assert!(stored.source_fingerprint.as_deref() == Some(requested.as_str()));
+            let refusal = stored
+                .attempt_history
+                .as_ref()
+                .and_then(|history| history.refusal.as_ref())
+                .expect("retirement is retained on the existing attempt");
+            assert_eq!(refusal.code, "legacy_source_input_retired");
+            assert!(
+                stored
+                    .attempt_history
+                    .as_ref()
+                    .unwrap()
+                    .refused_submissions
+                    .is_empty(),
+                "local retirement must not fabricate a confirmed refused judgment"
+            );
+            assert!(
+                serde_json::to_vec(&refusal.original).unwrap() == original_bytes,
+                "the original unknown write must remain unchanged in history"
+            );
+            let restored: DelegationAcceptanceEvaluation =
+                serde_json::from_slice(&serde_json::to_vec(&stored).unwrap()).unwrap();
+            assert!(
+                restored == stored,
+                "historical target and retirement must load unchanged"
+            );
+            let (again, run) = scripted_runner(Vec::new());
+            let repeated = state
+                .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run)
+                .err()
+                .expect("a retired attempt stays terminal");
+            assert!(
+                repeated
+                    .message
+                    .starts_with("this attempt was retired locally:")
+                    && !repeated.message.contains("definitively refused")
+                    && repeated
+                        .message
+                        .contains("earlier tracker outcome remains unknown"),
+                "retry refusal must distinguish local retirement from a producer answer"
+            );
+            assert!(
+                again.lock().unwrap().is_empty(),
+                "a retired attempt was resent"
+            );
+            let shown =
+                serde_json::to_value(state.get_delegation(&parent, &delegation).unwrap()).unwrap();
+            let history = &shown["delegation"]["acceptanceEvaluation"]["attemptHistory"];
+            assert!(
+                history.get("refusedSubmissions").is_none(),
+                "local retirement must not invent a producer refusal entry"
+            );
+            assert_eq!(history["refusal"]["code"], ACCEPTANCE_LOCAL_RETIREMENT_CODE);
+            assert!(
+                history["refusal"]["message"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("earlier tracker outcome remains unknown")),
+                "the requester must see the retained uncertainty"
+            );
+            assert_retired_write_projections(&state, &parent, &delegation, &child, &stored);
+        }
+    }
+}
+
+/// Exercise the public lifecycle, card and next-request notice, first for the
+/// retired current attempt and then for its history under a later receipt.
+fn assert_retired_write_projections(
+    state: &AppState,
+    parent: &str,
+    delegation: &str,
+    child: &str,
+    retired: &DelegationAcceptanceEvaluation,
+) {
+    let seed = AcceptanceEvaluationTargetSeed {
+        work_ref: retired.work_ref.clone(),
+        mode: retired.mode,
+        acceptance_basis: retired.acceptance_basis,
+        evidence_basis: retired.evidence_basis + 1,
+        criteria_count: retired.criteria_count,
+        bindings: retired.bindings.clone(),
+        supersedes: retired.supersedes.clone(),
+        store: retired.store.clone().unwrap(),
+        source_fingerprint: None,
+        source_id: None,
+        source_root: retired.source_root.clone(),
+        source_claim: retired.source_claim.clone(),
+        work_id: None,
+        naming_history: retired.naming_history.clone(),
+        reuse_identity: None,
+        selected_evidence: retired.selected_evidence.clone(),
+    };
+    let prompt = acceptance_evaluation_attempt_prompt(
+        "Fresh criteria",
+        "next-attempt",
+        2,
+        Some(retired),
+        &seed,
+    );
+    assert!(
+        prompt.contains("Earlier local retirement:")
+            && !prompt.contains("Earlier confirmed refusal:")
+    );
+    for later_receipt in [false, true] {
+        if later_receipt {
+            update_evaluation_target(state, delegation, |target| {
+                let history = target.attempt_history.as_mut().unwrap();
+                history.previous.push(AcceptanceEvaluationPreviousAttempt {
+                    ordinal: 1,
+                    key: target.attempt_key.clone(),
+                    acceptance_basis: target.acceptance_basis,
+                    evidence_basis: target.evidence_basis,
+                    source_fingerprint: target.source_fingerprint.take(),
+                    source_id: None,
+                    submission: target.submission.clone(),
+                    refusal: history.refusal.take(),
+                });
+                target.submission = AcceptanceEvaluationSubmission::Recorded {
+                    receipt: AcceptanceEvaluationReceiptExtract {
+                        passed: Some(1),
+                        verdicts_total: Some(2),
+                        ..Default::default()
+                    },
+                    recorded_at: "later-receipt".to_owned(),
+                };
+            });
+        }
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_delegation_index(delegation).unwrap();
+            inner.delegations[index].status = DelegationStatus::Running;
+            inner.delegations[index].result = None;
+            if !later_receipt {
+                let record = inner.delegations[index].clone();
+                add_parent_delegation_card_locked(&mut inner, &record).unwrap();
+            }
+        }
+        super::super::delegation_support::finish_delegation_child_with_assistant_text(
+            state,
+            child,
+            "## Result\n\nStatus: completed\n\nSummary:\nALL CRITERIA PASS",
+        );
+        let result = state.get_delegation(parent, delegation).unwrap().delegation;
+        let summary = &result.result.as_ref().unwrap().summary;
+        assert!(
+            !summary.contains("nothing was recorded")
+                && !summary.contains("no submission recorded")
+        );
+        assert!(summary.contains(if later_receipt {
+            "earlier locally retired write outcome remains unknown"
+        } else {
+            "unconfirmed submission outcome"
+        }));
+        if later_receipt {
+            assert_eq!(result.status, DelegationStatus::Completed);
+            assert!(summary.contains("1 of 2 criteria passed"));
+        } else {
+            assert_eq!(result.status, DelegationStatus::Failed);
+        }
+        state.refresh_acceptance_evaluation_card(child);
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.delegations[inner.find_delegation_index(delegation).unwrap()];
+        for terminal in [false, true] {
+            let card = acceptance_card_detail(&inner, record, "diagnostic", terminal);
+            assert!(card.contains("write outcome") && card.contains("unknown"));
+            assert!(
+                !card.contains("nothing was recorded") && !card.contains("evaluating; no verdict")
+            );
+        }
+        let parent_record = &inner.sessions[inner.find_session_index(parent).unwrap()];
+        let card = parent_record
+            .session
+            .messages
+            .iter()
+            .rev()
+            .find_map(|message| {
+                if let Message::ParallelAgents { agents, .. } = message {
+                    agents
+                        .iter()
+                        .find(|agent| agent.id == delegation)
+                        .and_then(|agent| agent.detail.as_ref())
+                } else {
+                    None
+                }
+            })
+            .expect("the real parent card is present");
+        assert!(
+            card.contains("write outcome")
+                && card.contains("unknown")
+                && !card.contains("nothing was recorded")
+        );
+        let target = record.acceptance_evaluation.as_ref().unwrap();
+        let notice = acceptance_evaluation_open_write_notice_locked(
+            &inner,
+            target.store.as_ref().unwrap(),
+            &target.work_ref,
+            None,
+        )
+        .expect("a later request must retain the unknown-write notice");
+        assert!(notice.contains(delegation) && notice.contains("outcome unknown"));
+        assert!(
+            acceptance_evaluation_open_write_notice_locked(
+                &inner,
+                target.store.as_ref().unwrap(),
+                "w-other",
+                None
+            )
+            .is_none()
         );
     }
+    update_evaluation_target(state, delegation, |target| {
+        target.submission = AcceptanceEvaluationSubmission::None
+    });
+    {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.delegations[inner.find_delegation_index(delegation).unwrap()];
+        let card = acceptance_card_detail(&inner, record, "diagnostic", false);
+        assert!(
+            card.contains("evaluating; no verdict recorded yet")
+                && card.contains(ACCEPTANCE_EARLIER_RETIRED_WRITE_NOTICE)
+        );
+        let outcome =
+            acceptance_evaluation_outcome_line(record.acceptance_evaluation.as_ref().unwrap());
+        assert!(
+            outcome.contains("no verdict is recorded for the current attempt")
+                && outcome.contains(ACCEPTANCE_EARLIER_RETIRED_WRITE_NOTICE)
+        );
+        assert!(!outcome.contains("the retained write was retired locally"));
+    }
+    update_evaluation_target(state, delegation, |target| {
+        let mut refusal = retired
+            .attempt_history
+            .as_ref()
+            .unwrap()
+            .refusal
+            .clone()
+            .unwrap();
+        refusal.code = "acceptance_evaluation_refused".into();
+        refusal.message = "the current producer definitively refused this attempt".into();
+        target.attempt_history.as_mut().unwrap().refusal = Some(refusal);
+    });
+    let inner = state.inner.lock().unwrap();
+    let record = &inner.delegations[inner.find_delegation_index(delegation).unwrap()];
+    let card = acceptance_card_detail(&inner, record, "diagnostic", false);
+    assert!(
+        card.contains("the current attempt was refused")
+            && card.contains(ACCEPTANCE_EARLIER_RETIRED_WRITE_NOTICE)
+    );
+    assert!(
+        !card.contains("the retained write was retired locally")
+            && !card.contains("evaluating; no verdict")
+    );
+}
+
+#[test]
+fn next_evaluation_request_keeps_a_retired_previous_attempt_notice() {
+    let (state, project, parent, root) = fixture();
+    install_store(&state, &project, &root);
+    super::super::delegation_support::install_delegation_codex_runtime(
+        &state,
+        "retired-notice-runtime",
+    );
+    let (delegation, child) =
+        install_evaluator_delegation(&state, &parent, Some(&project), &root.to_string_lossy(), 2);
+    let (authority, target, model, in_flight) = state
+        .acceptance_evaluation_submit_context(&child, &two_verdicts())
+        .unwrap();
+    let mut args = acceptance_evaluation_cli_args(
+        &target.connection,
+        &authority.target,
+        &two_verdicts(),
+        model.as_deref(),
+    )
+    .unwrap();
+    args.push(format!(
+        "--source-fingerprint=git-commit:{}",
+        "a".repeat(40)
+    ));
+    let original = AcceptanceEvaluationOpenWrite {
+        source_payload: None,
+        verdicts_digest: acceptance_evaluation_payload_digest(&acceptance_evaluation_verdict_args(
+            &two_verdicts(),
+        )),
+        args,
+    };
+    update_evaluation_target(&state, &delegation, |target| {
+        target.submission = pending_with(&original.digest().unwrap(), original);
+    });
+    drop(in_flight);
+    let (calls, run) = scripted_runner(Vec::new());
+    assert!(
+        state
+            .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run)
+            .is_err()
+    );
+    assert!(calls.lock().unwrap().is_empty());
+    // The new receipt belongs to another attempt, and cannot confirm or undo
+    // the older write. Model the same persisted history that reuse retains.
+    update_evaluation_target(&state, &delegation, |target| {
+        let history = target.attempt_history.as_mut().unwrap();
+        history.previous.push(AcceptanceEvaluationPreviousAttempt {
+            ordinal: 1,
+            key: target.attempt_key.clone(),
+            acceptance_basis: target.acceptance_basis,
+            evidence_basis: target.evidence_basis,
+            source_fingerprint: None,
+            source_id: None,
+            submission: AcceptanceEvaluationSubmission::None,
+            refusal: history.refusal.take(),
+        });
+        target.submission = AcceptanceEvaluationSubmission::Recorded {
+            receipt: AcceptanceEvaluationReceiptExtract::default(),
+            recorded_at: "later".into(),
+        };
+    });
+    set_delegation_status(&state, &delegation, DelegationStatus::Completed);
+    let response =
+        spawn_request(&state, &parent).expect("a retired attempt does not block a new evaluation");
+    let wire = serde_json::to_value(&response).unwrap();
+    let notice = wire["notice"]
+        .as_str()
+        .expect("the request carries the unknown-write notice");
+    assert!(notice.contains(&delegation) && notice.contains("outcome unknown"));
+    assert!(compact_acceptance_evaluation_request_result(&wire)["notice"] == wire["notice"]);
 }
 
 #[test]

@@ -759,12 +759,17 @@ fn assert_judges_the_admitted_commit(
         &registration.run_id,
     )
     .expect("the run's record reads back");
-    let basis = engram_verification_record_basis(&frozen.body)
-        .expect("a committed-input record has a source basis");
+    assert!(
+        matches!(&frozen.body.input, EngramVerificationRecordInput::Commit { commit } if commit == head),
+        "the historical record keeps its original committed input"
+    );
     assert_eq!(
-        (basis.workspace_id.as_str(), basis.source_revision.as_str()),
-        (source_root.root.as_str(), judged.as_str()),
+        frozen.body.registration.root.workspace_id, source_root.root,
         "{case}: the run's verification record ran on the judged source"
+    );
+    assert!(
+        engram_verification_record_basis(&frozen.body).is_none(),
+        "reading a historical receipt must not create a legacy producer basis"
     );
 
     const ON_SOURCE: &str = "1111aaaa1111aaaa1111aaaa1111aaaa";
@@ -776,13 +781,14 @@ fn assert_judges_the_admitted_commit(
             "non_holder": false, "summary": "the gate passed",
             "verification": {
                 "check_kind": "test", "result": "passed",
-                "source_revision": revision, "source_workspace": basis.workspace_id,
+                "source_revision": revision, "source_workspace": frozen.body.registration.root.workspace_id,
             }
         })
     };
     let mut show = show_receipt(None);
     show["notes"] = json!([
-        record(ON_SOURCE, &basis.source_revision),
+        // Explicit historical tracker metadata, not a new outgoing observation.
+        record(ON_SOURCE, &judged),
         record(OFF_SOURCE, "content-v1:4983be8a"),
     ]);
     let mut task =

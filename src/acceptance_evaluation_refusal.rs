@@ -1,5 +1,6 @@
-// Confirmed no-record ownership. Unknown writes retain the original submission
-// ladder; a later refusal never establishes that an earlier send did not land.
+// Terminal attempt ownership. A later refusal cannot resolve an unknown send.
+// Local retirement ends retries while retaining the original unknown write;
+// it cannot manufacture a producer refusal or a submitted judgment.
 const MAX_ACCEPTANCE_REFUSED_SUBMISSIONS: usize = MAX_ACCEPTANCE_EVALUATOR_ATTEMPTS as usize * 2;
 
 /// A bounded requester view, not an Engram evaluation or an admission receipt.
@@ -82,6 +83,11 @@ impl AcceptanceEvaluationAttemptHistory {
         let mut missing = Vec::new();
         let mut keep =
             |key: &str, ordinal, acceptance_basis, evidence_basis, code: &str, message: &str| {
+                // A local retirement retains uncertainty in attempt history;
+                // it is not a producer refusal with a missing payload.
+                if code == ACCEPTANCE_LOCAL_RETIREMENT_CODE {
+                    return;
+                }
                 let mut entry =
                     AcceptanceEvaluationRefusedSubmission::new(target, Some(code), message);
                 entry.attempt_key = key.to_owned();
@@ -137,6 +143,34 @@ impl AcceptanceEvaluationAttemptHistory {
 }
 
 impl AppState {
+    /// All send paths retire stored revision declarations through this owner.
+    /// The history retains the exact unknown write, never a producer refusal.
+    fn retire_legacy_acceptance_submission(
+        &self,
+        authority: &AcceptanceEvaluationSubmitAuthority,
+    ) -> Result<(), ApiError> {
+        let original = match &authority.target.submission {
+            AcceptanceEvaluationSubmission::Pending { original, .. }
+            | AcceptanceEvaluationSubmission::Unconfirmed { original, .. } => original,
+            _ => return Ok(()),
+        };
+        if !original.args.iter().any(|arg| {
+            arg == "--source-fingerprint" || arg.starts_with("--source-fingerprint=")
+        }) {
+            return Ok(());
+        }
+        const RETIRED: &str = "The retained source-fingerprint submission is retired locally and will not be sent again. Any earlier tracker outcome remains unknown; finish and report this attempt, and read the tracker before requesting a new evaluation.";
+        self.record_acceptance_evaluation_disposition(
+            authority,
+            Some(ACCEPTANCE_LOCAL_RETIREMENT_CODE),
+            RETIRED,
+            original.clone(),
+            Vec::new(),
+            None,
+        )?;
+        Err(ApiError::conflict(RETIRED))
+    }
+
     /// Settles a confirmed refusal of this attempt. One that names citable
     /// alternatives, on an attempt that has not used its re-submission, is
     /// kept as that retry instead of as definitive, and `true` says so
@@ -173,6 +207,28 @@ impl AppState {
             entry.rationale = entry.rationale.trim().to_owned();
         }
         refused.judgment = AcceptanceEvaluationRefusedJudgment::Refused { verdicts };
+        self.record_acceptance_evaluation_disposition(
+            authority,
+            code,
+            message,
+            original,
+            alternatives,
+            Some(refused),
+        )
+    }
+
+    /// Persists the existing terminal-attempt state under its original fences.
+    /// Only a confirmed producer refusal supplies a refused judgment; local
+    /// retirement retains the unknown original without projecting a new one.
+    fn record_acceptance_evaluation_disposition(
+        &self,
+        authority: &AcceptanceEvaluationSubmitAuthority,
+        code: Option<&str>,
+        message: &str,
+        original: AcceptanceEvaluationOpenWrite,
+        alternatives: Vec<AcceptanceCitableAlternatives>,
+        refused: Option<AcceptanceEvaluationRefusedSubmission>,
+    ) -> Result<bool, ApiError> {
         let (written, dispatch, retry) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index =
@@ -202,19 +258,21 @@ impl AppState {
                         citation_retry: None,
                         refused_submissions: Vec::new(),
                     });
-            if history.refused_submissions.len() >= MAX_ACCEPTANCE_REFUSED_SUBMISSIONS
-                || history
-                    .refused_submissions
-                    .iter()
-                    .filter(|entry| entry.attempt_key == refused.attempt_key)
-                    .count()
-                    >= 2
-            {
-                return Err(ApiError::internal(
-                    "confirmed refusal cannot fit its retained submission history",
-                ));
+            if let Some(refused) = refused {
+                if history.refused_submissions.len() >= MAX_ACCEPTANCE_REFUSED_SUBMISSIONS
+                    || history
+                        .refused_submissions
+                        .iter()
+                        .filter(|entry| entry.attempt_key == refused.attempt_key)
+                        .count()
+                        >= 2
+                {
+                    return Err(ApiError::internal(
+                        "confirmed refusal cannot fit its retained submission history",
+                    ));
+                }
+                history.refused_submissions.push(refused);
             }
-            history.refused_submissions.push(refused);
             let retry = acceptance_citation_retry_allowed(history, code, &alternatives);
             if retry {
                 history.citation_retry = Some(AcceptanceEvaluationCitationRetry {
@@ -236,7 +294,7 @@ impl AppState {
                 .commit_locked_with_persist_dispatch(&mut inner)
                 .map_err(|e| {
                     ApiError::internal(format!(
-                        "confirmed refusal retained; its local acknowledgement is unknown: {e:#}"
+                        "terminal attempt disposition retained; its local acknowledgement is unknown: {e:#}"
                     ))
                 })?;
             (inner.delegations[index].clone(), dispatch, retry)
@@ -245,7 +303,7 @@ impl AppState {
             self.confirm_acceptance_evaluation_submission_durable(authority, &written)
                 .map_err(|e| {
                     ApiError::internal(format!(
-                        "confirmed refusal retained; its local acknowledgement is unknown: {e}"
+                        "terminal attempt disposition retained; its local acknowledgement is unknown: {e}"
                     ))
                 })?;
         }

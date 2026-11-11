@@ -150,14 +150,14 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
         );
     });
     let before = fixture.source_id_now(session, &fixture.root);
-    let (body, receipt) =
-        fixture.historical_registered_check(session, &fixture.root, "cargo test --offline");
+    let (body, receipt) = fixture.registered_check(session, &fixture.root, "cargo test --offline");
     assert_eq!(body.registration.binding, binding);
     assert_eq!(body.registration.root.generation, named.generation as i64);
     let stored = fixture.object(&receipt.verifications[0].record_id);
-    assert_eq!(
-        stored["source_basis"],
-        serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap()
+    assert!(
+        stored["source_basis"]
+            == serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap(),
+        "the recovered root's record retains the complete registered source basis"
     );
     assert_eq!(stored["check_kind"], "test");
     finish_live_root(&fixture.live.state, session);
@@ -169,10 +169,8 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
     let shown = fixture.work(session, &["show", work, "--json"]);
     let acceptance = shown["acceptance_basis"].as_i64().unwrap().to_string();
     let evidence = shown["evidence_basis"].as_i64().unwrap().to_string();
-    let EngramVerificationRecordInput::Commit { commit } = &body.input else {
-        panic!("historical evaluation witness requires its retained Commit record");
-    };
-    let judged = acceptance_committed_judged_revision(commit);
+    let declaration = fixture.checked_source_file(&body);
+    let judged = declaration.path().to_str().unwrap();
     fixture.work(
         session,
         &[
@@ -190,7 +188,7 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
             "1=Real registered check in a prospectively confirmed legacy root passed",
             "--evidence",
             &format!("1={}", receipt.verifications[0].record_id),
-            "--source-fingerprint",
+            "--source-id-file",
             &judged,
             "--attempt",
             "legacy-forward-completion",
@@ -203,7 +201,7 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
             "done",
             work,
             "Prospective root check passed",
-            "--source-fingerprint",
+            "--source-id-file",
             &judged,
             "--json",
         ],

@@ -80,25 +80,13 @@ pub(super) fn run_check(
     EngramVerificationRecordBody,
     EngramVerificationRecordReceipt,
 ) {
-    run_check_in_lane(fixture, session, root, false)
-}
-
-pub(super) fn run_historical_check(
-    fixture: &CompletionFixture,
-    session: &str,
-    root: &FsPath,
-) -> (
-    EngramVerificationRecordBody,
-    EngramVerificationRecordReceipt,
-) {
-    run_check_in_lane(fixture, session, root, true)
+    run_check_in_lane(fixture, session, root)
 }
 
 fn run_check_in_lane(
     fixture: &CompletionFixture,
     session: &str,
     root: &FsPath,
-    historical: bool,
 ) -> (
     EngramVerificationRecordBody,
     EngramVerificationRecordReceipt,
@@ -216,11 +204,7 @@ fn run_check_in_lane(
         1,
         "original provider locator owns one row"
     );
-    let prepared = if historical {
-        CompletionFixture::prepare_historical_record(&registration)
-    } else {
-        engram_verification_record_prepare(&registration)
-    };
+    let prepared = engram_verification_record_prepare(&registration);
     let EngramVerificationRecordPrepared::Ready(frozen) = prepared else {
         panic!("actual committed-input run must prepare native evidence");
     };
@@ -364,7 +348,7 @@ fn a_real_edit_after_the_registered_launcher_check_is_still_refused() {
         session,
         "Check current content, then make a real source edit.",
     );
-    let (body, receipt) = run_historical_check(&fixture, session, &fixture.root);
+    let (body, receipt) = run_check(&fixture, session, &fixture.root);
     let original_check = fixture.object(&receipt.verifications[0].record_id);
     let before = fixture.source_id_now(session, &fixture.root);
     fs::write(
@@ -373,12 +357,12 @@ fn a_real_edit_after_the_registered_launcher_check_is_still_refused() {
     )
     .unwrap();
     assert!(fixture.source_id_now(session, &fixture.root) != before);
-    let EngramVerificationRecordInput::Commit { commit } = &body.input else {
+    let EngramVerificationRecordInput::SourceId { source_id } = &body.input else {
         panic!("registered Git input required");
     };
     assert_eq!(
         run_git_test_command_output(&fixture.root, &["rev-parse", "HEAD"]).trim(),
-        commit
+        source_id.commit
     );
     assert!(!run_git_test_command_output(&fixture.root, &["status", "--porcelain"]).is_empty());
     finish_live_root(&fixture.live.state, session);
@@ -396,7 +380,8 @@ fn a_real_edit_after_the_registered_launcher_check_is_still_refused() {
     let shown = fixture.work(session, &["show", work, "--json"]);
     let acceptance = shown["acceptance_basis"].as_i64().unwrap().to_string();
     let evidence = shown["evidence_basis"].as_i64().unwrap().to_string();
-    let judged = acceptance_committed_judged_revision(commit);
+    let declaration = fixture.checked_source_file(&body);
+    let judged = declaration.path().to_str().unwrap();
     let output = fixture.command_output(
         session,
         &[
@@ -414,7 +399,7 @@ fn a_real_edit_after_the_registered_launcher_check_is_still_refused() {
             "1=The registered input was checked before the edit",
             "--evidence",
             &format!("1={}", receipt.verifications[0].record_id),
-            "--source-fingerprint",
+            "--source-id-file",
             &judged,
             "--attempt",
             "edited-after-check",
@@ -431,10 +416,7 @@ fn a_real_edit_after_the_registered_launcher_check_is_still_refused() {
     assert_eq!(refusal["error"]["code"], "work_completion_refused");
     assert_eq!(
         refusal["error"]["details"]["reason"],
-        format!(
-            "registered root {} is dirty; commit or revert the changes and run a check on the intended commit",
-            body.registration.root.workspace_id
-        )
+        "the named root's full source_id changed since the registered check; run a check on the current source state"
     );
     assert!(
         fixture.object(&receipt.verifications[0].record_id) == original_check,
@@ -448,13 +430,11 @@ fn a_real_edit_after_the_registered_launcher_check_is_still_refused() {
         &["commit", "--quiet", "-m", "fixture intended edit"],
     );
     fixture.begin(session, "Check the intended revision in a later work turn.");
-    let (later, receipt) = run_historical_check(&fixture, session, &fixture.root);
+    let (later, receipt) = run_check(&fixture, session, &fixture.root);
     finish_live_root(&fixture.live.state, session);
     fixture.wait_for_reports(session);
-    let EngramVerificationRecordInput::Commit { commit } = &later.input else {
-        panic!("later registered Git input required");
-    };
-    let judged = acceptance_committed_judged_revision(commit);
+    let declaration = fixture.checked_source_file(&later);
+    let judged = declaration.path().to_str().unwrap();
     let shown = fixture.work(session, &["show", work, "--json"]);
     let acceptance = shown["acceptance_basis"].as_i64().unwrap().to_string();
     let evidence = shown["evidence_basis"].as_i64().unwrap().to_string();
@@ -475,18 +455,19 @@ fn a_real_edit_after_the_registered_launcher_check_is_still_refused() {
             "1=A later registered check followed the recorded source edit",
             "--evidence",
             &format!("1={}", receipt.verifications[0].record_id),
-            "--source-fingerprint",
+            "--source-id-file",
             &judged,
             "--attempt",
             "later-clean-check",
             "--json",
         ],
     );
-    eprintln!(
-        "PINNED_LAUNCHER_LATER_CHECK {}",
-        json!({
-            "evaluation": evaluated, "receipt": receipt, "judged_revision": judged,
-            "previous_refusal": refusal["error"]["code"],
-        })
+    assert_eq!(
+        evaluated["evaluation"]["passed"], 1,
+        "later checked source passes"
     );
+    let EngramVerificationRecordInput::SourceId { source_id } = &later.input else {
+        panic!("the later registered check retains its current source identity");
+    };
+    fixture.assert_evaluation_source(&evaluated, source_id);
 }

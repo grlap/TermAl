@@ -263,7 +263,7 @@ fn clean_commit_projection_refuses_equal_dirty_root_or_child_owner_values() {
 }
 
 #[test]
-fn historical_frozen_commit_records_replay_their_original_bytes() {
+fn historical_frozen_commit_records_are_readable_but_never_resent() {
     let fixture = RunFixture::new("source-record-historical");
     let (request, results) = source_artifacts(&fixture.root);
     let run = record_run(&fixture, "test-source-historical", request.clone(), results);
@@ -292,11 +292,39 @@ fn historical_frozen_commit_records_replay_their_original_bytes() {
         fs::read_to_string(&path).unwrap() == text,
         "the retained body bytes are unchanged"
     );
-    let basis = engram_verification_record_basis(&frozen.body).unwrap();
-    assert!(basis.source_id.is_none());
-    assert_eq!(basis.source_revision, format!("git-commit:{COMMIT}"));
-    let mut historical = basis;
-    historical.source_revision = "content-v1:retained-historical-value".into();
+    assert!(engram_verification_record_basis(&frozen.body).is_none());
+    assert!(
+        engram_verification_record_producers(&run.registration.run_id, &frozen.body).is_empty()
+    );
+    // No live connection is needed to settle local retirement. The original
+    // body stays readable and is never replaced with a current identity.
+    let step =
+        engram_verification_record_send(frozen, Err(EngramVerificationRecordPending::NoConnection));
+    assert!(
+        matches!(&step, EngramVerificationRecordStep::Rejected(detail)
+        if detail.starts_with("legacy_source_input_retired:"))
+    );
+    register(&fixture, &[&run]);
+    fixture
+        .state
+        .note_engram_verification_record_step(&run.registration, &step);
+    assert!(matches!(
+        current(&fixture, &run).verification_record,
+        Some(TestRunVerificationAck::Rejected { .. })
+    ));
+    assert!(matches!(
+        engram_verification_record_prepare(&current(&fixture, &run)),
+        EngramVerificationRecordPrepared::Finished
+    ));
+    assert!(
+        fs::read_to_string(&path).unwrap() == text,
+        "retirement changed stored body bytes"
+    );
+    let historical: EngramExecutionSourceBasis = serde_json::from_value(json!({
+        "workspace_id":"fixture-workspace",
+        "source_revision":"content-v1:retained-historical-value"
+    }))
+    .unwrap();
     let stored = serde_json::to_value(&historical).unwrap();
     let restored: EngramExecutionSourceBasis = serde_json::from_value(stored.clone()).unwrap();
     assert!(

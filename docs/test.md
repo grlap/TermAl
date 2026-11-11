@@ -1115,6 +1115,12 @@ have Engram's 8192 UTF-8 byte limit; a longer command is reported as
 `verification_command_too_long`, with its field and byte count. Commands and
 their fingerprints are preserved, and a terminal refusal is not resent.
 
+Retained Commit-format verification bodies are retired locally before any
+route read or send, with `legacy_source_input_retired`. Their original bytes remain readable;
+the local disposition does not determine any earlier producer outcome. Existing
+receipts remain readable without converting the body to a current identity or
+creating new legacy producer observations.
+
 A committed-input registration in a named root reads that exact claim's
 current held association before it publishes the registration. A same-claim
 handoff can retain the original name: the current holder's held read must prove

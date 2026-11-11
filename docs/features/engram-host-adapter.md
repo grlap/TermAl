@@ -2761,8 +2761,16 @@ tracker replays an identical resend (its receipt says `replayed: true`) and
 refuses different content once an evaluation is recorded. The command is also
 bounded as a whole: an argument list past the conservative Windows command-line
 limit is a `400` before anything runs.
-Historical attempts retain `--source-fingerprint` and their original digest;
-the two declaration forms are exclusive.
+Historical attempts retain `--source-fingerprint` and their original digest
+for inspection. An open historical fingerprint submission is retired locally
+before execution in both child submission and parent replay, retaining its
+exact original write and an explicit warning
+that any earlier tracker outcome remains unknown. It is not resent or
+converted to a current identity, and no confirmed refused judgment is invented.
+Parent results, evaluator cards and later request notices keep that unknown
+outcome visible, including when a later attempt records its own receipt.
+An already recorded receipt remains readable. Fresh commands never emit the
+historical flag; the two stored declaration forms remain exclusive.
 
 **One outcome model.** The tracker's write and the host's record of it can come
 apart (a lost response, a failed persist), so the target carries an explicit
@@ -2771,7 +2779,7 @@ silence:
 
 | State | Meaning | How it is entered |
 | --- | --- | --- |
-| absent (`none`) | nothing is recorded by this evaluator | initially; and, only for the request that itself entered from `none`, after a first send with positive evidence that it recorded nothing: a tracker refusal (below), a store that stayed locked, or a tracker process that never started |
+| absent (`none`) | no active host submission; inspect terminal attempt history too | initially; after a confirmed no-write first send; or after local retirement of a historical fingerprint write. Local retirement retains the unknown original in attempt history and blocks this attempt from sending again; it does not prove that the tracker recorded nothing |
 | `pending` | a write was started and its outcome is not yet known | set with the original command and payload digest, and acknowledged durable *before* the tracker runs; shared-source attempts also retain the complete private identity and immutable file locator |
 | `recorded` | the tracker holds the evaluation | a success receipt, acknowledged durable before the success answer. The record keeps a bounded extract (`evaluationId`, `mode`, `passed`, `verdictsTotal`, `blocking`, `replayed`, `workRevision`, `evaluatedCut`), never the raw receipt, which can be a whole control frame; the child's answer carries the raw receipt, cut to 16 KiB on a character boundary with `receiptTruncated: true` when it is larger |
 | `unconfirmed` | the host could not learn whether the write landed | see below; its `reason` leads with the latest thing learned |

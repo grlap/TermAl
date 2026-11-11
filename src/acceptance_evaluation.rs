@@ -2534,11 +2534,8 @@ fn acceptance_evaluation_cli_args(
         }
     }
     args.extend(acceptance_evaluation_verdict_args(&recorded_request));
-    // Host-measured, never the evaluator's: a later source change to this
-    // revision leaves the evaluation fresh. No workspace is declared, so a
-    // peer worktree holding the same content matches too. The flag came into
-    // Engram's `evaluate` with `--evidence-basis` (Engram 45b0f9e), which this
-    // list always passes, so no binary that takes the rest refuses it.
+    // Fresh declarations use only the host-owned SourceId file. A retained
+    // legacy fingerprint is historical metadata, never a new CLI argument.
     if target.source_id.is_some() && target.source_fingerprint.is_some() {
         return Err(ApiError::conflict("evaluation target has more than one source identity"));
     }
@@ -2549,8 +2546,6 @@ fn acceptance_evaluation_cli_args(
         // This is a canonical argument template. The persisted source payload
         // publishes the actual immutable file only at the subprocess boundary.
         args.extend(["--source-id-file".to_owned(), "<host-private-source-id>".to_owned()]);
-    } else if let Some(fingerprint) = target.source_fingerprint.as_ref() {
-        args.extend(["--source-fingerprint".to_owned(), fingerprint.clone()]);
     }
     // The carried failure the evaluation acknowledges, read with the brief.
     // Checked again here, whatever wrote the record: a value that is not a
@@ -2850,7 +2845,17 @@ fn acceptance_evaluation_outcome_line(evaluation: &DelegationAcceptanceEvaluatio
         acceptance_brief_text(&evaluation.work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
         evaluation.mode.word()
     );
-    match &evaluation.submission {
+    let outcome = match &evaluation.submission {
+        AcceptanceEvaluationSubmission::None if acceptance_evaluation_current_write_retired(evaluation) => {
+            format!("{subject}: {ACCEPTANCE_EVALUATION_UNKNOWN_OUTCOME_TEXT}; the retained write was retired locally and will not be resent.")
+        }
+        AcceptanceEvaluationSubmission::None if acceptance_evaluation_has_retired_write(evaluation) => {
+            if let Some(refusal) = evaluation.attempt_history.as_ref().and_then(|history| history.refusal.as_ref()) {
+                format!("{subject}: the current attempt was refused: {}.", acceptance_brief_text(&refusal.message, MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS))
+            } else {
+                format!("{subject}: no verdict is recorded for the current attempt.")
+            }
+        }
         AcceptanceEvaluationSubmission::None => format!(
             "{subject}: nothing was recorded; the tracker has no verdict from this evaluator."
         ),
@@ -2870,6 +2875,12 @@ fn acceptance_evaluation_outcome_line(evaluation: &DelegationAcceptanceEvaluatio
             "{subject}: recorded at {recorded_at}{}. Read the task in the tracker for the verdicts.",
             acceptance_evaluation_receipt_summary(receipt)
         ),
+    };
+    if acceptance_evaluation_has_retired_write(evaluation)
+        && !acceptance_evaluation_current_write_retired(evaluation) {
+        format!("{outcome} {ACCEPTANCE_EARLIER_RETIRED_WRITE_NOTICE}")
+    } else {
+        outcome
     }
 }
 

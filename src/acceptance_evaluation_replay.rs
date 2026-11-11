@@ -214,6 +214,8 @@ impl AppState {
                 authority, target, written, digest, original, earlier, flight,
             )
         };
+        self.retire_legacy_acceptance_submission(&authority)
+            .map_err(acceptance_replay_durability_error)?;
         validate_work_read_target(&target)?;
         self.confirm_acceptance_evaluation_submission_durable_classified(&authority, &written)
             .map_err(acceptance_replay_durability_error)?;

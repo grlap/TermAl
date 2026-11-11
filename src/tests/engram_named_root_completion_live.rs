@@ -296,17 +296,6 @@ impl CompletionFixture {
         command: &str,
         observe: bool,
     ) -> (TestRunRegistration, EngramVerificationRecordFrozen) {
-        self.prepare_registered_check_in_lane(session, root, command, observe, false)
-    }
-
-    fn prepare_registered_check_in_lane(
-        &self,
-        session: &str,
-        root: &FsPath,
-        command: &str,
-        observe: bool,
-        historical: bool,
-    ) -> (TestRunRegistration, EngramVerificationRecordFrozen) {
         let argv = engram_shell_words(command).unwrap();
         assert_eq!(argv.first().map(String::as_str), Some("cargo"));
         let clean_before = run_git_test_command_output(root, &["status", "--porcelain"]).is_empty();
@@ -459,59 +448,51 @@ impl CompletionFixture {
                 .unwrap();
             self.wait_for_check_capture(session);
         }
-        let prepared = if historical {
-            Self::prepare_historical_record(&registration)
-        } else {
+        let EngramVerificationRecordPrepared::Ready(frozen) =
             engram_verification_record_prepare(&registration)
-        };
-        let EngramVerificationRecordPrepared::Ready(frozen) = prepared else {
+        else {
             panic!("the real registered artifact must produce a native verification body");
         };
-        if !historical {
-            assert!(
-                matches!(&frozen.body.input, EngramVerificationRecordInput::SourceId { source_id }
-                if source_id == &source_before)
-            );
-            assert!(
-                matches!(&frozen.body.post_run, EngramVerificationRecordPostRun::SourceId(post_run)
-                if post_run.source_id == source_after)
-            );
-        }
+        assert!(
+            matches!(&frozen.body.input, EngramVerificationRecordInput::SourceId { source_id } if source_id == &source_before)
+        );
+        assert!(
+            matches!(&frozen.body.post_run, EngramVerificationRecordPostRun::SourceId(post_run) if post_run.source_id == source_after)
+        );
         (registration, frozen)
     }
 
-    // Explicit retained-record witness for the installed commit-only
-    // evaluation wire. This models the earlier producer before its first
-    // receipt; it is never selected as a fallback for a new record.
-    fn prepare_historical_record(
-        registration: &TestRunRegistration,
-    ) -> EngramVerificationRecordPrepared {
-        let directory = FsPath::new(&registration.run_directory);
-        let read = |file: &str| -> Value {
-            serde_json::from_slice(&fs::read(directory.join(file)).unwrap()).unwrap()
+    fn checked_source_file(&self, body: &EngramVerificationRecordBody) -> AcceptanceSourceFile {
+        let EngramVerificationRecordInput::SourceId { source_id } = &body.input else {
+            panic!("live checks require the current complete source identity");
         };
-        let request = read("request.json");
-        let results = read("results.json");
-        let input = TestRunCommittedInput::read(&results).unwrap();
-        let historical = EngramVerificationRecordInput::Commit {
-            commit: input.commit.unwrap(),
-        };
-        let body = engram_verification_record_build_body(
-            registration,
-            &request,
-            &results,
-            Some(&historical),
-        )
-        .unwrap();
-        fs::write(
-            directory.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE),
-            engram_verification_record_text(&body).unwrap(),
-        )
-        .unwrap();
-        engram_verification_record_prepare(registration)
+        AcceptanceSourcePayload {
+            source_id: source_id.clone(),
+            source_file: None,
+        }
+        .publish(&self.home.join("completion-sources"))
+        .expect("the immutable checked identity is published outside the named source")
     }
 
-    fn historical_registered_check(
+    fn assert_evaluation_source(&self, receipt: &Value, expected: &EngramSourceId) {
+        // The receipt exposes a bounded summary; the immutable record retains
+        // the complete identity. Read only this fixture's disposable store.
+        let id = receipt["evaluation"]["evaluation"]
+            .as_str()
+            .expect("the producer returns its evaluation record id");
+        let record = self.object(id);
+        let basis: AcceptanceSourceBasis = serde_json::from_value(record["source_basis"].clone())
+            .expect("the stored evaluation retains its typed source basis");
+        let AcceptanceSourceBasis::Shared(basis) = basis else {
+            panic!("a current evaluation must retain a shared source identity");
+        };
+        assert!(
+            &basis.source_id == expected,
+            "evaluation retains the complete checked source"
+        );
+    }
+
+    fn registered_check(
         &self,
         session: &str,
         root: &FsPath,
@@ -520,8 +501,7 @@ impl CompletionFixture {
         EngramVerificationRecordBody,
         EngramVerificationRecordReceipt,
     ) {
-        let (registration, frozen) =
-            self.prepare_registered_check_in_lane(session, root, command, true, true);
+        let (registration, frozen) = self.prepare_registered_check(session, root, command, true);
         self.record_registered_check(registration, frozen)
     }
 
@@ -990,7 +970,7 @@ fn recovered_claim_check_in_a_newly_named_root_completes_without_an_edit() {
             .host_turn_ref
             .clone()
     });
-    let (body, receipt) = registered_launcher::run_historical_check(&fixture, &second, &worktree);
+    let (body, receipt) = registered_launcher::run_check(&fixture, &second, &worktree);
     assert_eq!(body.registration.binding, recovered);
     assert_eq!(body.registration.root.generation, named.generation as i64);
     let stored = fixture.object(&receipt.verifications[0].record_id);
@@ -1029,10 +1009,8 @@ fn recovered_claim_check_in_a_newly_named_root_completes_without_an_edit() {
     let shown = fixture.work(&second, &["show", work, "--json"]);
     let acceptance = shown["acceptance_basis"].as_i64().unwrap().to_string();
     let evidence = shown["evidence_basis"].as_i64().unwrap().to_string();
-    let EngramVerificationRecordInput::Commit { commit } = &body.input else {
-        panic!("historical evaluation witness requires its retained Commit record");
-    };
-    let judged = acceptance_committed_judged_revision(commit);
+    let declaration = fixture.checked_source_file(&body);
+    let judged = declaration.path().to_str().unwrap();
     let verification = &receipt.verifications[0].record_id;
     fixture.work(
         &second,
@@ -1051,7 +1029,7 @@ fn recovered_claim_check_in_a_newly_named_root_completes_without_an_edit() {
             "1=Real registered test in the recovered named root passed without an edit",
             "--evidence",
             &format!("1={verification}"),
-            "--source-fingerprint",
+            "--source-id-file",
             &judged,
             "--attempt",
             "named-completion",
@@ -1099,7 +1077,7 @@ fn recovered_claim_check_in_a_newly_named_root_completes_without_an_edit() {
             "done",
             work,
             "Named-root registered check passed without an edit",
-            "--source-fingerprint",
+            "--source-id-file",
             &judged,
             "--json",
         ],

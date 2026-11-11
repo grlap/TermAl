@@ -412,7 +412,9 @@ enum TestRunVerificationAck {
         #[serde(default)]
         body_digest: String,
     },
-    /// The host saw Engram refuse the record, or answer it unreadably.
+    /// The host saw Engram refuse the record, answer it unreadably, or locally
+    /// retired an unsent legacy input. The detail distinguishes these cases;
+    /// local retirement says nothing about an earlier producer outcome.
     Rejected { detail: String },
 }
 
@@ -1550,13 +1552,33 @@ fn engram_verification_record_prepare(registration: &TestRunRegistration) -> Eng
     })
 }
 
-/// Sends `frozen` on `link` when its connection supports the operation, and
-/// records what came of it beside the run. Without the capability, or
-/// without a link, nothing is sent and the run stays pending with its reason.
+/// A purely local disposition shared by direct sends and the retry tick. The
+/// tick checks it before resolving a route; held receipts bypass it entirely.
+fn engram_verification_record_retire_legacy(
+    frozen: &EngramVerificationRecordFrozen,
+) -> Option<EngramVerificationRecordStep> {
+    if !matches!(frozen.body.input, EngramVerificationRecordInput::Commit { .. }) {
+        return None;
+    }
+    let detail = "legacy_source_input_retired: retained commit input is not sent; any earlier producer outcome is unchanged".to_owned();
+    eprintln!("engram> run={} verification record not settled: {detail}", frozen.run_id);
+    engram_verification_record_set_progress(
+        &frozen.run_dir,
+        &frozen.run_id,
+        EngramVerificationRecordProgress::Rejected { detail: detail.clone() },
+    );
+    Some(EngramVerificationRecordStep::Rejected(detail))
+}
+
+/// Sends current input when its connection supports the operation. Retired
+/// input rejects locally; missing capability/link leaves current input pending.
 fn engram_verification_record_send(
     frozen: EngramVerificationRecordFrozen,
     link: std::result::Result<EngramVerificationRecordLink<'_>, EngramVerificationRecordPending>,
 ) -> EngramVerificationRecordStep {
+    if let Some(retired) = engram_verification_record_retire_legacy(&frozen) {
+        return retired;
+    }
     let pending = |reason: EngramVerificationRecordPending| {
         engram_verification_record_set_progress(
             &frozen.run_dir,
@@ -1564,6 +1586,15 @@ fn engram_verification_record_send(
             EngramVerificationRecordProgress::Pending { reason: reason.clone() },
         );
         EngramVerificationRecordStep::Pending(reason)
+    };
+    let rejected = |detail: String| {
+        eprintln!("engram> run={} verification record not settled: {detail}", frozen.run_id);
+        engram_verification_record_set_progress(
+            &frozen.run_dir,
+            &frozen.run_id,
+            EngramVerificationRecordProgress::Rejected { detail: detail.clone() },
+        );
+        EngramVerificationRecordStep::Rejected(detail)
     };
     let link = match link {
         Ok(link) => link,
@@ -1575,15 +1606,6 @@ fn engram_verification_record_send(
     if !support.is_supported() {
         return pending(EngramVerificationRecordPending::CapabilityUnsupported { support });
     }
-    let rejected = |detail: String| {
-        eprintln!("engram> run={} verification record not settled: {detail}", frozen.run_id);
-        engram_verification_record_set_progress(
-            &frozen.run_dir,
-            &frozen.run_id,
-            EngramVerificationRecordProgress::Rejected { detail: detail.clone() },
-        );
-        EngramVerificationRecordStep::Rejected(detail)
-    };
     // Engram validates both command labels before association. Refuse the
     // original command explicitly rather than changing its text/fingerprint.
     const COMMAND_LIMIT: usize = 8192;
@@ -1659,14 +1681,14 @@ fn engram_verification_record_send(
 }
 
 /// The source basis of a run's checks in its original named root. Current
-/// records retain the complete owner value; historical commit records stay
-/// in their stored format. Staged inputs still supply no producer basis.
+/// records retain the complete owner value. Historical commit records remain
+/// readable, but cannot create new producer observations. Staged inputs also
+/// supply no producer basis.
 fn engram_verification_record_basis(body: &EngramVerificationRecordBody) -> Option<EngramExecutionSourceBasis> {
     let (source_id, source_revision) = match &body.input {
         EngramVerificationRecordInput::SourceId { source_id } => (Some(source_id.clone()), String::new()),
-        EngramVerificationRecordInput::Commit { commit } =>
-            (None, format!("{COMMITTED_SOURCE_REVISION_SCHEME}:{commit}")),
-        EngramVerificationRecordInput::StagedTree { .. } => return None,
+        EngramVerificationRecordInput::Commit { .. }
+        | EngramVerificationRecordInput::StagedTree { .. } => return None,
     };
     Some(EngramExecutionSourceBasis {
         source_id,
@@ -1851,11 +1873,15 @@ impl AppState {
             };
             let done = match engram_verification_record_prepare(&registration) {
                 EngramVerificationRecordPrepared::Ready(frozen) => {
-                    let route = self.engram_verification_record_route_until(&registration, deadline);
-                    let step = engram_verification_record_send(
-                        frozen,
-                        route.as_ref().map(EngramVerificationRecordRoute::link).map_err(Clone::clone),
-                    );
+                    let step = if let Some(retired) = engram_verification_record_retire_legacy(&frozen) {
+                        retired
+                    } else {
+                        let route = self.engram_verification_record_route_until(&registration, deadline);
+                        engram_verification_record_send(
+                            frozen,
+                            route.as_ref().map(EngramVerificationRecordRoute::link).map_err(Clone::clone),
+                        )
+                    };
                     self.note_engram_verification_record_step(&registration, &step);
                     match step {
                         EngramVerificationRecordStep::Received { body, receipt } => settled(

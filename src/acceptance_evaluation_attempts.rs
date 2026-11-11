@@ -1,6 +1,29 @@
 // Durable evaluator-attempt ownership. Reuses the existing request preparation
 // and submission fences; it does not infer tracker standing from host bindings.
 const MAX_ACCEPTANCE_EVALUATOR_ATTEMPTS: u8 = 3;
+const ACCEPTANCE_LOCAL_RETIREMENT_CODE: &str = "legacy_source_input_retired";
+const ACCEPTANCE_EARLIER_RETIRED_WRITE_NOTICE: &str = "An earlier locally retired write outcome remains unknown: the tracker may hold its verdict; read the task before relying on this evaluation alone.";
+
+fn acceptance_evaluation_current_write_retired(target: &DelegationAcceptanceEvaluation) -> bool {
+    target.attempt_history.as_ref().and_then(|history| history.refusal.as_ref())
+        .is_some_and(|refusal| refusal.code == ACCEPTANCE_LOCAL_RETIREMENT_CODE)
+}
+
+/// Retiring a replay ends local retry ownership, never uncertainty about the
+/// original tracker write. A later attempt/receipt cannot settle that write.
+fn acceptance_evaluation_has_retired_write(target: &DelegationAcceptanceEvaluation) -> bool {
+    target.attempt_history.as_ref().is_some_and(|history| {
+        history.refusal.iter()
+            .chain(history.previous.iter().filter_map(|attempt| attempt.refusal.as_ref()))
+            .any(|refusal| refusal.code == ACCEPTANCE_LOCAL_RETIREMENT_CODE)
+    })
+}
+
+fn acceptance_evaluation_has_unknown_write(target: &DelegationAcceptanceEvaluation) -> bool {
+    matches!(target.submission, AcceptanceEvaluationSubmission::Pending { .. }
+        | AcceptanceEvaluationSubmission::Unconfirmed { .. })
+        || acceptance_evaluation_has_retired_write(target)
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +98,8 @@ impl TryFrom<PersistedAcceptanceEvaluationPreviousAttempt> for AcceptanceEvaluat
     }
 }
 
+// A terminal attempt disposition. Local legacy retirement keeps an unknown
+// original write here; its code/message do not claim a producer refusal.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AcceptanceEvaluationDefinitiveRefusal {
@@ -125,11 +150,19 @@ fn acceptance_evaluation_attempt_prompt(
             .as_ref()
             .and_then(|h| h.refusal.as_ref())
         {
+            let disposition = if refusal.code == ACCEPTANCE_LOCAL_RETIREMENT_CODE {
+                "Earlier local retirement"
+            } else {
+                "Earlier confirmed refusal"
+            };
             header.push_str(&format!(
-                "Earlier confirmed refusal: {}: {}\n",
+                "{disposition}: {}: {}\n",
                 acceptance_brief_text(&refusal.code, 96),
                 acceptance_brief_text(&refusal.message, 512)
             ));
+        }
+        if acceptance_evaluation_has_retired_write(previous) {
+            header.push_str("An earlier locally retired write outcome remains unknown: the tracker may already hold its verdict. Read the task before relying on this evaluation alone.\n");
         }
     }
     format!("{header}\n{prompt}")

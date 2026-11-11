@@ -1,7 +1,7 @@
 //! Real native Build/Test records through registered verification and a pinned disposable store.
 use super::*;
 
-fn build_evaluation_args(work: &str, shown: &Value, id: &str, revision: &str) -> Vec<String> {
+fn build_evaluation_args(work: &str, shown: &Value, id: &str, source_file: &str) -> Vec<String> {
     vec![
         "evaluate".into(),
         work.into(),
@@ -17,8 +17,8 @@ fn build_evaluation_args(work: &str, shown: &Value, id: &str, revision: &str) ->
         "1=The actual host-observed command supplies this criterion's evidence".into(),
         "--evidence".into(),
         format!("1={id}"),
-        "--source-fingerprint".into(),
-        acceptance_committed_judged_revision(revision),
+        "--source-id-file".into(),
+        source_file.to_owned(),
         "--attempt".into(),
         format!("build-admission-{id}"),
         "--json".into(),
@@ -179,7 +179,7 @@ fn engram_build_live_producer_admits_actual_build_and_refuses_failed_or_test_onl
         let source = fixture.source_id_now(session, &fixture.root);
         fixture.begin(session, "Run the actual Cargo build.");
         let (body, receipt) =
-            fixture.historical_registered_check(session, &fixture.root, "cargo build --offline");
+            fixture.registered_check(session, &fixture.root, "cargo build --offline");
         let id = &receipt.verifications[0].record_id;
         let stored = fixture.object(id);
         assert_eq!(stored["check_kind"], "build", "<stored withheld>");
@@ -187,9 +187,10 @@ fn engram_build_live_producer_admits_actual_build_and_refuses_failed_or_test_onl
             stored["source_basis"]["source_root_generation"], named.generation,
             "<stored withheld>"
         );
-        assert_eq!(
-            stored["source_basis"],
-            serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap()
+        assert!(
+            stored["source_basis"]
+                == serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap(),
+            "the Build record retains the complete registered source basis"
         );
         assert_eq!(
             newest_build_record(
@@ -200,11 +201,10 @@ fn engram_build_live_producer_admits_actual_build_and_refuses_failed_or_test_onl
             ),
             *id
         );
-        let EngramVerificationRecordInput::Commit { commit: revision } = &body.input else {
-            panic!("historical evaluation witness requires its retained Commit record");
-        };
+        let declaration = fixture.checked_source_file(&body);
+        let source_file = declaration.path().to_str().unwrap();
         let shown = fixture.work(session, &["show", work, "--json"]);
-        let args = build_evaluation_args(work, &shown, id, revision);
+        let args = build_evaluation_args(work, &shown, id, source_file);
         if fails {
             rejected_build_evaluation(
                 &fixture,
@@ -220,10 +220,7 @@ fn engram_build_live_producer_admits_actual_build_and_refuses_failed_or_test_onl
             assert_eq!(evaluated["evaluation"]["passed"], 1, "<evaluated withheld>");
             assert_eq!(evaluated["evaluation"]["verdicts_total"], 1);
             assert_eq!(evaluated["evaluation"]["verdicts_omitted"], 0);
-            assert_eq!(
-                evaluated["evaluation"]["source_fingerprint"],
-                acceptance_committed_judged_revision(revision)
-            );
+            fixture.assert_evaluation_source(&evaluated, &source);
             let verdicts = evaluated["evaluation"]["verdicts"].as_array().unwrap();
             assert_eq!(verdicts.len(), 1);
             assert_eq!(verdicts[0]["position"], 1);
@@ -234,13 +231,13 @@ fn engram_build_live_producer_admits_actual_build_and_refuses_failed_or_test_onl
             fixture.wait_for_reports(session);
             fixture.begin(session, "Run a real Test as the wrong-kind control.");
             let (_, receipt) =
-                fixture.historical_registered_check(session, &fixture.root, "cargo test --offline");
+                fixture.registered_check(session, &fixture.root, "cargo test --offline");
             let test = newest_build_record(&fixture, work, "test", "passed");
             assert_eq!(test, receipt.verifications[0].record_id);
             let shown = fixture.work(session, &["show", work, "--json"]);
             rejected_build_evaluation(
                 &fixture,
-                &build_evaluation_args(work, &shown, &test, revision),
+                &build_evaluation_args(work, &shown, &test, source_file),
                 &test,
                 BuildEvaluationRefusal::CitationMismatch("bound_verification_mismatch"),
             );

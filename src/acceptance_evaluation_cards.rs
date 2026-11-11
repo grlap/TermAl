@@ -4,7 +4,7 @@
 
 const ACCEPTANCE_UNCONFIRMED_RESULT_SUMMARY: &str = "Evaluator finished with an unconfirmed submission outcome. Reconcile the retained tracker write; no evaluator verdict is confirmed.";
 const ACCEPTANCE_UNCONFIRMED_RESULT_FINDING: &str =
-    "Submission recording remains pending or unconfirmed; the retained write was preserved.";
+    "The tracker write outcome remains unknown; the retained write was preserved.";
 
 // Only replace the host's unavailable projection. Real child/transport failures
 // and the separately retained diagnostic output remain unchanged. Running this
@@ -28,7 +28,10 @@ fn refresh_recorded_acceptance_result_locked(
         || result.summary != ACCEPTANCE_UNCONFIRMED_RESULT_SUMMARY
         || result.findings.len() != 1
         || result.findings[0].severity != "Unavailable"
-        || result.findings[0].message != ACCEPTANCE_UNCONFIRMED_RESULT_FINDING
+        // Recognize the host's older persisted finding after a restart too.
+        || (result.findings[0].message != ACCEPTANCE_UNCONFIRMED_RESULT_FINDING
+            && result.findings[0].message
+                != "Submission recording remains pending or unconfirmed; the retained write was preserved.")
     {
         return None;
     }
@@ -66,7 +69,7 @@ fn acceptance_evaluator_unavailable_result(
         if delegation
             .acceptance_evaluation
             .as_ref()
-            .is_some_and(|target| !target.submission.is_none())
+            .is_some_and(acceptance_evaluation_has_unknown_write)
         {
             (
                 ACCEPTANCE_UNCONFIRMED_RESULT_SUMMARY,
@@ -170,12 +173,25 @@ fn acceptance_card_detail(
             acceptance_brief_text(&evaluation.work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
             evaluation.mode.word()
         )
-    } else if matches!(evaluation.submission, AcceptanceEvaluationSubmission::None) && !terminal {
-        format!(
+    } else if matches!(evaluation.submission, AcceptanceEvaluationSubmission::None)
+        && !terminal
+        && !acceptance_evaluation_current_write_retired(evaluation)
+        && evaluation
+            .attempt_history
+            .as_ref()
+            .and_then(|history| history.refusal.as_ref())
+            .is_none()
+    {
+        let evaluating = format!(
             "Acceptance evaluation of `{}` ({}): evaluating; no verdict recorded yet.",
             acceptance_brief_text(&evaluation.work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
             evaluation.mode.word()
-        )
+        );
+        if acceptance_evaluation_has_retired_write(evaluation) {
+            format!("{evaluating} {ACCEPTANCE_EARLIER_RETIRED_WRITE_NOTICE}")
+        } else {
+            evaluating
+        }
     } else {
         acceptance_evaluation_outcome_line(evaluation)
     };

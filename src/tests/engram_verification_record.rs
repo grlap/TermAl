@@ -1135,7 +1135,7 @@ fn the_producers_quiet_sighting_is_neither_a_turn_nor_verification_credit() {
 }
 
 #[test]
-fn the_producers_receipt_and_refusal_fixtures_settle_and_reject() {
+fn historical_producer_receipts_stay_readable_but_commit_requests_are_not_resent() {
     let producer = producer_request();
     let fixture = RunFixture::new("verification-record-producer-receipt");
     let (registration, request, results) = producer_fixture_run(&fixture, &producer);
@@ -1188,7 +1188,8 @@ fn the_producers_receipt_and_refusal_fixtures_settle_and_reject() {
     serde_json::from_value::<EngramVerificationRecordBody>(Value::Object(refused))
         .expect("the producer's refused request reads as a record");
 
-    // Sent and answered with the producer's receipt, the record settles.
+    // The historical body and its existing receipt remain readable, but an
+    // unsent retained Commit body can no longer acquire a new producer answer.
     let frozen = EngramVerificationRecordFrozen {
         run_dir: fixture.runs_dir().join("test-native"),
         run_id: "test-native".to_owned(),
@@ -1199,19 +1200,24 @@ fn the_producers_receipt_and_refusal_fixtures_settle_and_reject() {
     let adapter = adapter(&transport);
     let own = connection(SESSION, "actor");
     read_work_session(&transport, &adapter, &own, supported());
-    transport.script(Ok(producer_receipt()));
-    let step = engram_verification_record_send(frozen.clone(), link(&adapter, &own));
+    let step = engram_verification_record_send(frozen, link(&adapter, &own));
     assert!(
-        matches!(step, EngramVerificationRecordStep::Received { .. }),
-        "{step:?}"
+        matches!(&step, EngramVerificationRecordStep::Rejected(detail)
+            if detail.starts_with("legacy_source_input_retired:")),
+        "retained Commit input must retire without a send"
     );
-    assert_eq!(
-        transport.sent_records()[0]["operation_key"],
-        "termal-run:test-native"
+    assert!(
+        transport.sent_records().is_empty(),
+        "retired body reached the producer"
     );
-    assert!(transport.sent_records()[0].get("idempotency_key").is_none());
 
-    // The producer's refusal, as its envelope carries it, is not sent again.
+    // Its typed refusal still settles a current source-id request as rejected.
+    let current = record_run(
+        &fixture,
+        "test-current-producer-refusal",
+        commit_request(&fixture.root),
+        commit_results(),
+    );
     let EngramControlResponse::Error { error } =
         serde_json::from_value::<EngramControlResponse>(producer_refusal())
             .expect("the producer's refusal reads")
@@ -1219,11 +1225,19 @@ fn the_producers_receipt_and_refusal_fixtures_settle_and_reject() {
         panic!("the refusal is an error envelope");
     };
     transport.script(Err(EngramTransportError::remote(error.into_body())));
-    let step = engram_verification_record_send(frozen, link(&adapter, &own));
+    let step = engram_verification_record_send(ready(&current.registration), link(&adapter, &own));
     assert!(
         matches!(&step, EngramVerificationRecordStep::Rejected(detail) if detail.contains("verification_record_refused")),
-        "{step:?}"
+        "the producer's typed refusal is final"
     );
+    let sent = transport.sent_records();
+    assert_eq!(sent.len(), 1);
+    assert!(
+        sent[0]["input"]["kind"] == "source_id",
+        "the control uses the current format"
+    );
+    assert!(sent[0]["operation_key"] == "termal-run:test-current-producer-refusal");
+    assert!(sent[0].get("idempotency_key").is_none());
 }
 
 #[test]
@@ -1985,6 +1999,87 @@ fn historical_control_metadata_is_unchanged_by_native_verification() {
 }
 
 #[test]
+fn retained_commit_tick_retires_before_route_and_leaves_current_delivery_usable() {
+    let fixture = RunFixture::new("verification-record-retired-before-route");
+    let (session, transport) = engram_session(&fixture, true);
+    let mut request = commit_request(&fixture.root);
+    request.as_object_mut().unwrap().remove("sourceId");
+    let mut results = commit_results();
+    results.as_object_mut().unwrap().remove("sourceIdBefore");
+    results.as_object_mut().unwrap().remove("sourceIdAfter");
+    let mut retired = record_run(&fixture, "test-a-retired", request.clone(), results.clone());
+    initiated_by(&mut retired, &session);
+    let historical = engram_verification_record_build_body(
+        &retired.registration,
+        &request,
+        &results,
+        Some(&EngramVerificationRecordInput::Commit {
+            commit: COMMIT.into(),
+        }),
+    )
+    .expect("historical retained bytes rebuild");
+    let body_path = retired.run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE);
+    fs::write(
+        &body_path,
+        engram_verification_record_text(&historical).unwrap(),
+    )
+    .unwrap();
+    let original = fs::read(&body_path).unwrap();
+    register(&fixture, &[&retired]);
+    attach_launch_row(&fixture, &retired);
+    assert!(matches!(
+        engram_verification_record_prepare(&current(&fixture, &retired)),
+        EngramVerificationRecordPrepared::Ready(_)
+    ));
+
+    // No response is scripted: even the first route read would be observable.
+    fixture.state.engram_verification_records_tick();
+    assert!(
+        transport.sent_operations().is_empty(),
+        "retirement must precede route/transport"
+    );
+    assert!(matches!(
+        current(&fixture, &retired).verification_record,
+        Some(TestRunVerificationAck::Rejected { .. })
+    ));
+    assert!(
+        matches!(engram_verification_record_progress(&retired.run_dir),
+        Some(EngramVerificationRecordProgress::Rejected { detail })
+        if detail.starts_with("legacy_source_input_retired:"))
+    );
+    fixture.state.engram_verification_records_tick();
+    assert!(
+        transport.sent_operations().is_empty(),
+        "a retired record must not be retried"
+    );
+    assert!(
+        fs::read(&body_path).unwrap() == original,
+        "retirement must retain exact original bytes"
+    );
+
+    let mut current_run = record_run(
+        &fixture,
+        "test-z-current",
+        commit_request(&fixture.root),
+        commit_results(),
+    );
+    initiated_by(&mut current_run, &session);
+    register(&fixture, &[&current_run]);
+    attach_launch_row(&fixture, &current_run);
+    transport.script(Ok(work_supported(&session)));
+    transport.script(Ok(receipt_for("failed")));
+    fixture.state.engram_verification_records_tick();
+    assert_eq!(
+        transport.sent_operations(),
+        ["work_session_read", "verification_record"]
+    );
+    assert!(matches!(
+        current(&fixture, &current_run).verification_record,
+        Some(TestRunVerificationAck::Settled { .. })
+    ));
+}
+
+#[test]
 fn an_unassociated_ordinary_session_is_never_bound_by_the_sender() {
     let fixture = RunFixture::new("verification-record-control-unbound");
     let (session, transport) = engram_session(&fixture, true);
@@ -2654,6 +2749,68 @@ fn a_crash_after_the_receipt_settles_from_the_held_receipt_without_a_resend() {
 }
 
 #[test]
+fn held_historical_commit_receipt_settles_without_transport_or_rewriting() {
+    let fixture = RunFixture::new("verification-record-held-historical");
+    let (session, transport) = engram_session(&fixture, true);
+    let mut request = commit_request(&fixture.root);
+    request.as_object_mut().unwrap().remove("sourceId");
+    let mut results = commit_results();
+    results.as_object_mut().unwrap().remove("sourceIdBefore");
+    results.as_object_mut().unwrap().remove("sourceIdAfter");
+    let mut run = record_run(
+        &fixture,
+        "test-held-historical",
+        request.clone(),
+        results.clone(),
+    );
+    initiated_by(&mut run, &session);
+    let body = engram_verification_record_build_body(
+        &run.registration,
+        &request,
+        &results,
+        Some(&EngramVerificationRecordInput::Commit {
+            commit: COMMIT.into(),
+        }),
+    )
+    .unwrap();
+    let path = run.run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE);
+    fs::write(&path, engram_verification_record_text(&body).unwrap()).unwrap();
+    let original = fs::read(&path).unwrap();
+    register(&fixture, &[&run]);
+    attach_launch_row(&fixture, &run);
+    let receipt: EngramVerificationRecordReceipt =
+        serde_json::from_value(receipt_for("failed")).unwrap();
+    assert!(engram_verification_record_receipt_check(&body, &receipt).is_ok());
+    fixture.state.note_engram_verification_record_ack(
+        &run.registration,
+        TestRunVerificationAck::Received {
+            receipt: receipt.clone(),
+            body_digest: engram_verification_record_body_digest(&body),
+        },
+    );
+    assert!(matches!(
+        engram_verification_record_prepare(&current(&fixture, &run)),
+        EngramVerificationRecordPrepared::ReceiptHeld { .. }
+    ));
+    fixture.state.engram_verification_records_tick();
+    assert!(
+        matches!(current(&fixture, &run).verification_record, Some(TestRunVerificationAck::Settled { receipt: saved, .. }) if saved == receipt)
+    );
+    assert!(
+        transport.sent_operations().is_empty(),
+        "a pre-held receipt requires no route or send"
+    );
+    assert!(
+        fs::read(&path).unwrap() == original,
+        "historical body bytes stay exact"
+    );
+    assert!(
+        engram_verification_record_basis(&body).is_none(),
+        "settled historical custody creates no new legacy producer basis"
+    );
+}
+
+#[test]
 fn a_held_receipt_never_settles_a_body_rewritten_with_its_results_to_another_commit() {
     const UNTESTED: &str = "89abcdef0123456789abcdef0123456789abcdef";
     let fixture = RunFixture::new("verification-record-rewritten");
@@ -2689,32 +2846,33 @@ fn a_held_receipt_never_settles_a_body_rewritten_with_its_results_to_another_com
     )
     .unwrap();
     register(&fixture, &[&run]);
-    let execution_id = attach_launch_row(&fixture, &run);
+    attach_launch_row(&fixture, &run);
     let transport = Arc::new(RecordingTransport::default());
     let adapter = adapter(&transport);
     let own = connection(SESSION, "actor");
     read_work_session(&transport, &adapter, &own, supported());
 
-    // Engram genuinely answers the record of the run on COMMIT; the host
-    // holds the receipt, bound to that body, but has not settled it yet.
-    transport.script(Ok(receipt_for("failed")));
-    let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own));
-    fixture
-        .state
-        .note_engram_verification_record_step(&run.registration, &step);
-    let EngramVerificationRecordStep::Received {
-        body: answered,
-        receipt,
-    } = step
-    else {
-        panic!("a valid receipt is received");
-    };
+    // Load an already-held pre-cutover receipt. The retired body cannot be
+    // sent now to create one; its stored receipt still binds the original bytes.
+    let receipt: EngramVerificationRecordReceipt =
+        serde_json::from_value(receipt_for("failed")).unwrap();
+    assert_eq!(
+        engram_verification_record_receipt_check(&historical, &receipt),
+        Ok(())
+    );
+    fixture.state.note_engram_verification_record_ack(
+        &run.registration,
+        TestRunVerificationAck::Received {
+            receipt: receipt.clone(),
+            body_digest: engram_verification_record_body_digest(&historical),
+        },
+    );
     let held = current(&fixture, &run).verification_record;
     assert_eq!(
         held,
         Some(TestRunVerificationAck::Received {
             receipt: receipt.clone(),
-            body_digest: engram_verification_record_body_digest(&answered),
+            body_digest: engram_verification_record_body_digest(&historical),
         })
     );
 
@@ -2758,16 +2916,15 @@ fn a_held_receipt_never_settles_a_body_rewritten_with_its_results_to_another_com
         EngramVerificationRecordSettlement::AcknowledgedBodyChanged
     );
     fixture.state.engram_verification_records_tick();
-    assert!(
-        row_records(&fixture, &execution_id).is_empty(),
-        "no record is attached to the rewritten run"
-    );
     assert_eq!(
         current(&fixture, &run).verification_record,
         held,
         "the held receipt stays bound to its body"
     );
-    assert_eq!(transport.sent_records().len(), 1, "never sent again");
+    assert!(
+        transport.sent_records().is_empty(),
+        "a historical receipt needs no new send"
+    );
 }
 
 /// A project's per-call Engram deadline, raised where a test drives the
