@@ -1,5 +1,5 @@
-// Owns the Work panel's default ordering and its Urgent strip in a large
-// project: every open P0 and P1 is reachable in the initial default view even
+// Owns the Work panel's default ordering and its Urgent view in a large
+// project: every open P0 and P1 is reachable through its own view even
 // when Engram's source order (oldest first) puts it past the first two hundred
 // rows, and even when lower-priority dependency chains fill the start of the
 // Dependencies view; source order stays one choice away. Does not own paging,
@@ -63,7 +63,7 @@ async function mount() {
   return view;
 }
 
-describe("Work panel default order and Urgent strip", () => {
+describe("Work panel default order and Urgent view", () => {
   beforeEach(() => {
     vi.resetAllMocks(); localStorage.clear();
     vi.mocked(readWorkDetail).mockResolvedValue({ status: null, holder: null, heldUntil: null, notes: [],
@@ -86,7 +86,7 @@ describe("Work panel default order and Urgent strip", () => {
     expect(refs().slice(0, 2)).toEqual([ref(0), ref(1)]);
   });
 
-  it("keeps an unlinked P0 and held P1 reachable through the Urgent strip when chains fill the Dependencies view", async () => {
+  it("keeps an unlinked P0 and held P1 reachable through Urgent when chains fill Dependencies", async () => {
     serve(true);
     const { container } = await mount();
 
@@ -95,30 +95,24 @@ describe("Work panel default order and Urgent strip", () => {
     const treeRefs = [...container.querySelectorAll(".work-row-ref")].map(node => node.textContent);
     expect(treeRefs.slice(0, 2)).toEqual([ref(0), ref(1)]);
 
-    // The strip lists both, P0 first, in the initial default view.
-    const strip = screen.getByRole("region", { name: "Urgent work" });
-    expect(within(strip).getByRole("button", { name: "Urgent: 1 P0, 1 P1" })).toHaveAttribute("aria-expanded", "true");
-    expect(within(strip).getAllByRole("button", { name: /^Urgent item-/ }).map(button => button.getAttribute("aria-label")))
-      .toEqual([`Urgent ${ref(P0_INDEX)} — Newest P0`, `Urgent ${ref(HELD_P1_INDEX)} — Held P1`]);
-    expect(within(strip).getByText("Termal::Holder")).toBeInTheDocument();
-
-    // A strip row selects the item; its row and details open in the active view.
-    fireEvent.click(within(strip).getByRole("button", { name: `Urgent ${ref(P0_INDEX)} — Newest P0` }));
-    expect(await screen.findByRole("complementary", { name: "Work item details" })).toBeInTheDocument();
-    expect(within(strip).getByRole("button", { name: `Urgent ${ref(P0_INDEX)} — Newest P0` })).toHaveAttribute("aria-current", "true");
+    // Urgent lists both, P0 first, without depending on the graph's structure.
+    expect(screen.queryByRole("region", { name: "Urgent work" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Urgent" }));
+    const urgent = screen.getByRole("region", { name: "Urgent work" });
+    expect(within(urgent).getByRole("heading", { name: "Urgent: 1 P0, 1 P1" })).toBeInTheDocument();
+    expect(within(urgent).getAllByRole("button", { name: /^item-/ }).map(button => button.textContent))
+      .toEqual([`${ref(P0_INDEX)} — Newest P0`, `${ref(HELD_P1_INDEX)} — Held P1`]);
+    expect(within(urgent).getByText("Termal::Holder")).toBeInTheDocument();
+    fireEvent.click(within(urgent).getByRole("button", { name: `${ref(P0_INDEX)} — Newest P0` }));
+    expect(await within(urgent).findByRole("complementary", { name: "Work item details" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: `${ref(P0_INDEX)} — Newest P0` })).toHaveAttribute("aria-current", "true");
-
-    // The strip collapses and expands without losing its count.
-    fireEvent.click(within(strip).getByRole("button", { name: "Urgent: 1 P0, 1 P1" }));
-    expect(within(strip).queryByRole("button", { name: /^Urgent item-/ })).not.toBeInTheDocument();
-    fireEvent.click(within(strip).getByRole("button", { name: "Urgent: 1 P0, 1 P1" }));
-    expect(within(strip).getAllByRole("button", { name: /^Urgent item-/ })).toHaveLength(2);
+    expect(readProjectWork).toHaveBeenCalledTimes(3);
   });
 });
 
 // Small fixtures for the reveal path: an urgent item hidden by a collapsed
-// tree branch or label group opens from the strip all the same.
-describe("Urgent strip reveal of hidden rows", () => {
+// tree branch or label group stays selected when returning from Urgent.
+describe("Urgent selection reveal in other views", () => {
   const item = (id: string, extra: Partial<WorkItem> = {}): WorkItem => ({
     id, shortRef: id, title: `Title ${id}`, kind: "task", lifecycle: "open", availability: "ready", priority: 2,
     labels: ["shared"], assignedTo: null, parentId: null, updatedAt: "today", blockedBy: [], source: "engram",
@@ -132,8 +126,11 @@ describe("Urgent strip reveal of hidden rows", () => {
     render(<WorkPanel projects={projects} focusedProjectId="project" />);
     await screen.findByText(new RegExp(`${count} of ${count} Engram items loaded`));
   };
-  const clickUrgent = (ref: string) => fireEvent.click(within(screen.getByRole("region", { name: "Urgent work" }))
-    .getByRole("button", { name: new RegExp(`^Urgent ${ref} — `) }));
+  const clickUrgent = (ref: string) => {
+    fireEvent.click(screen.getByRole("button", { name: "Urgent" }));
+    fireEvent.click(within(screen.getByRole("region", { name: "Urgent work" }))
+      .getByRole("button", { name: `${ref} — Title ${ref}` }));
+  };
 
   beforeEach(() => {
     vi.resetAllMocks(); localStorage.clear();
@@ -142,7 +139,7 @@ describe("Urgent strip reveal of hidden rows", () => {
   });
   afterEach(() => { vi.restoreAllMocks(); });
 
-  it("expands a collapsed Dependencies branch that holds the urgent item", async () => {
+  it("keeps the urgent selection when returning to a Dependencies branch", async () => {
     // w-goal waits for the urgent w-urgent, so w-urgent is nested under it.
     serveRows([item("w-goal", { availability: "blocked", prerequisites: [{ id: "w-urgent", satisfied: false }] }),
       item("w-urgent", { priority: 0 })]);
@@ -151,12 +148,13 @@ describe("Urgent strip reveal of hidden rows", () => {
     expect(screen.queryByRole("button", { name: "w-urgent — Title w-urgent" })).not.toBeInTheDocument();
 
     clickUrgent("w-urgent");
+    fireEvent.click(screen.getByRole("button", { name: "Dependencies" }));
     expect(screen.getByRole("button", { name: "w-urgent — Title w-urgent" })).toHaveAttribute("aria-current", "true");
     expect(await screen.findByRole("complementary", { name: "Work item details" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Collapse w-goal" })).toBeInTheDocument();
   });
 
-  it("expands a collapsed Hierarchy parent that holds the urgent item", async () => {
+  it("keeps the urgent selection when returning to its Hierarchy parent", async () => {
     serveRows([item("w-parent", { kind: "epic" }), item("w-child", { parentId: "w-parent", priority: 1 })]);
     await mountSmall(2);
     fireEvent.click(screen.getByRole("button", { name: "Hierarchy" }));
@@ -164,11 +162,12 @@ describe("Urgent strip reveal of hidden rows", () => {
     expect(screen.queryByRole("button", { name: "w-child — Title w-child" })).not.toBeInTheDocument();
 
     clickUrgent("w-child");
+    fireEvent.click(screen.getByRole("button", { name: "Hierarchy" }));
     expect(screen.getByRole("button", { name: "w-child — Title w-child" })).toHaveAttribute("aria-current", "true");
     expect(await screen.findByRole("complementary", { name: "Work item details" })).toBeInTheDocument();
   });
 
-  it("expands the item's label group after Collapse all labels and opens its details there", async () => {
+  it("returns from Urgent with details in the item's first label group", async () => {
     serveRows([item("w-other"), item("w-urgent", { priority: 0, labels: ["alpha", "shared"] })]);
     await mountSmall(2);
     fireEvent.click(screen.getByRole("button", { name: "Labels" }));
@@ -176,10 +175,10 @@ describe("Urgent strip reveal of hidden rows", () => {
     expect(screen.queryByRole("button", { name: "w-urgent — Title w-urgent" })).not.toBeInTheDocument();
 
     clickUrgent("w-urgent");
-    // Its first label group ("alpha") opens; the others stay collapsed.
+    fireEvent.click(screen.getByRole("button", { name: "Labels" }));
+    // The returned view selects the first label group ("alpha").
     const alpha = screen.getByRole("region", { name: "Label group: alpha" });
     expect(within(alpha).getByRole("button", { name: "w-urgent — Title w-urgent" })).toHaveAttribute("aria-current", "true");
     expect(await within(alpha).findByRole("complementary", { name: "Work item details" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "w-other — Title w-other" })).not.toBeInTheDocument();
   });
 });

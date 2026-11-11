@@ -24,7 +24,7 @@ export function WorkTree({ rows, universe, mode, selection, onSelect, onLabel, r
     () => (mode === "dependencies" ? buildDependencyForest(rows, universe) : buildHierarchyForest(rows, universe)),
     [rows, universe, mode],
   );
-  // A reveal request from outside the tree (the Urgent strip) expands every
+  // A reveal request from another view expands every
   // collapsed ancestor of the item's canonical row during this render, so the
   // row and its details mount in the same commit as the selection. A request
   // seen before this tree mounted is not replayed.

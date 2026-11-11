@@ -488,7 +488,7 @@ describe("WorkPanel", () => {
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
   });
 
-  it.each(["Dependencies", "Hierarchy", "Labels", "Table"])("expands details under the selected task in %s and toggles them closed", async view => {
+  it.each(["Urgent", "Dependencies", "Hierarchy", "Labels", "Table"])("expands details under the selected task in %s and toggles them closed", async view => {
     vi.mocked(readProjectWork).mockResolvedValue(page());
     vi.mocked(readWorkDetail).mockResolvedValue({ status: null, holder: null, heldUntil: null, notes: [],
       notesWindow: { total: 0, shown: 0, newer: 0, older: 0, after: null, readCut: { projectPosition: 1, observedAt: "now", validUntilMs: null } } });
@@ -513,7 +513,7 @@ describe("WorkPanel", () => {
     expect(title).toHaveFocus();
   });
 
-  it.each(["Hierarchy", "Table", "Labels"])("keeps visible details on a switch to %s without stealing the view button's focus", async view => {
+  it.each(["Urgent", "Hierarchy", "Table", "Labels"])("keeps visible details on a switch to %s without stealing the view button's focus", async view => {
     vi.mocked(readProjectWork).mockResolvedValue(page());
     vi.mocked(readWorkDetail).mockResolvedValue({ status: null, holder: null, heldUntil: null, notes: [],
       notesWindow: { total: 0, shown: 0, newer: 0, older: 0, after: null, readCut: { projectPosition: 1, observedAt: "now", validUntilMs: null } } });

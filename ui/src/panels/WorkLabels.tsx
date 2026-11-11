@@ -25,7 +25,7 @@ export function WorkLabels({ rows, mixedSources, selection, onSelect, onLabel, r
 }) {
   const groups = useMemo(() => groupWorkLabels(rows), [rows]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
-  // A reveal request from outside (the Urgent strip) expands the item's first
+  // A reveal request from another view expands the item's first
   // label group, the group its selection names, during this render, so the
   // row and its details mount with the selection. Earlier requests are not
   // replayed when the view mounts.
