@@ -728,6 +728,10 @@ fn app_router_with_acceptance_policy_limiter(
             post(submit_session_acceptance_evaluation),
         )
         .route(
+            "/api/sessions/{id}/acceptance-evaluation-replay",
+            post(replay_session_acceptance_evaluation),
+        )
+        .route(
             "/api/sessions/{id}/mailboxes/{mailbox_id}/read",
             post(read_mailbox),
         )
@@ -1219,6 +1223,7 @@ include!("acceptance_evaluation_citation_retry.rs");
 include!("acceptance_evaluation_reuse.rs");
 include!("acceptance_evaluation_brief_delivery.rs");
 include!("acceptance_evaluation_api.rs");
+include!("acceptance_evaluation_replay.rs");
 include!("acceptance_named_root_sighting.rs");
 include!("acceptance_committed_input.rs");
 include!("acceptance_native_input.rs");

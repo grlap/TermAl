@@ -68,6 +68,9 @@ mod maintenance_pass;
 #[path = "acceptance_evaluation_refresh.rs"]
 mod refresh;
 
+#[path = "acceptance_evaluation_submission_replay.rs"]
+mod submission_replay;
+
 #[path = "acceptance_evaluation_sub_agent.rs"]
 mod sub_agent;
 

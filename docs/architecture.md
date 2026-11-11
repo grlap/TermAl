@@ -375,6 +375,7 @@ Local operator routes are under `/api`; pair-authenticated domain routes use a d
 
 | Method | Path | Purpose |
 |--------|------|---------|
+| POST | `/api/sessions/{id}/acceptance-evaluation-replay` | Owning parent root only: resend an ended evaluator's retained Unconfirmed write. Body `{ delegationId }`, never verdicts or a new key. Preserves the original evaluator actor, attempt, payload and source. 200 `state: recorded` after durable acknowledgment, or `state: refused` with `originalOutcomeUnknown: true`; 409 Recorded repeat or admission conflict; 502 unknown resend; 503 structured durability-pending response with original attempt identity and same-request guidance, also through MCP. No new judgment. See [recovery contract](features/engram-host-adapter.md#acceptance-evaluation). |
 | GET | `/api/health` | Health check + capability probe |
 | GET | `/api/diagnostics/persistence` | Read bounded, passive [persistence writer diagnostics](features/persistence-diagnostics.md) |
 | GET | `/api/diagnostics/host-lifecycle` | Read how the previous instance ended, from the [host lifecycle journal](features/host-lifecycle-journal.md) |

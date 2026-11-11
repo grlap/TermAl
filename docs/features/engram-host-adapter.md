@@ -2210,11 +2210,12 @@ on or off. The delegation side is
 described under
 [evaluator delegations](agent-delegation-sessions.md#evaluator-delegations).
 
-**Two routes, two callers.** The paths differ by one letter on purpose and are
-not interchangeable:
+**Request, submission and retained-write recovery.** These routes have distinct
+callers and bodies:
 
 | Route | Caller | Meaning |
 | --- | --- | --- |
+| `POST /api/sessions/{id}/acceptance-evaluation-replay` | the owning parent root of an ended evaluator | resend its saved Unconfirmed write once, with body `{ delegationId }`; no caller verdicts, payload or new key |
 | `POST /api/sessions/{id}/acceptance-evaluations` (plural) | the parent session whose task needs judging | a request that *may create* an evaluation: it reads the tracker and either spawns an evaluator or answers with a same-session brief. Body `{ workRef, agent?, model?, reuseDelegationId? }` |
 | `POST /api/sessions/{id}/acceptance-evaluation` (singular) | the evaluator child itself | the *one* evaluation that child owns: `{id}` is the child, and the task, mode, bases and attempt key are the host's. Body `{ schemaVersion, attemptKey?, verdicts }` |
 
@@ -2222,6 +2223,24 @@ The plural route is a collection the parent adds to; the singular route is the
 single resource an evaluator child has. Neither accepts the other's body
 (unknown fields are `422`), and a parent calling the singular route is refused
 for want of evaluator authority.
+
+**Retained-write recovery.** The root-only MCP tool
+`termal_replay_acceptance_evaluation` calls the replay route with the same
+reference-only body. The host checks the original digest, evaluator actor,
+attempt key, source bytes and store, and refuses concurrent submissions or
+follow-ups. It creates no evaluator or new judgment. A confirmed receipt
+answers `state: recorded` and refreshes the host's formerly unavailable result;
+the original child output remains diagnostic. A repeated Recorded request is
+409 and sends nothing. A typed refused resend answers `state: refused` with
+`originalOutcomeUnknown: true`: it cannot disprove the original write. An
+unknown resend answers 502 and retains Unconfirmed. An enqueued persistence
+deadline answers 503 with the structured `termal-durability-pending` envelope,
+original evaluator/attempt identity and `same_request` guidance, including
+through MCP. Other admission conflicts are 409; invalid bodies are 400/422;
+missing delegations are 404 and exhausted submit permits are 429. A durable
+Pending write left after a restart is outside this Unconfirmed-only route.
+See also [evaluator delegations](agent-delegation-sessions.md#evaluator-delegations)
+and the [API table](../architecture.md).
 
 **Request.** `termal_evaluate_acceptance`, or
 `POST /api/sessions/{id}/acceptance-evaluations` with

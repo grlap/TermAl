@@ -96,6 +96,22 @@ fn durability_pending_for_request(
         // Legacy submissions may omit the key; the server still reports the
         // existing attempt. Current briefs require the exact echoed key.
         keys = &["delegationId", "attemptKey", "evaluatorSessionId"];
+    } else if path == format!("/api/sessions/{caller}/acceptance-evaluation-replay") {
+        operation = "acceptance_evaluation_submission";
+        // The parent supplies only the retained reference. Attempt/evaluator
+        // identity comes from the host's saved write, never from this caller.
+        if response["operation"] != operation
+            || request.as_object()?.len() != 1
+            || !durability_pending_nonempty_string(&request["delegationId"])
+            || field("delegationId") != &request["delegationId"]
+            || !["attemptKey", "evaluatorSessionId"]
+                .iter()
+                .all(|key| durability_pending_nonempty_string(field(key)))
+            || field("evaluatorSessionId") == caller
+        {
+            return None;
+        }
+        keys = &["delegationId", "attemptKey", "evaluatorSessionId"];
     } else if path == format!("/api/sessions/{caller}/engram-named-root-release") {
         operation = "named_root_release";
         let reason = request["reason"].as_str()?.trim();

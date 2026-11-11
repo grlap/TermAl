@@ -2,6 +2,60 @@
 // Does not own verdict execution, durable acknowledgement or card rendering.
 // Projects receipt truth alongside acceptance_settings.rs; never interprets child verdicts.
 
+const ACCEPTANCE_UNCONFIRMED_RESULT_SUMMARY: &str = "Evaluator finished with an unconfirmed submission outcome. Reconcile the retained tracker write; no evaluator verdict is confirmed.";
+const ACCEPTANCE_UNCONFIRMED_RESULT_FINDING: &str =
+    "Submission recording remains pending or unconfirmed; the retained write was preserved.";
+
+// Only replace the host's unavailable projection. Real child/transport failures
+// and the separately retained diagnostic output remain unchanged. Running this
+// on terminal reads also repairs the projection after a restart.
+fn refresh_recorded_acceptance_result_locked(
+    inner: &mut StateInner,
+    index: usize,
+) -> Option<DelegationLifecycleDelta> {
+    let delegation = inner.delegations.get(index)?.clone();
+    if delegation.mode != DelegationMode::Evaluator
+        || delegation.status != DelegationStatus::Failed
+        || !delegation_submission_recorded(&delegation)
+        || inner
+            .acceptance_evaluation_submissions_in_flight
+            .contains_key(&delegation.id)
+    {
+        return None;
+    }
+    let mut result = delegation.result.clone()?;
+    if result.status != DelegationStatus::Failed
+        || result.summary != ACCEPTANCE_UNCONFIRMED_RESULT_SUMMARY
+        || result.findings.len() != 1
+        || result.findings[0].severity != "Unavailable"
+        || result.findings[0].message != ACCEPTANCE_UNCONFIRMED_RESULT_FINDING
+    {
+        return None;
+    }
+    result.summary = acceptance_evaluation_outcome_line(delegation.acceptance_evaluation.as_ref()?);
+    result.status = DelegationStatus::Completed;
+    result.findings.clear();
+    let completed_at = delegation.completed_at.clone().unwrap_or_else(stamp_now);
+    let record = &mut inner.delegations[index];
+    record.status = DelegationStatus::Completed;
+    record.result = Some(result.clone());
+    record.completed_at = Some(completed_at.clone());
+    inner.sync_running_read_only_delegation_index(index);
+    inner.mark_delegation_mutated(index);
+    let parent_card_delta = update_parent_delegation_card_locked(
+        inner,
+        &delegation,
+        ParallelAgentStatus::Completed,
+        delegation_result_card_detail(&delegation, &result),
+    );
+    Some(DelegationLifecycleDelta::Completed {
+        delegation_id: delegation.id,
+        result,
+        completed_at,
+        parent_card_delta,
+    })
+}
+
 fn acceptance_evaluator_unavailable_result(
     delegation: &DelegationRecord,
 ) -> Option<(&'static str, &'static str)> {
@@ -15,8 +69,8 @@ fn acceptance_evaluator_unavailable_result(
             .is_some_and(|target| !target.submission.is_none())
         {
             (
-                "Evaluator finished with an unconfirmed submission outcome. Reconcile the retained tracker write; no evaluator verdict is confirmed.",
-                "Submission recording remains pending or unconfirmed; the retained write was preserved.",
+                ACCEPTANCE_UNCONFIRMED_RESULT_SUMMARY,
+                ACCEPTANCE_UNCONFIRMED_RESULT_FINDING,
             )
         } else {
             (

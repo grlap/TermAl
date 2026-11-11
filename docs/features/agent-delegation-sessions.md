@@ -613,6 +613,15 @@ labels: `success` or `error`.
 
 ### Evaluator delegations
 
+An owning parent root can recover an ended evaluator's retained Unconfirmed
+write through `termal_replay_acceptance_evaluation` or
+`POST /api/sessions/{id}/acceptance-evaluation-replay`, supplying only
+`{ delegationId }`. The host resends the saved actor, attempt and payload;
+it creates no judgment. Recorded repeats refuse, and a refused resend leaves
+the original outcome unknown. See the
+[recovery contract](engram-host-adapter.md#acceptance-evaluation) for admission,
+responses and durability-pending semantics.
+
 `mode: evaluator` is a host-created delegation that judges an Engram task's
 acceptance criteria. The host side of that contract, including how the mode is
 selected and what is recorded, is described in the

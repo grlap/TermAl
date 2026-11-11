@@ -3599,7 +3599,7 @@ fn refresh_delegation_from_child_locked(
 ) -> Option<DelegationLifecycleDelta> {
     let delegation = inner.delegations.get(delegation_index)?;
     if delegation_is_terminal(delegation.status) {
-        return None;
+        return refresh_recorded_acceptance_result_locked(inner, delegation_index);
     }
 
     // A held attempt, one still admitting its prompt, or a follow-up whose turn

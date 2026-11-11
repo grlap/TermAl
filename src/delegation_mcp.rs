@@ -1051,6 +1051,9 @@ impl TermalDelegationMcpBridge {
             "termal_review_freeze_check" => self.tool_review_freeze_check(arguments),
             "termal_review_identity" => self.tool_review_identity(arguments),
             "termal_evaluate_acceptance" => self.tool_evaluate_acceptance(arguments),
+            "termal_replay_acceptance_evaluation" => {
+                self.tool_replay_acceptance_evaluation(arguments)
+            }
             "termal_submit_acceptance_evaluation" => {
                 self.tool_submit_acceptance_evaluation(arguments)
             }
@@ -2560,6 +2563,7 @@ fn tool_requires_root_session(name: &str) -> bool {
             | "termal_resume_after_test_runs"
             | "termal_name_source_root"
             | "termal_release_named_root"
+            | "termal_replay_acceptance_evaluation"
     )
 }
 
@@ -2948,6 +2952,11 @@ fn mcp_tools_list_result() -> Value {
         &mut result,
         "termal_followup_session",
         acceptance_evaluation_request_tool_definition(),
+    );
+    insert_mcp_tool_after(
+        &mut result,
+        TERMAL_EVALUATE_ACCEPTANCE_TOOL_NAME,
+        acceptance_evaluation_replay_tool_definition(),
     );
     insert_mcp_tool_after(
         &mut result,

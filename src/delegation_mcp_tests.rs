@@ -16,6 +16,9 @@ use std::thread;
 #[path = "delegation_spawn_brief_tests.rs"]
 mod spawn_brief;
 
+#[path = "delegation_mcp_evaluation_replay_tests.rs"]
+mod evaluation_replay;
+
 const TEST_MCP_HTTP_ACCEPT_DEADLINE: Duration = Duration::from_secs(10);
 
 #[test]
@@ -456,6 +459,7 @@ fn delegation_mcp_base_tools_list_includes_role_scoped_tools() {
             "termal_release_named_root",
             "termal_followup_session",
             "termal_evaluate_acceptance",
+            "termal_replay_acceptance_evaluation",
             "termal_review_freeze_check",
             "termal_review_identity",
             "termal_submit_review_result",
