@@ -203,6 +203,9 @@ fn normalize(
     // sequence, revision, wait id, status, prompt and mutation stamp.
     let mut timestamps = BTreeSet::new();
     times(&value, &mut timestamps);
+    // Replace the complete RFC3339 value before its HH:MM:SS substring.
+    let mut timestamps = timestamps.into_iter().collect::<Vec<_>>();
+    timestamps.sort_by_key(|time| std::cmp::Reverse(time.len()));
     let mut substitutions = substitutions.to_vec();
     substitutions.extend(
         timestamps
@@ -211,6 +214,46 @@ fn normalize(
     );
     replace(&mut value, &substitutions);
     value
+}
+
+#[test]
+fn delegation_refresh_normalization_masks_overlapping_timestamps() {
+    for hour in ["00", "01", "19", "20", "23"] {
+        for fraction in ["666144284", "675886679"] {
+            let timestamp = format!("{hour}:02:03");
+            let value = json!({
+                "messages": [{
+                    "timestamp": timestamp,
+                    "completedAt": timestamp,
+                    "failedAt": timestamp,
+                    "text": "Refresh complete."
+                }],
+                "restartRecovery": {
+                    "restartedAt": format!("2026-11-11T{timestamp}.{fraction}+00:00")
+                },
+                "sessions": {"fixture-session": {"id": "fixture-session", "revision": 42}},
+                "waits": [{"id": "wait-related", "status": "completed"}]
+            });
+            assert_eq!(
+                normalize(
+                    value,
+                    &[("fixture-session".to_owned(), "$session".to_owned())]
+                ),
+                json!({
+                    "messages": [{
+                        "timestamp": "$time",
+                        "completedAt": "$time",
+                        "failedAt": "$time",
+                        "text": "Refresh complete."
+                    }],
+                    "restartRecovery": {"restartedAt": "$time"},
+                    "sessions": {"$session": {"id": "$session", "revision": 42}},
+                    "waits": [{"id": "wait-related", "status": "completed"}]
+                }),
+                "hour {hour}, fraction {fraction}"
+            );
+        }
+    }
 }
 
 fn image(fixture: &RefreshFixture, events: &mut broadcast::Receiver<String>) -> serde_json::Value {
