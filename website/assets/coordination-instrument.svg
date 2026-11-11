@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 620" fill="none">
+  <defs>
+    <pattern id="grid" width="34" height="34" patternUnits="userSpaceOnUse"><path d="M34 0H0V34" stroke="#243e4b" stroke-width=".6"/></pattern>
+    <radialGradient id="light"><stop stop-color="#294c58"/><stop offset="1" stop-color="#102733"/></radialGradient>
+  </defs>
+  <rect width="680" height="620" fill="#102733"/>
+  <rect width="680" height="620" fill="url(#grid)"/>
+  <circle cx="340" cy="295" r="248" fill="url(#light)" stroke="#48616b"/>
+  <g stroke="#66828a" opacity=".55">
+    <circle cx="340" cy="295" r="222" stroke-dasharray="1 9" stroke-width="5"/>
+    <circle cx="340" cy="295" r="194"/>
+    <circle cx="340" cy="295" r="158" stroke-dasharray="3 8"/>
+    <path d="M340 24V566M69 295H611M148 103L532 487M148 487L532 103" stroke-dasharray="3 9"/>
+    <path d="M85 65H65V85M595 65H615V85M65 505V525H85M615 505V525H595"/>
+  </g>
+  <g stroke="#b7ccc5" stroke-width="1.5">
+    <path d="M340 127V230M485 211L396 262M485 379L396 328M340 463V360M195 379L284 328M195 211L284 262"/>
+    <path d="M340 127L485 211V379L340 463L195 379V211Z" opacity=".25"/>
+  </g>
+  <g fill="#d5a16a">
+    <circle cx="340" cy="188" r="4"/><circle cx="436" cy="239" r="4"/><circle cx="431" cy="348" r="4"/>
+    <circle cx="340" cy="404" r="4"/><circle cx="244" cy="350" r="4"/><circle cx="248" cy="242" r="4"/>
+  </g>
+  <circle cx="340" cy="295" r="78" fill="#152e39" stroke="#c8c7ad" stroke-width="1.5"/>
+  <circle cx="340" cy="295" r="67" stroke="#728f94"/>
+  <path d="M324 276H345M334 276V311M351 276V311M351 296H364" stroke="#f0eadd" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="364" cy="296" r="3" fill="#d5a16a"/>
+  <g fill="#102733" stroke="#b7ccc5">
+    <rect x="296" y="94" width="88" height="66" rx="4"/>
+    <rect x="441" y="178" width="88" height="66" rx="4"/>
+    <rect x="441" y="346" width="88" height="66" rx="4"/>
+    <rect x="296" y="430" width="88" height="66" rx="4"/>
+    <rect x="151" y="346" width="88" height="66" rx="4"/>
+    <rect x="151" y="178" width="88" height="66" rx="4"/>
+  </g>
+  <g fill="#f0eadd" text-anchor="middle" font-family="Georgia,serif" font-size="27">
+    <text x="340" y="129">C</text><text x="485" y="213">A</text><text x="485" y="381">G</text>
+    <text x="340" y="465">⌁</text><text x="195" y="381">O</text><text x="195" y="213">K</text>
+  </g>
+  <g fill="#b7ccc5" text-anchor="middle" font-family="Consolas,monospace" font-size="10" letter-spacing="1">
+    <text x="340" y="148">CODEX</text><text x="485" y="232">CLAUDE</text><text x="485" y="400">GEMINI</text>
+    <text x="340" y="484">CURSOR</text><text x="195" y="400">OPENCODE</text><text x="195" y="232">KIMI</text>
+  </g>
+  <g fill="#91adb3" font-family="Consolas,monospace" font-size="10" letter-spacing="1.2">
+    <text x="30" y="32">FIG. 01 / COORDINATION INSTRUMENT</text><text x="30" y="592">SIX RUNTIMES</text>
+    <text x="515" y="592">ONE WORKSPACE</text><text x="315" y="332" font-size="8">TERMAL</text>
+    <text x="567" y="300" transform="rotate(90 567 300)">DURABLE CONTEXT</text>
+  </g>
+  <path d="M30 558H650" stroke="#48616b"/>
+  <circle cx="650" cy="28" r="4" fill="#d5a16a"/>
+  <g stroke="#d5a16a"><path d="M340 39V53M340 537V551M84 295H98M582 295H596" stroke-width="2"/></g>
+</svg>

@@ -35,7 +35,7 @@ The launch-mode verifier is expected to fail until those prerequisites exist.
 
 ## Product-copy guardrails
 
-- TermAl currently integrates Claude Code, OpenAI Codex, Gemini CLI, Cursor Agent, and OpenCode.
+- TermAl currently integrates Claude Code, OpenAI Codex, Gemini CLI, Cursor Agent, OpenCode, and Kimi Code CLI.
 - It runs from source; no packaged release is advertised.
 - “Source available” is intentional. Do not change it to “open source” until a license is declared.
 - Approval and sandbox controls vary by agent and configuration. Do not promise that every command is sandboxed or requires approval.
