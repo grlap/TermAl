@@ -487,6 +487,15 @@ struct EngramRootReconciliation {
 
 const ENGRAM_NAMED_ROOT_JOURNAL_LIMIT: usize = 1024;
 
+fn engram_named_root_journal_limit(_inner: &StateInner) -> usize {
+    #[cfg(test)]
+    if let Some(limit) = _inner.test_engram_named_root_journal_limit {
+        assert!((1..=ENGRAM_NAMED_ROOT_JOURNAL_LIMIT).contains(&limit));
+        return limit;
+    }
+    ENGRAM_NAMED_ROOT_JOURNAL_LIMIT
+}
+
 /// History belongs to a work, rather than the disposable receipts of its
 /// successive claims. The revision orders publication, not allocation.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -1553,7 +1562,7 @@ impl AppState {
         let index = match existing {
             Some(index) => index,
             None => {
-                if inner.engram_named_root_journal.len() >= ENGRAM_NAMED_ROOT_JOURNAL_LIMIT {
+                if inner.engram_named_root_journal.len() >= engram_named_root_journal_limit(inner) {
                     return Err(ApiError::conflict(
                         engram_root_journal_census(inner).capacity_message(),
                     ));

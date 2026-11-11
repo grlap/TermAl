@@ -53,6 +53,18 @@ mod failure_diagnostics;
 #[path = "engram_named_root_journal.rs"]
 mod journal_diagnostics;
 
+// Repeated public lifecycle transitions use the real capacity boundary with
+// a small inventory. Separate census/admission tests keep the production cap.
+fn bounded_journal_capacity(turn: &EOCheckedTurn) -> usize {
+    let limit = 8;
+    turn.state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_named_root_journal_limit = Some(limit);
+    limit
+}
+
 impl EOCheckedTurn {
     /// These reconciliation fixtures script BOTH producer operations. A
     /// status tuple alone cannot invent the canonical run/event carrier.
@@ -685,10 +697,11 @@ fn source_root_review_released_removed_sessions_make_progress_past_journal_capac
     timings.phase("fixture_setup");
     let label = "removed-root-capacity";
     let mut claimed = EOCheckedTurn::idle(label, true);
+    let journal_limit = bounded_journal_capacity(&claimed);
     naming_store(&claimed);
     let worktree = naming_worktree(&claimed.root);
     let mut store_work = None;
-    for sequence in 0..=ENGRAM_NAMED_ROOT_JOURNAL_LIMIT {
+    for sequence in 0..=journal_limit {
         timings.phase("iteration");
         let mut held = naming_claim(label);
         let binding = held.items[0].control_binding.as_mut().unwrap();
@@ -759,7 +772,7 @@ fn source_root_review_released_removed_sessions_make_progress_past_journal_capac
     let (store, work) = store_work.unwrap();
     assert_eq!(
         engram_work_naming_token(&inner, &store, &work).revision,
-        (ENGRAM_NAMED_ROOT_JOURNAL_LIMIT + 1) as u64
+        (journal_limit + 1) as u64
     );
     assert!(
         claimed
@@ -2603,10 +2616,11 @@ fn source_root_review_successive_claim_displacements_do_not_fill_the_journal() {
     timings.phase("fixture_setup");
     let label = "review-successive-claims";
     let claimed = EOCheckedTurn::idle(label, true);
+    let journal_limit = bounded_journal_capacity(&claimed);
     let worktree = naming_worktree(&claimed.root);
     naming_store(&claimed);
     let mut last_generation = 0;
-    for occurrence in 0..=ENGRAM_NAMED_ROOT_JOURNAL_LIMIT {
+    for occurrence in 0..=journal_limit {
         timings.phase("iteration");
         let mut held = naming_claim(label);
         let mut binding = held.items[0].control_binding.clone().unwrap();

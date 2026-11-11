@@ -529,6 +529,8 @@ impl PersistedState {
             engram_retired_work_authority_grants: self.engram_retired_work_authority_grants.into(),
             engram_work_source_roots: self.engram_work_source_roots.into(),
             engram_named_root_journal: self.engram_named_root_journal.into(),
+            #[cfg(test)]
+            test_engram_named_root_journal_limit: None,
             engram_work_naming_history: self.engram_work_naming_history.into(),
             engram_named_root_release_audit: engram_named_root_release_audit.into(),
             engram_source_sightings: self.engram_source_sightings.into(),

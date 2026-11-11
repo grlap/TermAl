@@ -368,8 +368,9 @@ fn named_root_reclamation_published_notices_do_not_exhaust_the_journal() {
     timings.phase("fixture_setup");
     let label = "reclaim-published-journal-capacity";
     let (claimed, worktree) = root_fixture(label);
+    let journal_limit = bounded_journal_capacity(&claimed);
     let clock = claimed.state.engram_budget_clock();
-    for occurrence in 0..=ENGRAM_NAMED_ROOT_JOURNAL_LIMIT {
+    for occurrence in 0..=journal_limit {
         timings.phase("iteration");
         let fixture_binding = test_control_work_binding(&format!("eo-check-{label}"), 1);
         let mut held = EngramHeldClaims {
@@ -399,7 +400,7 @@ fn named_root_reclamation_published_notices_do_not_exhaust_the_journal() {
         drop(naming_timing);
         assert!(named.is_ok(),
             "new naming {occurrence} must progress after acknowledged retirements: {named:?}");
-        if occurrence == ENGRAM_NAMED_ROOT_JOURNAL_LIMIT { break; }
+        if occurrence == journal_limit { break; }
 
         let (entry, journal) = {
             let inner = claimed.state.inner.lock().unwrap();
@@ -443,12 +444,14 @@ fn named_root_reclamation_published_notices_do_not_exhaust_the_journal() {
         assert_eq!(inner.engram_work_naming_history[0].retirements.len(), occurrence + 1);
         assert!(inner.engram_work_naming_history[0].retirements.iter()
             .all(|notice| notice.published && notice.delivered));
-        if occurrence + 1 == ENGRAM_NAMED_ROOT_JOURNAL_LIMIT {
+        if occurrence + 1 == journal_limit {
             let _restart_timing = fixture_phase("restart_roundtrip");
             // Both vectors persist. Restart must preserve the exact durable
             // notice identities without making them scarce journal pins.
             persist_state(claimed.state.persistence_path.as_path(), &inner).unwrap();
-            let restored = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
+            let mut restored = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
+            assert_eq!(restored.test_engram_named_root_journal_limit, None);
+            restored.test_engram_named_root_journal_limit = Some(journal_limit);
             assert_eq!(restored.engram_work_naming_history[0].retirements,
                 inner.engram_work_naming_history[0].retirements);
             *inner = restored;
@@ -462,7 +465,7 @@ fn named_root_reclamation_published_notices_do_not_exhaust_the_journal() {
     assert_eq!(inner.engram_named_root_journal.len(), 1,
         "only the fresh live claim still requires a journal");
     assert_eq!(engram_named_root_capacity(&inner), 1);
-    assert_eq!(inner.engram_work_naming_history[0].retirements.len(), ENGRAM_NAMED_ROOT_JOURNAL_LIMIT);
+    assert_eq!(inner.engram_work_naming_history[0].retirements.len(), journal_limit);
     let index = inner.find_session_index(&claimed.session_id).unwrap();
     assert!(refresh_engram_source_root_notices_locked(&mut inner, index).iter()
         .all(|notice| !matches!(notice.kind, EngramSourceRootNoticeKind::Reclaimed { .. })),
@@ -499,6 +502,10 @@ fn named_root_reclamation_published_undelivered_notice_survives_compacted_restar
     assert_eq!(restored.engram_work_naming_history[0].retirements.len(), 1);
     assert!(restored.engram_work_naming_history[0].retirements[0].delivered);
     assert!(restored.engram_named_root_journal.is_empty());
+}
+
+mod history_scale {
+    include!("engram_named_root_history_scale.rs");
 }
 
 #[test]

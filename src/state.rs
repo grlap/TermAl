@@ -1815,6 +1815,9 @@ struct StateInner {
     /// (`engram_source_roots.rs`), persisted so a restart keeps them.
     engram_work_source_roots: PersistTracked<Vec<EngramWorkSourceRoot>>,
     engram_named_root_journal: PersistTracked<Vec<EngramNamedRootJournal>>,
+    /// Per-fixture capacity for bounded lifecycle witnesses; never persisted.
+    #[cfg(test)]
+    test_engram_named_root_journal_limit: Option<usize>,
     engram_work_naming_history: PersistTracked<Vec<EngramWorkNamingHistory>>,
     /// The operator releases of retained named roots, newest last
     /// (`engram_named_root_release.rs`), persisted as their audit.
@@ -2006,6 +2009,8 @@ impl StateInner {
             engram_retired_work_authority_grants: PersistTracked::default(),
             engram_work_source_roots: PersistTracked::default(),
             engram_named_root_journal: PersistTracked::default(),
+            #[cfg(test)]
+            test_engram_named_root_journal_limit: None,
             engram_work_naming_history: PersistTracked::default(),
             engram_named_root_release_audit: PersistTracked::default(),
             engram_source_sightings: PersistTracked::default(),

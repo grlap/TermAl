@@ -4,6 +4,44 @@
 use super::*;
 
 #[test]
+fn fixture_capacity_is_local_and_refuses_a_full_pending_journal() {
+    let label = "journal-fixture-capacity";
+    let turn = EOCheckedTurn::idle(label, true);
+    let other = EOCheckedTurn::idle("journal-default-capacity", true);
+    let worktree = naming_worktree(&turn.root);
+    request_naming(&turn, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    let (fresh, binding) = fill_settled_journal(&turn);
+    let mut inner = turn.state.inner.lock().unwrap();
+    inner.test_engram_named_root_journal_limit = Some(2);
+    inner.engram_named_root_journal.truncate(2);
+    for journal in inner.engram_named_root_journal.iter_mut() {
+        journal.pending = Some(journal.confirmed.as_ref().unwrap().0.clone());
+    }
+    let before = inner.engram_named_root_journal.clone();
+    let census = engram_root_journal_census(&inner);
+    assert_eq!(census.limit, 2);
+    assert_eq!(census.retained, 2);
+    let error = turn
+        .state
+        .stage_engram_root_event_locked(&mut inner, &fresh, Some(&binding))
+        .expect_err("the fixture cap must exercise real admission refusal");
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(inner.engram_named_root_journal, before);
+    let bytes = serde_json::to_vec(&PersistedState::from_inner(&inner)).unwrap();
+    drop(inner);
+    let restored = serde_json::from_slice::<PersistedState>(&bytes)
+        .unwrap()
+        .into_inner()
+        .unwrap();
+    assert_eq!(restored.test_engram_named_root_journal_limit, None);
+    assert_eq!(engram_root_journal_census(&restored).limit, 1024);
+    assert_eq!(
+        engram_root_journal_census(&other.state.inner.lock().unwrap()).limit,
+        1024
+    );
+}
+
+#[test]
 fn a_new_naming_past_256_preserves_pending_journal_entries() {
     let label = "journal-past-old-capacity";
     let turn = EOCheckedTurn::idle(label, true);

@@ -268,7 +268,7 @@ fn engram_root_journal_retention(
 
 fn engram_root_journal_census(inner: &StateInner) -> EngramRootJournalCensus {
     let mut census = EngramRootJournalCensus {
-        limit: ENGRAM_NAMED_ROOT_JOURNAL_LIMIT,
+        limit: engram_named_root_journal_limit(inner),
         entries: inner.engram_named_root_journal.len(),
         selected_roots: inner.engram_work_source_roots.len(),
         retained: 0,
