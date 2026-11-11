@@ -355,6 +355,13 @@ fn resolve_sqlite_state_setup_result<T>(
 }
 
 fn open_sqlite_state_read_connection(path: &FsPath) -> Result<rusqlite::Connection> {
+    open_sqlite_state_read_connection_with_busy_timeout(path, SQLITE_BUSY_TIMEOUT)
+}
+
+fn open_sqlite_state_read_connection_with_busy_timeout(
+    path: &FsPath,
+    busy_timeout: Duration,
+) -> Result<rusqlite::Connection> {
     reject_existing_sqlite_state_path_redirection(path)?;
     let connection = rusqlite::Connection::open_with_flags(
         path,
@@ -364,7 +371,7 @@ fn open_sqlite_state_read_connection(path: &FsPath) -> Result<rusqlite::Connecti
     )
     .with_context(|| format!("failed to open `{}` for transcript paging", path.display()))?;
     connection
-        .busy_timeout(SQLITE_BUSY_TIMEOUT)
+        .busy_timeout(busy_timeout)
         .with_context(|| format!("failed to set SQLite read timeout for `{}`", path.display()))?;
     connection
         .execute_batch("PRAGMA query_only = ON;")
@@ -378,7 +385,14 @@ fn open_sqlite_state_read_connection(path: &FsPath) -> Result<rusqlite::Connecti
 }
 
 fn open_sqlite_history_snapshot(path: &FsPath) -> Result<rusqlite::Connection> {
-    let connection = open_sqlite_state_read_connection(path)?;
+    open_sqlite_history_snapshot_with_busy_timeout(path, SQLITE_BUSY_TIMEOUT)
+}
+
+fn open_sqlite_history_snapshot_with_busy_timeout(
+    path: &FsPath,
+    busy_timeout: Duration,
+) -> Result<rusqlite::Connection> {
+    let connection = open_sqlite_state_read_connection_with_busy_timeout(path, busy_timeout)?;
     // Cursor resolution and range loading are separate statements. Keep them
     // in one read transaction so a concurrent writer cannot move the cursor
     // between those statements.

@@ -1,6 +1,33 @@
 // A history page combines a resident tail with a durable prefix. Pin the
 // SQLite view at the resident capture, so rollback cannot mix two transcripts.
 
+const SESSION_HISTORY_CAPTURE_TIMEOUT: Duration = Duration::from_secs(60);
+const SESSION_HISTORY_WARNING_AFTER: Duration = Duration::from_secs(10);
+const SESSION_HISTORY_RETRY_DELAY: Duration = Duration::from_millis(25);
+
+fn history_snapshot_is_busy(error: &rusqlite::Error) -> bool {
+    matches!(error, rusqlite::Error::SqliteFailure(code, _)
+        if code.code == rusqlite::ErrorCode::DatabaseBusy)
+}
+
+fn observe_history_capture_budget(
+    spent: Duration,
+    warned: &mut bool,
+    warn: &mut impl FnMut(Duration),
+    last_failure: &str,
+) -> Result<(), ApiError> {
+    if !*warned && spent >= SESSION_HISTORY_WARNING_AFTER {
+        *warned = true;
+        warn(spent);
+    }
+    if spent >= SESSION_HISTORY_CAPTURE_TIMEOUT {
+        return Err(ApiError::internal(format!(
+            "failed to capture session history snapshot before its deadline: {last_failure}"
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy)]
 struct SessionHistorySelector<'a> {
     before: Option<&'a str>,
@@ -76,10 +103,61 @@ impl AppState {
         session_id: &str,
         selector: SessionHistorySelector<'_>,
     ) -> Result<LocalSessionHistorySnapshot, ApiError> {
+        let started = std::time::Instant::now();
+        self.capture_local_session_history_with_wait(
+            session_id,
+            selector,
+            || started.elapsed(),
+            std::thread::sleep,
+            |elapsed| {
+                eprintln!(
+                    "history snapshot warning> still waiting after {} ms",
+                    elapsed.as_millis()
+                );
+            },
+            || open_sqlite_history_snapshot_with_busy_timeout(
+                self.persistence_path.as_ref(), Duration::ZERO,
+            ),
+        )
+    }
+
+    // Keep the clock, diagnostic and off-lock backoff in this capture owner.
+    // The opening boundary permits a prepared read connection in contention
+    // tests; production always opens the existing history snapshot helper.
+    fn capture_local_session_history_with_wait(
+        &self,
+        session_id: &str,
+        selector: SessionHistorySelector<'_>,
+        mut elapsed: impl FnMut() -> Duration,
+        mut pause: impl FnMut(Duration),
+        mut warn: impl FnMut(Duration),
+        mut open: impl FnMut() -> Result<rusqlite::Connection>,
+    ) -> Result<LocalSessionHistorySnapshot, ApiError> {
         let mut persistence = None;
-        let mut pin_attempts = 0;
+        let mut wait_pending = false;
+        let mut warned = false;
+        let mut last_failure = "history state lock is busy".to_owned();
         loop {
-            let inner = self.inner.lock().expect("state mutex poisoned");
+            let spent = elapsed();
+            observe_history_capture_budget(spent, &mut warned, &mut warn, &last_failure)?;
+            if wait_pending {
+                let remaining = SESSION_HISTORY_CAPTURE_TIMEOUT.saturating_sub(spent);
+                let until_warning = if warned {
+                    remaining
+                } else {
+                    SESSION_HISTORY_WARNING_AFTER.saturating_sub(spent)
+                };
+                pause(SESSION_HISTORY_RETRY_DELAY.min(remaining).min(until_warning));
+                wait_pending = false;
+                continue;
+            }
+            let Some(inner) = self.inner.try_lock_now() else {
+                // No SQLite transaction or global guard survives a backoff.
+                drop(persistence.take());
+                last_failure = "history state lock is busy".to_owned();
+                wait_pending = true;
+                continue;
+            };
             let index = inner
                 .find_visible_session_index(session_id)
                 .ok_or_else(ApiError::local_session_missing)?;
@@ -105,18 +183,23 @@ impl AppState {
             };
             if needs_persistence && persistence.is_none() {
                 drop(inner);
-                // Opening/configuring SQLite can touch the filesystem; do it
-                // outside the global lock. Re-capture memory after opening.
-                let connection = open_sqlite_history_snapshot(self.persistence_path.as_ref())
-                    .map_err(|err| {
-                        ApiError::internal(format!(
-                            "failed to open session history snapshot: {err:#}"
-                        ))
-                    })?;
-                connection.busy_timeout(Duration::ZERO).map_err(|err| {
-                    ApiError::internal(format!("failed to configure history snapshot pin: {err:#}"))
-                })?;
-                persistence = Some(connection);
+                // Reader setup and any backoff stay outside the global lock.
+                // busy=0 is selected before setup, not after opening returns.
+                match open() {
+                    Ok(connection) => persistence = Some(connection),
+                    Err(err) => {
+                        let contended = err.chain().any(|cause| {
+                            cause.downcast_ref::<rusqlite::Error>()
+                                .is_some_and(history_snapshot_is_busy)
+                        });
+                        let detail = format!("failed to open session history snapshot: {err:#}");
+                        if !contended {
+                            return Err(ApiError::internal(detail));
+                        }
+                        last_failure = detail;
+                        wait_pending = true;
+                    }
+                }
                 continue;
             }
             if needs_persistence {
@@ -134,23 +217,22 @@ impl AppState {
                         |row| row.get(0),
                     );
                 if let Err(err) = pin {
-                    // Never wait for SQLite while holding the global mutex.
-                    // The production DB uses WAL. Transient schema/locking
-                    // contention gets a bounded retry with a new transaction.
+                    // An external BUSY can clear after another connection
+                    // finishes. LOCKED may be same-connection misuse and must
+                    // not be hidden by retrying it.
                     drop(inner);
-                    let contended = matches!(&err, rusqlite::Error::SqliteFailure(code, _)
-                        if matches!(code.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked));
-                    pin_attempts += 1;
-                    if contended && pin_attempts < 3 {
-                        persistence.take();
-                        continue;
+                    drop(persistence.take());
+                    let contended = history_snapshot_is_busy(&err);
+                    let detail = format!("failed to pin session history snapshot: {err:#}");
+                    if !contended {
+                        return Err(ApiError::internal(detail));
                     }
-                    return Err(ApiError::internal(format!(
-                        "failed to pin session history snapshot: {err:#}"
-                    )));
+                    last_failure = detail;
+                    wait_pending = true;
+                    continue;
                 }
             }
-            return Ok(LocalSessionHistorySnapshot {
+            let snapshot = LocalSessionHistorySnapshot {
                 messages: record.session.messages.clone(),
                 start_index: record.message_start_index,
                 cursor_position,
@@ -160,7 +242,14 @@ impl AppState {
                 body_seq: record.wire_body_seq(),
                 body_seq_epoch: record.wire_body_seq_epoch(&self.server_instance_id),
                 persistence,
-            });
+            };
+            drop(inner);
+            // Account for pinning and resident capture as well as retries.
+            // Diagnostics never perform I/O while holding StateInner.
+            observe_history_capture_budget(
+                elapsed(), &mut warned, &mut warn, "history capture completed after its budget",
+            )?;
+            return Ok(snapshot);
         }
     }
 }
