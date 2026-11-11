@@ -1397,6 +1397,11 @@ happens elsewhere. The agent therefore names the item's worktree once with
   paths, commands or source payloads. Pending or unavailable capture results
   currently retain otherwise unrelated journal history; a census is a current
   observation, not proof of what caused an earlier capacity refusal.
+  `retryableClosingJobs` and `terminalClosingJobs` count resident closing jobs
+  across sessions, separately from the exclusive per-journal reasons. A job
+  with a terminal failure keeps its persisted diagnostic but no longer holds
+  journal custody; pending and retryable jobs keep their protection. Other
+  references can still protect the same journal after a job becomes terminal.
 
   An operator can see and release retained entries through the host API
   ([`GET /api/engram/named-roots` and

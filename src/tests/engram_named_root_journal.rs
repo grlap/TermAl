@@ -339,6 +339,8 @@ async fn journal_census_route_is_bounded_private_and_read_only() {
         ENGRAM_NAMED_ROOT_JOURNAL_LIMIT - 1
     );
     assert_eq!(view["journal"]["primaryReasons"]["confirmedBinding"], 1);
+    assert_eq!(view["journal"]["retryableClosingJobs"], 0);
+    assert_eq!(view["journal"]["terminalClosingJobs"], 0);
     assert_eq!(view["serverInstanceId"], turn.state.server_instance_id);
     let wire = String::from_utf8(bytes.to_vec()).unwrap();
     for private in [
@@ -357,5 +359,121 @@ async fn journal_census_route_is_bounded_private_and_read_only() {
     assert_eq!(
         inner.engram_named_root_journal, before,
         "GET cannot compact the journal"
+    );
+}
+
+#[test]
+fn terminal_closing_diagnostics_release_journal_custody_after_reload() {
+    let label = "journal-terminal-closing-custody";
+    let turn = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&turn.root);
+    request_naming(&turn, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    turn.begin("Keep pending closing observations protected.");
+    let (fresh, binding) = fill_settled_journal(&turn);
+    let terminal = {
+        let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&turn.session_id).unwrap();
+        let trace = inner.sessions[index]
+            .engram
+            .unadmitted_active_turn
+            .clone()
+            .expect("ordinary turn has its real trace");
+        let scope = EngramRuntimeClosingScope::capture(&inner, &turn.session_id).unwrap();
+        let jobs = inner
+            .engram_named_root_journal
+            .iter()
+            .skip(1)
+            .map(|journal| {
+                let mut scope = scope.clone();
+                scope.binding = journal.read_binding.clone();
+                let mut job = EngramRuntimeClosingJob::new(trace.clone(), None, scope);
+                job.attempts = ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS - 1;
+                job
+            })
+            .collect::<Vec<_>>();
+        let terminal = jobs[0].clone();
+        inner.sessions[index].engram.unadmitted_closing_jobs = jobs;
+        let before = inner.engram_named_root_journal.clone();
+        assert_eq!(
+            engram_root_journal_census(&inner).primary_reasons
+                [&EngramRootJournalRetention::ClosingJob],
+            ENGRAM_NAMED_ROOT_JOURNAL_LIMIT - 1
+        );
+        assert_eq!(
+            turn.state
+                .stage_engram_root_event_locked(&mut inner, &fresh, Some(&binding))
+                .expect_err("retryable jobs keep all their journal custody")
+                .status,
+            StatusCode::CONFLICT
+        );
+        assert_eq!(inner.engram_named_root_journal, before);
+        terminal
+    };
+    // Use the production settler's retry-exhaustion path. The diagnostic row
+    // remains persisted, but the worker can never select it for another send.
+    turn.state
+        .install_runtime_closing_result(
+            &turn.session_id,
+            &terminal,
+            Err(EngramTransportError::local_state(
+                "private retained closing diagnosis",
+            )),
+        )
+        .unwrap();
+    let (persisted, diagnostic) = {
+        let inner = turn.state.inner.lock().expect("state mutex poisoned");
+        let record = &inner.sessions[inner.find_session_index(&turn.session_id).unwrap()];
+        let diagnostic = record.engram.unadmitted_closing_jobs[0].clone();
+        assert!(diagnostic.terminal_failure.is_some());
+        assert_eq!(diagnostic.attempts, ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS);
+        let census = engram_root_journal_census(&inner);
+        assert_eq!(census.terminal_closing_jobs, 1);
+        assert_eq!(
+            census.retryable_closing_jobs,
+            ENGRAM_NAMED_ROOT_JOURNAL_LIMIT - 2
+        );
+        assert_eq!(
+            census.reclaimable, 1,
+            "a terminal diagnostic must release its obsolete journal reference"
+        );
+        assert_eq!(
+            census.primary_reasons[&EngramRootJournalRetention::ClosingJob],
+            ENGRAM_NAMED_ROOT_JOURNAL_LIMIT - 2,
+            "every other retryable job remains protected"
+        );
+        (
+            serde_json::to_vec(&PersistedState::from_inner(&inner)).unwrap(),
+            diagnostic,
+        )
+    };
+    let mut restored = serde_json::from_slice::<PersistedState>(&persisted)
+        .unwrap()
+        .into_inner()
+        .unwrap();
+    engram_compact_root_journal(&mut restored);
+    let claim = terminal.scope.binding.as_ref().unwrap().claim_id.as_str();
+    assert!(
+        engram_root_journal(
+            &restored.engram_named_root_journal,
+            &terminal.scope.store,
+            claim
+        )
+        .is_none()
+    );
+    let record = &restored.sessions[restored.find_session_index(&turn.session_id).unwrap()];
+    assert_eq!(
+        record.engram.unadmitted_closing_jobs[0], diagnostic,
+        "reclamation must preserve the complete persisted terminal diagnostic"
+    );
+    assert_eq!(
+        record.engram.unadmitted_closing_jobs.len(),
+        ENGRAM_NAMED_ROOT_JOURNAL_LIMIT - 1
+    );
+    turn.state
+        .stage_engram_root_event_locked(&mut restored, &fresh, Some(&binding))
+        .unwrap();
+    assert_eq!(
+        restored.engram_named_root_journal.len(),
+        ENGRAM_NAMED_ROOT_JOURNAL_LIMIT
     );
 }

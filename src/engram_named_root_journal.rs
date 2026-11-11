@@ -59,6 +59,8 @@ struct EngramRootJournalCensus {
     selected_roots: usize,
     retained: usize,
     reclaimable: usize,
+    retryable_closing_jobs: usize,
+    terminal_closing_jobs: usize,
     primary_reasons: BTreeMap<EngramRootJournalRetention, usize>,
 }
 
@@ -211,10 +213,14 @@ fn engram_root_journal_retention(
     }
     if inner.sessions.iter().any(|record| {
         record.engram.unadmitted_closing_jobs.iter().any(|job| {
-            job.scope
-                .binding
-                .as_ref()
-                .is_some_and(|binding| binding.claim_id == journal.claim_id)
+            // Terminal rows preserve diagnostics; the worker never retries
+            // them, so they no longer own executable journal custody.
+            job.terminal_failure.is_none()
+                && job
+                    .scope
+                    .binding
+                    .as_ref()
+                    .is_some_and(|binding| binding.claim_id == journal.claim_id)
         })
     }) {
         return Some(Keep::ClosingJob);
@@ -267,8 +273,21 @@ fn engram_root_journal_census(inner: &StateInner) -> EngramRootJournalCensus {
         selected_roots: inner.engram_work_source_roots.len(),
         retained: 0,
         reclaimable: 0,
+        retryable_closing_jobs: 0,
+        terminal_closing_jobs: 0,
         primary_reasons: BTreeMap::new(),
     };
+    for job in inner
+        .sessions
+        .iter()
+        .flat_map(|record| &record.engram.unadmitted_closing_jobs)
+    {
+        if job.terminal_failure.is_some() {
+            census.terminal_closing_jobs += 1;
+        } else {
+            census.retryable_closing_jobs += 1;
+        }
+    }
     for journal in inner.engram_named_root_journal.iter() {
         match engram_root_journal_retention(inner, journal) {
             Some(reason) => {
