@@ -596,6 +596,9 @@ it.each([false, true])("bounds retry waits and fences abandoned results (deferre
   if (!deferred) f.fetchLayout.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
   act(() => f.hook.result.current.retryWorkspaceLayoutStorage());
   await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(f.fetchLayout.mock.lastCall![1]!.signal!.aborted).toBe(false);
+  expect(f.hook.result.current.isWorkspaceLayoutRetrying).toBe(true);
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
   expect(f.fetchLayout.mock.lastCall![1]!.signal!.aborted).toBe(true);
   expect(f.hook.result.current.isWorkspaceLayoutRetrying).toBe(false);
   expect(f.hook.result.current.isWorkspaceLayoutReady).toBe(false);
@@ -687,8 +690,44 @@ it("aborts a retry on unmount and ignores a late result", async () => {
   expect(api.saveWorkspaceLayout).not.toHaveBeenCalled();
 });
 
-it("cancels an outstanding retry through the real workspace GET API", async () => {
-  vi.spyOn(console, "warn").mockImplementation(() => {});
+it.each(["server", "sessions"] as const)("allows slow workspace recovery waiting for %s after one warning", async (waitingFor) => {
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const f = recoveryFixture(waitingFor !== "sessions");
+  await act(async () => {});
+  f.unblock();
+  let resolve!: (value: api.WorkspaceLayoutResponse) => void;
+  if (waitingFor === "server") {
+    f.fetchLayout.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+  }
+  act(() => f.hook.result.current.retryWorkspaceLayoutStorage());
+  await act(async () => {});
+  const signal = f.fetchLayout.mock.lastCall![1]!.signal!;
+  warning.mockClear();
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+  expect(warning).toHaveBeenCalledOnce();
+  expect(signal.aborted).toBe(false);
+  expect(f.hook.result.current.isWorkspaceLayoutRetrying).toBe(true);
+  await act(async () => { await vi.advanceTimersByTimeAsync(40_000); });
+  expect(signal.aborted).toBe(false);
+  expect(warning).toHaveBeenCalledOnce();
+  if (waitingFor === "server") {
+    await act(async () => resolve(f.response));
+  } else {
+    f.params.sessionsRef.current = f.available;
+    f.hook.rerender({ ready: true });
+  }
+  expect(f.hook.result.current.isWorkspaceLayoutReady).toBe(true);
+  expect(f.hook.result.current.isWorkspaceLayoutRetrying).toBe(false);
+  expect(f.hook.result.current.workspaceLayoutStorageError).toBeNull();
+  await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+  expect(warning).toHaveBeenCalledOnce();
+  expect(f.hook.result.current.workspaceLayoutStorageError).toBeNull();
+  f.hook.unmount();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("cancels an outstanding retry through the real workspace GET API at its deadline", async () => {
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
   const f = recoveryFixture();
   await act(async () => {});
   f.unblock();
@@ -704,7 +743,15 @@ it("cancels an outstanding retry through the real workspace GET API", async () =
   })));
   act(() => f.hook.result.current.retryWorkspaceLayoutStorage());
   expect(requestSignal).toBeDefined();
-  await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+  warning.mockClear();
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+  expect(warning).toHaveBeenCalledOnce();
+  expect(cancelled).toBe(false);
+  expect(f.hook.result.current.isWorkspaceLayoutRetrying).toBe(true);
+  await act(async () => { await vi.advanceTimersByTimeAsync(49_999); });
+  expect(cancelled).toBe(false);
+  expect(warning).toHaveBeenCalledOnce();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
   expect(cancelled).toBe(true);
   expect(f.hook.result.current.isWorkspaceLayoutReady).toBe(false);
   expect(f.hook.result.current.isWorkspaceLayoutRetrying).toBe(false);

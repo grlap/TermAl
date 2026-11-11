@@ -172,7 +172,8 @@ type FetchedWorkspaceThemeFields = Pick<
   "lightThemeId" | "darkThemeId" | "themeMode"
 >;
 
-const WORKSPACE_STORAGE_RETRY_TIMEOUT_MS = 15_000;
+const WORKSPACE_STORAGE_RETRY_TIMEOUT_MS = 60_000;
+const WORKSPACE_STORAGE_RETRY_WARNING_MS = 10_000;
 
 // Only failures at the browser write boundary enter storage recovery; parser
 // or reconciliation exceptions must not be disguised as storage failures.
@@ -838,10 +839,12 @@ export function useAppWorkspaceLayout(
     const isStorageRetry = storagePauseRef.current?.workspaceId === workspaceViewId;
     const controller = new AbortController();
     let retryDeadline: number | undefined;
+    let retryWarning: number | undefined;
     const cancelRetry = () => {
       cancelled = true;
       controller.abort();
       window.clearTimeout(retryDeadline);
+      window.clearTimeout(retryWarning);
       pendingFetchedWorkspaceLayoutRef.current = null;
       if (cancelStorageRetryRef.current === cancelRetry) cancelStorageRetryRef.current = null;
     };
@@ -863,6 +866,9 @@ export function useAppWorkspaceLayout(
 
     if (isStorageRetry) {
       cancelStorageRetryRef.current = cancelRetry;
+      retryWarning = window.setTimeout(() => {
+        console.warn("workspace layout warning> recovery is still waiting; workspace save remains paused until recovery completes");
+      }, WORKSPACE_STORAGE_RETRY_WARNING_MS);
       // The deadline covers the GET and any wait for session metadata. On
       // expiry abandon this attempt, fence late results and allow another try.
       retryDeadline = window.setTimeout(() => {
