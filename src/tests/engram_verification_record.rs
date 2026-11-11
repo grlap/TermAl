@@ -28,6 +28,9 @@ mod fmt;
 #[path = "engram_verification_doc_links.rs"]
 mod doc_links;
 
+#[path = "engram_verification_vitest.rs"]
+mod vitest;
+
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 const SESSION: &str = "session-record";
 const STARTED: &str = "2026-10-30T10:00:00.000Z";
@@ -1668,6 +1671,9 @@ fn stage_kinds_follow_the_actual_argv_then_the_stage_rule() {
     assert_eq!(kind(Full, "fingerprint-tests", node_test, &full_gate), test);
     assert_eq!(kind(Focused, "focused", words("npx vitest run"), &[]), test);
     assert_eq!(kind(Full, "ui", words("npx vitest run"), &full_gate), test);
+    let vitest = with_node("node_modules/vitest/vitest.mjs run");
+    assert_eq!(kind(Focused, "focused", vitest.clone(), &[]), test);
+    assert_eq!(kind(Full, "vitest", vitest, &full_gate), test);
     assert_eq!(
         kind(Full, "unit", words("cargo test --bin termal"), &full_gate),
         test
@@ -1695,9 +1701,7 @@ fn stage_kinds_follow_the_actual_argv_then_the_stage_rule() {
         build
     );
     // Then the launcher's agreed stage rule, for stages the argv does not
-    // name: the gate's Vitest and Rust stages, and a live run's stage.
-    let vitest = with_node("node_modules/vitest/vitest.mjs run");
-    assert_eq!(kind(Full, "vitest", vitest.clone(), &full_gate), test);
+    // name: the gate's Rust wrapper and a live run's stage.
     assert_eq!(
         kind(
             Full,
@@ -1722,7 +1726,6 @@ fn stage_kinds_follow_the_actual_argv_then_the_stage_rule() {
     );
     // Neither: no kind, and the run waits on it (never dropped).
     assert_eq!(kind(Full, "helper-tests", reported, &full_gate), None);
-    assert_eq!(kind(Focused, "focused", vitest, &[]), None);
     assert_eq!(
         kind(Focused, "focused", words("node scripts/lint.mjs"), &[]),
         None

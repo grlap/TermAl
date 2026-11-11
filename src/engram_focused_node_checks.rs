@@ -1,5 +1,67 @@
-// Bounded foreground native-Node Test grammar and interpretation. Shared
-// launcher validation and the lifecycle's source/grant fences own admission.
+// Native Node test interpretation and shared direct-Vitest argv recognition
+// and feedback. Registered record policy, launcher validation and the
+// lifecycle's source/grant fences own admission; only Node TAP/spec is counted here.
+
+fn engram_is_direct_vitest_script(script: &str) -> bool {
+    let script = script.replace('\\', "/");
+    script == "node_modules/vitest/vitest.mjs"
+        || script.ends_with("/node_modules/vitest/vitest.mjs")
+}
+
+/// Vitest's native JavaScript CLI avoids Windows package-manager shims. Only
+/// execution mode and bounded selection/reporting options identify this Test;
+/// unknown options, watch, discovery and help never borrow the stage's label.
+fn engram_is_direct_vitest_run(args: &[String]) -> bool {
+    let [script, mode, rest @ ..] = args else {
+        return false;
+    };
+    if mode != "run" || !engram_is_direct_vitest_script(script) {
+        return false;
+    }
+    let mut index = 0;
+    while let Some(arg) = rest.get(index) {
+        if arg.is_empty() {
+            return false;
+        }
+        if arg.starts_with('-') {
+            let (option, inline) = arg
+                .split_once('=')
+                .map_or((arg.as_str(), None), |(option, value)| {
+                    (option, Some(value))
+                });
+            if !matches!(
+                option,
+                "--root"
+                    | "--config"
+                    | "-c"
+                    | "--project"
+                    | "--testNamePattern"
+                    | "-t"
+                    | "--reporter"
+                    | "--outputFile"
+                    | "--maxWorkers"
+                    | "--testTimeout"
+            ) {
+                return false;
+            }
+            let value = match inline {
+                Some(value) => value,
+                None => {
+                    index += 1;
+                    let Some(value) = rest.get(index) else {
+                        return false;
+                    };
+                    value.as_str()
+                }
+            };
+            if value.is_empty() || value.starts_with('-') {
+                return false;
+            }
+        }
+        index += 1;
+    }
+    true
+}
 
 fn engram_focused_node_words(program: &str, args: &[String]) -> Option<Vec<String>> {
     let [node, rest @ ..] = engram_focused_launcher_words(program, args)?.ok()? else {
@@ -206,7 +268,10 @@ fn engram_unsupported_focused_line(command: &str) -> Option<String> {
     // bounded foreground grammar. --no-run and lint/script commands do not
     // claim a Test; they may still have evidence of another verification kind.
     let test_intent = engram_is_test_command(&inner_program, inner_args)
-        || (inner_program == "node" && inner_args.first().is_some_and(|arg| arg == "--test"));
+        || (inner_program == "node"
+            && inner_args
+                .first()
+                .is_some_and(|arg| arg == "--test" || engram_is_direct_vitest_script(arg)));
     Some(if test_intent {
         format!(
             "[TermAl] Unsupported focused test-runner form {line:?}: no Test record will follow; \

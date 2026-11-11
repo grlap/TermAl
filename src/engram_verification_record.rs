@@ -681,6 +681,16 @@ fn engram_verification_record_check_kind(
     if mode == EngramVerificationRecordMode::Full && stage == "fmt" {
         return None;
     }
+    // Category stages use Vitest's same CLI but retain their existing
+    // no-credit policy. Only the reserved focused stage adds this route;
+    // a client-supplied test-stage list cannot turn a category into a Test.
+    if mode == EngramVerificationRecordMode::Focused
+        && stage != "focused"
+        && matches!(argv, [program, args @ ..]
+            if engram_program_name(program) == "node" && engram_is_direct_vitest_run(args))
+    {
+        return None;
+    }
     let focused: Vec<String> = ["scripts/test-launcher.mjs", "focused", "--"]
         .into_iter()
         .map(str::to_owned)

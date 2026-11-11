@@ -383,6 +383,33 @@ For an authorized focused check, pass an argument array after `--`:
 node scripts/test-launcher.mjs focused -- node --test scripts/test-launcher.test.mjs
 ```
 
+For named UI test files on Windows, run Vitest's JavaScript entrypoint from
+the repository root, including `--root ui` and the files' Vitest project:
+
+```powershell
+node scripts/test-launcher.mjs focused --input commit -- node ui/node_modules/vitest/vitest.mjs run --root ui --project component src/transcript-activity-slot.test.tsx src/panels/SessionActivityStrip.test.tsx
+```
+
+This form needs installed UI dependencies and a running host with direct-Node
+Vitest classification. It records the registered stage as Test from its actual
+argv, through the existing committed-input verification and Engram receipt
+checks. A stage label cannot supply that classification. It does not add Vitest
+counts to the launcher's ordinary focused Node/TAP count reader. `--root ui`
+selects Vite's root; tests that themselves depend on the process working
+directory can use the category route for execution in `ui/`; category runs
+remain partial checks and do not earn registered Test credit.
+
+The supported direct CLI path ends in `node_modules/vitest/vitest.mjs` and is
+followed by `run`, file filters and optional `--root`, `--config`/`-c`,
+`--project`, `--testNamePattern`/`-t`, `--reporter`, `--outputFile`,
+`--maxWorkers` or `--testTimeout` values (separate or `=value`). Other modes,
+watch/help flags and unknown options remain unclassified in a focused run.
+Windows `.cmd` package-manager shims are not needed.
+As with `npx vitest`, this classifies the trusted installed runner's invocation;
+it does not attest the package bytes or confine the runner's configuration.
+File-writing reporters should target ignored scratch (such as `.tmp/`), since
+creating an untracked report makes committed input ineligible.
+
 A direct `focused -- cargo test` skips `scripts/test-rust.sh`, so unless something
 sets a count libtest runs one test thread per available core, where `full` defaults
 to `RUST_TEST_THREADS=4`. On a many-core host a direct run is far harsher than a

@@ -691,6 +691,9 @@ fn engram_is_test_command(program: &str, args: &[String]) -> bool {
                 })
         }
         "node" => {
+            if engram_is_direct_vitest_run(args) {
+                return true;
+            }
             let launcher = arg(0)
                 .is_some_and(|script| script.replace('\\', "/").ends_with("test-launcher.mjs"));
             // A detached run is a launch, carried until it settles
