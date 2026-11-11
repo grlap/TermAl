@@ -129,10 +129,13 @@ timeout, look for the delegation it may already have made with
 unarchives before the next prompt. Explicit user input to a completed/failed
 Codex child uses the same follow-up path, preserving its transcript; canceled
 children and background/peer dispatch retain the terminal guard. The persisted
-archive flag is preserved after restart, but automatic unarchive requires an
-in-memory barrier originating from terminal cleanup. A manual Archive (or an
-archived thread with no surviving origin after restart) requires explicit
-Unarchive, including a manual Archive used to recover failed automatic cleanup.
+archive flag and confirmed automatic-cleanup origin survive restart. The origin
+is private durable metadata bound to the exact thread id and Codex home profile;
+only a matching archived child rebuilds a settled follow-up barrier on load.
+Replacing the thread or restoring it clears that saved origin. A subsequent
+manual Archive requires explicit Unarchive, including a manual Archive used to
+recover failed automatic cleanup. Older archived records without this metadata
+also require explicit Unarchive; terminal delegation status alone supplies no origin.
 The recovery error explains this extra step. Successful unarchive records
 `Restored`, not `Archived`, in that barrier.
 Invalid follow-up payloads (including unsupported or malformed image attachments)
@@ -160,7 +163,8 @@ Only a restore performed by follow-up dispatch grants compensation ownership;
 cancellation or rejection before prompt start cannot undo a preceding manual Unarchive.
 For an unstarted canceled attempt, manual Archive can retry its same-attempt
 durability obligation and cleanup; cancellation still prohibits another follow-up.
-This ownership is process-local, like the terminal-release barrier described above.
+This in-flight compensation ownership remains process-local; completed automatic
+archive provenance is durable as described above.
 Transport/timeouts with an unknown external unarchive outcome remain a separate
 reconciliation limitation: a failed request is not proof that the server did nothing.
 

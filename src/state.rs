@@ -2205,8 +2205,10 @@ struct SessionRecord {
     federation_native_creation_id: String,
     /// Starts at zero when loaded; never persisted across server instances.
     body_sequence: SessionBodySequence,
-    /// Process-local barrier; persisted Archived state handles restart/resume.
+    /// Process-local synchronization; rebuilt only from matching archive provenance.
     codex_delegation_release: Option<Arc<CodexDelegationRelease>>,
+    /// Private durable ownership of an automatic archive, bound to its thread/home.
+    codex_terminal_archive: Option<CodexTerminalArchive>,
     active_codex_approval_policy: Option<CodexApprovalPolicy>,
     active_codex_reasoning_effort: Option<CodexReasoningEffort>,
     active_codex_sandbox_mode: Option<CodexSandboxMode>,

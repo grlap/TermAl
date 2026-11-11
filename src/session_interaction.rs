@@ -119,6 +119,9 @@ fn sync_codex_thread_state(record: &mut SessionRecord) {
 
 /// Sets record external session ID.
 fn set_record_external_session_id(record: &mut SessionRecord, external_session_id: Option<String>) {
+    if record.external_session_id != external_session_id {
+        record.codex_terminal_archive = None;
+    }
     record.external_session_id = external_session_id.clone();
     record.session.external_session_id = external_session_id;
     sync_codex_thread_state(record);
@@ -131,6 +134,9 @@ fn set_record_codex_thread_state(record: &mut SessionRecord, thread_state: Codex
         record.external_session_id.as_deref(),
         Some(thread_state),
     );
+    // Only the automatic archive owner may attach provenance after confirming
+    // its own side effect. A thread-state notification alone cannot create it.
+    record.codex_terminal_archive = None;
 }
 
 /// Records has archived Codex thread.

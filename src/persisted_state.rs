@@ -826,6 +826,8 @@ struct PersistedSessionRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     codex_thread_profile: Option<SharedCodexProfile>,
     external_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    codex_terminal_archive: Option<CodexTerminalArchive>,
     #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
     queued_prompts: VecDeque<QueuedPromptRecord>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -987,6 +989,7 @@ impl PersistedSessionRecord {
             codex_sandbox_mode: self.codex_sandbox_mode.clone(),
             codex_thread_profile: self.codex_thread_profile.clone(),
             external_session_id: self.external_session_id.clone(),
+            codex_terminal_archive: self.codex_terminal_archive.clone(),
             queued_prompts: self.queued_prompts.clone(),
             queued_peer_messages: self.queued_peer_messages.clone(),
             queued_prompt_durability_holds: self.queued_prompt_durability_holds.clone(),
@@ -1036,6 +1039,7 @@ impl PersistedSessionRecord {
             codex_sandbox_mode: record.codex_sandbox_mode,
             codex_thread_profile: record.codex_thread_profile,
             external_session_id: record.external_session_id.clone(),
+            codex_terminal_archive: record.codex_terminal_archive.clone(),
             queued_prompts: record.queued_prompts.clone(),
             queued_peer_messages: record.queued_peer_messages.clone(),
             queued_prompt_durability_holds: record.queued_prompt_durability_holds.clone(),
@@ -1170,6 +1174,7 @@ impl PersistedSessionRecord {
             federation_retired_automatic_mailbox_bindings: self.federation_retired_automatic_mailbox_bindings,
             federation_native_creation_id: self.federation_native_creation_id,
             codex_delegation_release: None,
+            codex_terminal_archive: self.codex_terminal_archive,
             active_codex_approval_policy: self.active_codex_approval_policy,
             active_codex_reasoning_effort: self.active_codex_reasoning_effort,
             active_codex_sandbox_mode: self.active_codex_sandbox_mode,
@@ -1251,6 +1256,7 @@ impl PersistedSessionRecord {
         // is rebuilt from it so a loaded session never advertises a stale
         // paused/unpaused state from an older snapshot.
         record.session.queue_paused = record.orchestrator_auto_dispatch_blocked;
+        restore_codex_terminal_archive_barrier(&mut record);
         // A restarted host cannot prove that an in-flight Resume sent nothing.
         // Keep the persisted hold and leave recovery to the operator.
         clear_provider_capacity_retry(&mut record);

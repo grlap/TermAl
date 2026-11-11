@@ -625,6 +625,7 @@ fn push_remote_proxy_session_record(
         federation_retired_automatic_mailbox_bindings: Vec::new(),
         federation_native_creation_id: new_federation_native_creation_id(),
         codex_delegation_release: None,
+        codex_terminal_archive: None,
         active_codex_approval_policy: None,
         active_codex_reasoning_effort: None,
         active_codex_sandbox_mode: None,

@@ -39,6 +39,7 @@ mod claude_turn_ownership;
 mod cli;
 mod codex_bin;
 mod codex_delegation_release;
+mod codex_delegation_release_restart;
 mod codex_discovery;
 mod codex_home;
 mod codex_profile_routing;

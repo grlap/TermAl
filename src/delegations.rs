@@ -4030,6 +4030,7 @@ fn detach_terminal_delegation_child_runtime_locked(
                         let release = Arc::new(CodexDelegationRelease::for_child(
                             shared.clone(),
                             terminal.clone(),
+                            CodexTerminalArchive::of_record(child),
                         ));
                         child.codex_delegation_release = Some(release.clone());
                         detached.codex_release = Some(CodexDelegationReleaseTicket {

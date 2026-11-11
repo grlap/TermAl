@@ -5,6 +5,55 @@
 
 const CODEX_CHILD_RESULT_FENCE_TIMEOUT: Duration = Duration::from_secs(5);
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+struct CodexTerminalArchive {
+    thread_id: String,
+    profile: SharedCodexProfile,
+}
+
+impl CodexTerminalArchive {
+    fn identity(record: &SessionRecord) -> Option<(&str, SharedCodexProfile)> {
+        if record.session.agent != Agent::Codex
+            || record.remote_id.is_some()
+            || record.session.parent_delegation_id.is_none()
+        {
+            return None;
+        }
+        let thread_id = record.external_session_id.as_deref().filter(|id| !id.is_empty())?;
+        Some((thread_id, record.codex_thread_profile.unwrap_or(SharedCodexProfile::Default)))
+    }
+
+    fn of_record(record: &SessionRecord) -> Option<Self> {
+        let (thread_id, profile) = Self::identity(record)?;
+        Some(Self {
+            thread_id: thread_id.to_owned(),
+            profile,
+        })
+    }
+
+    fn matches(&self, record: &SessionRecord) -> bool {
+        Self::identity(record) == Some((self.thread_id.as_str(), self.profile))
+    }
+}
+
+// A completed automatic archive is durable. Runtime handles, in-flight RPCs,
+// compensation and synchronization are not: only rebuild a settled barrier.
+fn restore_codex_terminal_archive_barrier(record: &mut SessionRecord) {
+    let Some(archive) = record.codex_terminal_archive.clone().filter(|archive| {
+        record_has_archived_codex_thread(record) && archive.matches(record)
+    }) else {
+        record.codex_terminal_archive = None;
+        return;
+    };
+    let release = Arc::new(CodexDelegationRelease {
+        terminal_release: true,
+        terminal_thread: Some(archive),
+        ..Default::default()
+    });
+    release.finish(CodexReleaseOutcome::Archived);
+    record.codex_delegation_release = Some(release);
+}
+
 // Only a failed/canceled first follow-up owns this compensation. A generic
 // terminal status read must not undo an explicit manual Unarchive action.
 fn retain_followup_archive_compensation_locked(
@@ -24,6 +73,7 @@ fn retain_followup_archive_compensation_locked(
                 let release = Arc::new(CodexDelegationRelease {
                     undurable_terminal: Mutex::new(Some(terminal.clone())),
                     terminal_release: true,
+                    terminal_thread: CodexTerminalArchive::of_record(child),
                     compensation_pending: std::sync::atomic::AtomicBool::new(true),
                     ..Default::default()
                 });
@@ -82,6 +132,7 @@ struct CodexDelegationRelease {
     undurable_terminal: Mutex<Option<DelegationRecord>>,
     // Only automatic terminal release authorizes automatic unarchive.
     terminal_release: bool,
+    terminal_thread: Option<CodexTerminalArchive>,
     // A detached restored thread still needs archive even when no transport
     // exists. Keep a retry owner instead of treating Restored as cleanup.
     compensation_pending: std::sync::atomic::AtomicBool,
@@ -94,6 +145,13 @@ struct CodexDelegationRelease {
 }
 
 impl CodexDelegationRelease {
+    fn authorizes_thread(&self, record: &SessionRecord) -> bool {
+        // Existing process-local barriers need no durable row. A restarted
+        // host only creates the barrier from a matching saved identity above.
+        self.terminal_release
+            && self.terminal_thread.as_ref().is_none_or(|thread| thread.matches(record))
+    }
+
     fn needs_followup_compensation(&self) -> bool {
         let outcome = self.outcome.lock().expect("Codex release mutex poisoned");
         (self
@@ -133,11 +191,16 @@ impl CodexDelegationRelease {
         replacement && matches!(process.try_wait(), Ok(Some(_)))
     }
 
-    fn for_child(shared: SharedCodexSessionHandle, terminal: DelegationRecord) -> Self {
+    fn for_child(
+        shared: SharedCodexSessionHandle,
+        terminal: DelegationRecord,
+        thread: Option<CodexTerminalArchive>,
+    ) -> Self {
         Self {
             local: Mutex::new(Some(shared)),
             undurable_terminal: Mutex::new(Some(terminal)),
             terminal_release: true,
+            terminal_thread: thread,
             ..Self::default()
         }
     }
@@ -383,6 +446,7 @@ impl CodexDelegationReleaseTicket {
                     };
                     let record = &inner.sessions[index];
                     if record.external_session_id.as_deref() != Some(&thread_id)
+                        || !release.authorizes_thread(record)
                         || !record
                             .codex_delegation_release
                             .as_ref()
@@ -392,12 +456,10 @@ impl CodexDelegationReleaseTicket {
                             "Codex child thread changed during archive",
                         ));
                     }
-                    set_record_codex_thread_state(
-                        inner
-                            .session_mut_by_index(index)
-                            .expect("validated child session index"),
-                        CodexThreadState::Archived,
-                    );
+                    let record = inner.session_mut_by_index(index)
+                        .expect("validated child session index");
+                    set_record_codex_thread_state(record, CodexThreadState::Archived);
+                    record.codex_terminal_archive = CodexTerminalArchive::of_record(record);
                     state.commit_locked(&mut inner).map_err(|error| {
                         ApiError::internal(format!(
                             "failed persisting released child thread: {error:#}"
@@ -466,6 +528,7 @@ impl AppState {
             let release = Arc::new(CodexDelegationRelease {
                 undurable_terminal: Mutex::new(Some(terminal.clone())),
                 terminal_release: true,
+                terminal_thread: CodexTerminalArchive::of_record(child),
                 compensation_pending: std::sync::atomic::AtomicBool::new(true),
                 ..Default::default()
             });
@@ -647,12 +710,12 @@ impl AppState {
                         ));
                     }
                     if archived {
-                        set_record_codex_thread_state(
-                            inner
-                                .session_mut_by_index(index)
-                                .expect("validated child session index"),
-                            CodexThreadState::Archived,
-                        );
+                        let record = inner.session_mut_by_index(index)
+                            .expect("validated child session index");
+                        set_record_codex_thread_state(record, CodexThreadState::Archived);
+                        if barrier.as_ref().is_some_and(|barrier| barrier.authorizes_thread(record)) {
+                            record.codex_terminal_archive = CodexTerminalArchive::of_record(record);
+                        }
                         self.commit_locked(&mut inner).map_err(|error| {
                             ApiError::internal(format!(
                                 "failed persisting confirmed archive: {error:#}"
@@ -669,10 +732,15 @@ impl AppState {
             barrier.retry_durability(self)?;
         }
         if archived {
-            if !barrier
-                .as_ref()
-                .is_some_and(|barrier| barrier.terminal_release)
-            {
+            let automatic = {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                inner.find_session_index(session_id).is_some_and(|index| {
+                    barrier.as_ref().is_some_and(|barrier| {
+                        barrier.authorizes_thread(&inner.sessions[index])
+                    })
+                })
+            };
+            if !automatic {
                 return Err(ApiError::conflict(
                     "the current Codex thread was archived manually; unarchive it before sending another prompt",
                 ));
