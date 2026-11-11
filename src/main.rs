@@ -365,6 +365,7 @@ fn app_router_with_acceptance_policy_limiter(
             "/api/diagnostics/runtime-observations",
             get(get_runtime_observation_counts),
         )
+        .route("/api/diagnostics/closing-jobs", get(get_closing_job_counts))
         .route(
             "/api/diagnostics/named-root-journal",
             get(get_engram_root_journal_diagnostics),
@@ -1126,6 +1127,10 @@ include!("engram_unadmitted_capture.rs");
 include!("engram_unadmitted_closing.rs");
 include!("engram_unadmitted_delivery.rs");
 include!("engram_runtime_observation_counts.rs");
+include!("engram_closing_job_counts.rs");
+#[cfg(test)]
+#[path = "tests/engram_closing_job_counts.rs"]
+mod closing_job_counts_tests;
 include!("engram_unadmitted_worker.rs");
 include!("engram_unadmitted_lifecycle.rs");
 include!("engram_source_observation_removal.rs");
