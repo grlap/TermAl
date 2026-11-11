@@ -431,28 +431,30 @@ async fn federation_reference_publication_other_key_settling_is_retryable_not_st
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn federation_reference_publication_busy_state_returns_without_writer_lock_inversion() {
+async fn federation_reference_publication_busy_state_waits_without_writer_lock_inversion() {
     let _scope = TestTempRootDirectoryScope::repository_local();
-    let fixture = ReferenceFixture::new(true).await;
-    fixture.provision("publication-admission").await;
-    let row = prepared(&fixture);
-    let context = fixture
-        .proof
-        .central
-        .capture_federation_reference(&fixture.caller, &fixture.canonical)
-        .unwrap();
-    let app = fixture.proof.central.clone();
-    let held = fixture.proof.central.inner.lock().unwrap();
-    let task =
-        tokio::task::spawn_blocking(move || app.publish_federation_reference(&context, &row));
-    let error = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, task)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap_err();
-    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
-    assert!(error.message.starts_with("REFERENCE_PUBLICATION_BUSY:"));
+    let (fixture, row, context) = unpublished_fixture("publication-admission").await;
+    let mut held = Some(fixture.proof.central.inner.lock().unwrap());
+    let clock = PublicationClock::default();
+    let result = clock.run(
+        &fixture,
+        &context,
+        &row,
+        |spent| {
+            publication_writer_released(&fixture);
+            assert!(receipt(&fixture, &row).is_none());
+            assert_eq!(publication_witness(&fixture), 0);
+            if spent == Duration::from_secs(50) {
+                drop(held.take());
+            }
+        },
+        |connection, statement| connection.execute_batch(statement),
+    );
     drop(held);
+    assert_eq!(result.unwrap(), row.descriptor());
+    assert_eq!(clock.spent.get(), Duration::from_secs(50));
+    assert_eq!(&*clock.warnings.borrow(), &[Duration::from_secs(10)]);
+    assert_eq!(publication_witness(&fixture), 1);
     fixture.finish().await;
 }
 
@@ -553,5 +555,429 @@ async fn federation_reference_publication_unknown_or_malformed_marker_never_back
         .unwrap();
     assert_eq!(unchanged, "not-json");
     drop(connection);
+    fixture.finish().await;
+}
+
+// Start from an actually provisioned, durable descriptor, then remove only its
+// publication receipt so the local commit cut can be exercised independently.
+async fn unpublished_fixture(
+    key: &str,
+) -> (
+    ReferenceFixture,
+    FederationMailboxReference,
+    FederationReferenceContext,
+) {
+    let fixture = ReferenceFixture::new(true).await;
+    fixture.provision(key).await;
+    fixture.proof.central.shutdown_persist_blocking();
+    let row = prepared(&fixture);
+    let context = fixture
+        .proof
+        .central
+        .capture_federation_reference(&fixture.caller, &fixture.canonical)
+        .unwrap();
+    let connection =
+        rusqlite::Connection::open(fixture.proof.central.persistence_path.as_path()).unwrap();
+    connection
+        .execute(
+            "DELETE FROM meta WHERE key=?1",
+            [federation_reference_publication_key(&row.id)],
+        )
+        .unwrap();
+    connection.execute_batch("INSERT INTO meta(key,value) VALUES('publication_fixture_commit_count','0');
+        CREATE TRIGGER publication_commit_witness AFTER INSERT ON meta
+        WHEN NEW.key GLOB 'federation_reference_publication_v1:*'
+        BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='publication_fixture_commit_count'; END;").unwrap();
+    fixture
+        .proof
+        .central
+        .inner
+        .lock()
+        .unwrap()
+        .federation
+        .mailbox_references
+        .get_mut(&row.id)
+        .unwrap()
+        .publication = None;
+    drop(connection);
+    (fixture, row, context)
+}
+
+fn publication_witness(fixture: &ReferenceFixture) -> i64 {
+    rusqlite::Connection::open(fixture.proof.central.persistence_path.as_path())
+        .unwrap()
+        .query_row(
+            "SELECT CAST(value AS INTEGER) FROM meta WHERE key='publication_fixture_commit_count'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+fn publication_sql_error(code: i32) -> rusqlite::Error {
+    rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None)
+}
+
+#[derive(Default)]
+struct PublicationClock {
+    spent: std::cell::Cell<Duration>,
+    warnings: std::cell::RefCell<Vec<Duration>>,
+}
+
+impl PublicationClock {
+    fn run(
+        &self,
+        fixture: &ReferenceFixture,
+        context: &FederationReferenceContext,
+        row: &FederationMailboxReference,
+        mut waiting: impl FnMut(Duration),
+        sql: impl FnMut(&rusqlite::Connection, &'static str) -> rusqlite::Result<()>,
+    ) -> Result<Value, ApiError> {
+        fixture
+            .proof
+            .central
+            .publish_federation_reference_with_wait(
+                context,
+                row,
+                || self.spent.get(),
+                |delay| {
+                    assert!(delay > Duration::ZERO && delay <= Duration::from_millis(25));
+                    // The injected clock models elapsed work between observations;
+                    // no real sleep or scheduling race advances the operation.
+                    self.spent.set(self.spent.get() + Duration::from_secs(5));
+                    waiting(self.spent.get());
+                },
+                |spent| self.warnings.borrow_mut().push(spent),
+                sql,
+            )
+    }
+}
+
+fn publication_state_progress(fixture: &ReferenceFixture) {
+    let state = &fixture.proof.central.inner;
+    assert!(
+        std::thread::scope(|scope| scope
+            .spawn(move || {
+                let Some(mut inner) = state.try_lock_now() else {
+                    return false;
+                };
+                inner.revision += 1;
+                true
+            })
+            .join()
+            .unwrap()),
+        "publication wait retained StateInner"
+    );
+}
+
+fn publication_writer_released(fixture: &ReferenceFixture) {
+    assert!(
+        fixture.proof.channel.state.try_lock().is_ok(),
+        "publication kept link authority during backoff"
+    );
+    let writer = sqlite_state_write_lock(fixture.proof.central.persistence_path.as_path());
+    let admission = lock_sqlite_state_writer_for(&writer, Duration::ZERO)
+        .expect("publication kept writer admission during backoff");
+    let connection =
+        rusqlite::Connection::open(fixture.proof.central.persistence_path.as_path()).unwrap();
+    connection.busy_timeout(Duration::ZERO).unwrap();
+    connection
+        .execute_batch("BEGIN IMMEDIATE; ROLLBACK;")
+        .expect("publication kept a transaction during backoff");
+    drop(connection);
+    drop(admission);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn federation_reference_publication_writer_contention_waits_warns_and_commits_once() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (fixture, row, context) = unpublished_fixture("writer-contention").await;
+    let writer =
+        rusqlite::Connection::open(fixture.proof.central.persistence_path.as_path()).unwrap();
+    writer.execute_batch("BEGIN IMMEDIATE;").unwrap();
+    let mut held = Some(writer);
+    let clock = PublicationClock::default();
+    let result = clock
+        .run(
+            &fixture,
+            &context,
+            &row,
+            |spent| {
+                publication_state_progress(&fixture);
+                assert!(receipt(&fixture, &row).is_none());
+                if spent < Duration::from_secs(10) {
+                    assert!(clock.warnings.borrow().is_empty());
+                }
+                if spent == Duration::from_secs(50) {
+                    held.take().unwrap().execute_batch("ROLLBACK;").unwrap();
+                }
+            },
+            |connection, statement| {
+                let busy: u64 =
+                    connection.query_row("PRAGMA busy_timeout", [], |row| row.get(0))?;
+                assert_eq!(busy, 0);
+                connection.execute_batch(statement)
+            },
+        )
+        .unwrap();
+    assert_eq!(clock.spent.get(), Duration::from_secs(50));
+    assert_eq!(&*clock.warnings.borrow(), &[Duration::from_secs(10)]);
+    assert_eq!(result, row.descriptor());
+    assert_eq!(
+        receipt(&fixture, &row),
+        Some(row.publication_marker().unwrap())
+    );
+    assert_eq!(publication_witness(&fixture), 1);
+    assert_eq!(fixture.mail_counts(), (0, 0, 0));
+    drop(held);
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn federation_reference_publication_writer_contention_expires_with_existing_busy_error() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (fixture, row, context) = unpublished_fixture("writer-expiry").await;
+    let writer =
+        rusqlite::Connection::open(fixture.proof.central.persistence_path.as_path()).unwrap();
+    writer.execute_batch("BEGIN IMMEDIATE;").unwrap();
+    let clock = PublicationClock::default();
+    let error = clock
+        .run(
+            &fixture,
+            &context,
+            &row,
+            |_| publication_state_progress(&fixture),
+            |connection, statement| connection.execute_batch(statement),
+        )
+        .unwrap_err();
+    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(error.message.starts_with("REFERENCE_PUBLICATION_BUSY:"));
+    assert_eq!(clock.spent.get(), Duration::from_secs(60));
+    assert_eq!(&*clock.warnings.borrow(), &[Duration::from_secs(10)]);
+    writer.execute_batch("ROLLBACK;").unwrap();
+    drop(writer);
+    assert_eq!(publication_witness(&fixture), 0);
+    assert!(receipt(&fixture, &row).is_none());
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn federation_reference_publication_writer_admission_uses_the_original_budget() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (fixture, row, context) = unpublished_fixture("writer-admission").await;
+    let writer = sqlite_state_write_lock(fixture.proof.central.persistence_path.as_path());
+    let mut admission = Some(lock_sqlite_state_writer(&writer));
+    let clock = PublicationClock::default();
+    clock
+        .run(
+            &fixture,
+            &context,
+            &row,
+            |spent| {
+                publication_state_progress(&fixture);
+                if spent == Duration::from_secs(50) {
+                    drop(admission.take());
+                }
+            },
+            |connection, statement| connection.execute_batch(statement),
+        )
+        .unwrap();
+    assert_eq!(clock.spent.get(), Duration::from_secs(50));
+    assert_eq!(&*clock.warnings.borrow(), &[Duration::from_secs(10)]);
+    assert_eq!(publication_witness(&fixture), 1);
+    drop(admission);
+    drop(writer);
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn federation_reference_publication_authority_change_during_wait_refuses_without_marker() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (fixture, row, context) = unpublished_fixture("authority-after-wait").await;
+    let writer =
+        rusqlite::Connection::open(fixture.proof.central.persistence_path.as_path()).unwrap();
+    writer.execute_batch("BEGIN IMMEDIATE;").unwrap();
+    let mut held = Some(writer);
+    let clock = PublicationClock::default();
+    let error = clock
+        .run(
+            &fixture,
+            &context,
+            &row,
+            |spent| {
+                if spent == Duration::from_secs(50) {
+                    held.take().unwrap().execute_batch("ROLLBACK;").unwrap();
+                    let mut inner = fixture.proof.central.inner.lock().unwrap();
+                    let index = inner.find_session_index(&fixture.caller).unwrap();
+                    inner
+                        .session_mut_by_index(index)
+                        .unwrap()
+                        .federation_native_creation_id = Uuid::new_v4().to_string();
+                }
+            },
+            |connection, statement| connection.execute_batch(statement),
+        )
+        .unwrap_err();
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(receipt(&fixture, &row).is_none());
+    assert_eq!(publication_witness(&fixture), 0);
+    assert_eq!(&*clock.warnings.borrow(), &[Duration::from_secs(10)]);
+    drop(held);
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn federation_reference_publication_commit_busy_confirms_rollback_before_rebuilding() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (fixture, row, context) = unpublished_fixture("commit-busy").await;
+    let clock = PublicationClock::default();
+    let mut commits = 0;
+    let mut rollbacks = 0;
+    clock
+        .run(
+            &fixture,
+            &context,
+            &row,
+            |_| {
+                publication_state_progress(&fixture);
+                publication_writer_released(&fixture);
+                assert_eq!(publication_witness(&fixture), 0);
+                assert!(receipt(&fixture, &row).is_none());
+            },
+            |connection, statement| {
+                if statement == "COMMIT" {
+                    commits += 1;
+                    if clock.spent.get() < Duration::from_secs(50) {
+                        return Err(publication_sql_error(rusqlite::ffi::SQLITE_BUSY));
+                    }
+                } else {
+                    rollbacks += 1;
+                }
+                connection.execute_batch(statement)
+            },
+        )
+        .unwrap();
+    assert_eq!((commits, rollbacks), (11, 10));
+    assert_eq!(&*clock.warnings.borrow(), &[Duration::from_secs(10)]);
+    assert_eq!(publication_witness(&fixture), 1);
+    assert_eq!(
+        receipt(&fixture, &row),
+        Some(row.publication_marker().unwrap())
+    );
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn federation_reference_publication_failed_rollback_never_retries_unknown_commit() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (fixture, row, context) = unpublished_fixture("rollback-unknown").await;
+    let mut commits = 0;
+    let mut rollbacks = 0;
+    let error = PublicationClock::default()
+        .run(
+            &fixture,
+            &context,
+            &row,
+            |_| panic!("unknown outcome was replayed"),
+            |_, statement| {
+                if statement == "COMMIT" {
+                    commits += 1;
+                    Err(publication_sql_error(rusqlite::ffi::SQLITE_BUSY))
+                } else {
+                    rollbacks += 1;
+                    Err(publication_sql_error(rusqlite::ffi::SQLITE_IOERR))
+                }
+            },
+        )
+        .unwrap_err();
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!((commits, rollbacks), (1, 1));
+    assert!(receipt(&fixture, &row).is_none());
+    assert_eq!(publication_witness(&fixture), 0);
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn federation_reference_publication_ambiguous_busy_commit_reconciles_only_exact_marker() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (fixture, row, context) = unpublished_fixture("commit-unknown-marker").await;
+    let mut commits = 0;
+    let descriptor = PublicationClock::default()
+        .run(
+            &fixture,
+            &context,
+            &row,
+            |_| panic!("unknown outcome was replayed"),
+            |connection, statement| {
+                assert_eq!(
+                    statement, "COMMIT",
+                    "autocommit is not proof of failed commit"
+                );
+                commits += 1;
+                connection.execute_batch(statement)?;
+                Err(publication_sql_error(rusqlite::ffi::SQLITE_BUSY))
+            },
+        )
+        .unwrap();
+    assert_eq!(commits, 1);
+    assert_eq!(descriptor, row.descriptor());
+    assert_eq!(publication_witness(&fixture), 1);
+    assert_eq!(
+        receipt(&fixture, &row),
+        Some(row.publication_marker().unwrap())
+    );
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn federation_reference_publication_unknown_commit_without_marker_never_replays() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (fixture, row, context) = unpublished_fixture("commit-unknown-empty").await;
+    let mut commits = 0;
+    let error = PublicationClock::default()
+        .run(
+            &fixture,
+            &context,
+            &row,
+            |_| panic!("unknown outcome was replayed"),
+            |connection, statement| {
+                if statement == "COMMIT" {
+                    commits += 1;
+                    Err(publication_sql_error(rusqlite::ffi::SQLITE_IOERR))
+                } else {
+                    connection.execute_batch(statement)
+                }
+            },
+        )
+        .unwrap_err();
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(commits, 1);
+    assert!(receipt(&fixture, &row).is_none());
+    assert_eq!(publication_witness(&fixture), 0);
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn federation_reference_publication_successful_commit_issues_no_rollback() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (fixture, row, context) = unpublished_fixture("successful-commit-owner").await;
+    let mut statements = Vec::new();
+    let descriptor = PublicationClock::default()
+        .run(
+            &fixture,
+            &context,
+            &row,
+            |_| panic!("uncontended publication must not wait"),
+            |connection, statement| {
+                statements.push(statement);
+                connection.execute_batch(statement)?;
+                assert!(connection.is_autocommit());
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert_eq!(statements, vec!["COMMIT"]);
+    assert_eq!(descriptor, row.descriptor());
+    assert_eq!(publication_witness(&fixture), 1);
     fixture.finish().await;
 }
