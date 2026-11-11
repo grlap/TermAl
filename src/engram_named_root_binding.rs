@@ -1117,6 +1117,7 @@ impl AppState {
         budget: Duration,
     ) {
         let clock = self.engram_budget_clock();
+        // This bounds admission of another journal, not an issued call.
         let deadline = engram_removed_root_read_now(&clock) + budget.min(Duration::from_secs(2));
         if claim.is_none() {
             self.recover_engram_authority_runs(
@@ -1182,6 +1183,9 @@ impl AppState {
             if budget.is_zero() {
                 break;
             }
+            // Once admitted, this journal's authority/read/publication stages
+            // keep their operation window even after the pass stops admitting.
+            let operation_deadline = clock.now() + ENGRAM_MIN_CALL_TIMEOUT;
             // Advance only for an attempted read, even when it uses the whole
             // budget. Stable claim identity survives removal and filtering;
             // requested-claim reads cannot reset the store's sweep position.
@@ -1196,11 +1200,11 @@ impl AppState {
                 .read_binding
                 .as_ref()
                 .expect("selected read identity");
-            let Ok(owner) = self.prepare_engram_authority_until(&before.store, binding, deadline)
+            let Ok(owner) = self.prepare_engram_authority_until(&before.store, binding, operation_deadline)
             else {
                 continue;
             };
-            let budget = deadline.saturating_duration_since(clock.now());
+            let budget = operation_deadline.saturating_duration_since(clock.now());
             if budget.is_zero() {
                 break;
             }
@@ -1266,7 +1270,7 @@ impl AppState {
             engram_compact_root_journal(&mut inner);
             drop(inner);
             if self
-                .publish_engram_authority_until(&before.store, &owner, deadline)
+                .publish_engram_authority_image_until(&before.store, &owner, operation_deadline)
                 .is_err()
             {
                 continue;

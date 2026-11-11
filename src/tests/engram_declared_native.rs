@@ -178,8 +178,14 @@ fn native_opening_expiry_notice_is_turn_scoped_for_both_providers() {
 
 #[test]
 fn native_opening_publication_and_expiry_use_a_controlled_clock() {
-    for elapsed_seconds in [9, 34, 36] {
-        let expired = elapsed_seconds == 36;
+    let total = NATIVE_S0_CAPTURE_BUDGET + NATIVE_S0_AUTHORITY_MARGIN;
+    for elapsed in [
+        Duration::from_secs(9),
+        total - Duration::from_millis(1),
+        total,
+        total + Duration::from_millis(1),
+    ] {
+        let expired = elapsed >= total;
         let native = NativeFixture::new("native-controlled-opening", false);
         // Exercise native snapshot assembly with the scripted shared owner,
         // separately from dispatch availability or real-producer latency.
@@ -206,9 +212,8 @@ fn native_opening_publication_and_expiry_use_a_controlled_clock() {
             .test_declared_run_snapshot = Some(Arc::new(move |_, _| {
             // Controlled ordering: capture completes before publication, with
             // logical time either still valid or beyond the original deadline.
-            // Nine seconds exceeds the former bound; 34 includes time for
-            // opening stages around source; 36 exceeds the combined deadline.
-            *clock.lock().unwrap() = initial + Duration::from_secs(elapsed_seconds);
+            // Exercise both sides and the exact original admission boundary.
+            *clock.lock().unwrap() = initial + elapsed;
             Ok(snapshot.clone())
         }));
         native
@@ -290,7 +295,8 @@ fn native_opening_observes_the_named_worktree_once_without_borrowing_project_roo
     let expected = native.source_owner.identity();
     let expected_cwd = engram_host_workdir(native.fixture.state.persistence_path.as_ref()).unwrap();
     let mut roots = Vec::new();
-    let deadline = std::time::Instant::now() + NATIVE_S0_CAPTURE_BUDGET;
+    let deadline =
+        std::time::Instant::now() + NATIVE_S0_CAPTURE_BUDGET + NATIVE_S0_AUTHORITY_MARGIN;
     let snapshot = native
         .fixture
         .state
@@ -298,6 +304,7 @@ fn native_opening_observes_the_named_worktree_once_without_borrowing_project_roo
             &native.session,
             &pending,
             deadline,
+            EngramSourcePhasePlan::from(std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET),
             |_, cwd, args, until, _| {
                 assert_eq!(
                     cwd, expected_cwd,
@@ -311,14 +318,15 @@ fn native_opening_observes_the_named_worktree_once_without_borrowing_project_roo
                         .is_not_held_by_current_thread_for_test(),
                     "source IO holds no StateInner lock"
                 );
-                assert_eq!(
-                    until, deadline,
-                    "the original aggregate deadline is retained"
+                assert!(
+                    until < deadline,
+                    "source must leave the outer authority reserve available"
                 );
                 if args[0] == "--version" {
                     return Ok(super::engram_source_owner::source_owner_reply(args));
                 }
                 assert_eq!(args[0], "source");
+                assert_eq!(args.len(), 4, "use the owner's supported default");
                 let root = fs::canonicalize(&args[2]).unwrap();
                 roots.push(root);
                 Ok(super::engram_source_owner::source_owner_output(
@@ -379,6 +387,9 @@ fn native_opening_rechecks_pending_root_fence_and_owner_authority_before_returni
                 &native.session,
                 &pending,
                 std::time::Instant::now() + NATIVE_S0_CAPTURE_BUDGET,
+                EngramSourcePhasePlan::from(
+                    std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET,
+                ),
                 |_, _, args, _, _| {
                     if args[0] == "--version" {
                         return Ok(super::engram_source_owner::source_owner_reply(args));
@@ -1239,6 +1250,14 @@ fn native_end_freezes_artifact_before_a_blocked_registration_worker() {
             if std::thread::current().name() == Some("native-declared-run")
                 && !blocked.swap(true, std::sync::atomic::Ordering::SeqCst)
             {
+                // A durability wait may precede registration's source call.
+                // Its worker must retain the source window after that wait.
+                check_capture_cancellation_at(
+                    std::time::Instant::now()
+                        + TEST_RUN_REGISTRATION_DURABILITY_BUDGET
+                        + ENGRAM_SOURCE_COMMAND_BUDGET / 2,
+                )
+                .expect("worker age cannot cancel a later native registration stage");
                 ready_tx.send(()).unwrap();
                 release_rx
                     .lock()

@@ -360,6 +360,13 @@ impl EngramControlTransport for ProcessEngramControlTransport {
         request: &EngramControlRequest,
         timeout: Duration,
     ) -> std::result::Result<Value, EngramTransportError> {
+        // Direct transport callers have the same admission boundary as the
+        // adapter. A refused call must not encode, consult or replace a child.
+        if timeout.is_zero() {
+            return Err(EngramTransportError::deadline_before_launch(
+                "Engram admission budget exhausted before process launch",
+            ));
+        }
         // Only the control worker writes to the process, and only after it
         // receives this request from the channel below. Every failure before
         // that hand-off provably sent no byte of the request frame, so it is
@@ -412,8 +419,7 @@ impl EngramControlTransport for ProcessEngramControlTransport {
                 error
             })?;
 
-        let remaining = timeout.saturating_sub(started_at.elapsed());
-        match reply_rx.recv_timeout(remaining) {
+        match receive_engram_call(&reply_rx, started_at, timeout, request.operation()) {
             Ok(Ok(result)) => Ok(result),
             Ok(Err(error)) => {
                 // A valid Engram error envelope is an application response on
@@ -699,7 +705,7 @@ fn spawn_engram_control_process(
     }
 
     if let Some(handshake) = startup_handshake {
-        let startup_result = match startup_rx.recv_timeout(handshake.timeout) {
+        let startup_result = match receive_engram_call(&startup_rx, std::time::Instant::now(), handshake.timeout, "control startup handshake") {
             Ok(result) => result,
             Err(mpsc::RecvTimeoutError::Timeout) => Err(EngramTransportError::transport(format!(
                 "Engram control startup handshake exceeded {} ms",

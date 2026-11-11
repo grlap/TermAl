@@ -6,6 +6,58 @@ const ENGRAM_SOURCE_JSON_LIMIT: usize = 1024 * 1024;
 // The same scalar configures the launcher's source process and metadata GET.
 const ENGRAM_SOURCE_COMMAND_BUDGET: Duration =
     Duration::from_millis(include!("../scripts/source-id-budget-ms.json"));
+const ENGRAM_SOURCE_PROCESS_BUDGET: Duration = Duration::from_millis(
+    if ENGRAM_SOURCE_COMMAND_BUDGET.as_millis() > ENGRAM_CALL_BUDGET_MS[0] as u128 {
+        ENGRAM_SOURCE_COMMAND_BUDGET.as_millis() as u64 + ENGRAM_CALL_BUDGET_MS[1]
+    } else {
+        ENGRAM_CALL_BUDGET_MS[0] + ENGRAM_CALL_BUDGET_MS[1]
+    },
+);
+const ENGRAM_SOURCE_METADATA_BUDGET: Duration = ENGRAM_SOURCE_PROCESS_BUDGET.saturating_mul(2);
+
+/// One admitted plan, retained through queueing and every nested source helper.
+/// The first window funds preparation/version; the second leaves a late-issued
+/// source process its own default and delivery reserve. Longer stages stay longer.
+#[derive(Clone, Copy, Debug)]
+struct EngramSourcePhasePlan {
+    probe_deadline: std::time::Instant,
+    source_admission_deadline: std::time::Instant,
+    completion_deadline: std::time::Instant,
+    admitted: bool,
+}
+impl EngramSourcePhasePlan {
+    fn at(requested: std::time::Instant, admitted_at: std::time::Instant) -> Self {
+        let probe_deadline = requested.max(admitted_at + ENGRAM_SOURCE_PROCESS_BUDGET);
+        Self { probe_deadline, source_admission_deadline: probe_deadline,
+            completion_deadline: probe_deadline + ENGRAM_SOURCE_PROCESS_BUDGET,
+            admitted: requested > admitted_at }
+    }
+
+    fn check(&self) -> Result<()> {
+        if !self.admitted { bail!("Engram source deadline exceeded"); }
+        engram_source_before_deadline(self.source_admission_deadline)
+    }
+
+    fn source_deadline_at(&self, now: std::time::Instant) -> Result<std::time::Instant> {
+        if !self.admitted || now >= self.source_admission_deadline { bail!("Engram source deadline exceeded"); }
+        Ok(self.probe_deadline.max(now + ENGRAM_SOURCE_PROCESS_BUDGET))
+    }
+
+    fn remaining(&self) -> Duration {
+        self.completion_deadline.saturating_duration_since(std::time::Instant::now())
+    }
+
+    fn following_observation(self) -> Self {
+        Self { probe_deadline: self.probe_deadline,
+            source_admission_deadline: self.completion_deadline,
+            completion_deadline: self.completion_deadline + ENGRAM_SOURCE_PROCESS_BUDGET,
+            admitted: self.admitted }
+    }
+}
+
+impl From<std::time::Instant> for EngramSourcePhasePlan {
+    fn from(deadline: std::time::Instant) -> Self { Self::at(deadline, std::time::Instant::now()) }
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -172,11 +224,10 @@ fn parse_engram_source_observation(
 
 fn engram_source_command_args(root: &FsPath, deadline: std::time::Instant) -> Result<Vec<String>> {
     engram_source_before_deadline(deadline)?;
-    let remaining = deadline.saturating_duration_since(std::time::Instant::now())
-        .as_millis().min(ENGRAM_SOURCE_COMMAND_BUDGET.as_millis());
-    if remaining == 0 { bail!("Engram source deadline exceeded"); }
+    // The installed owner chooses its own supported default. Host-side waits
+    // cover the newer default without imposing an argument older owners refuse.
     Ok(vec!["source".into(), "--root".into(),
         normalize_user_facing_path(root).to_str()
             .context("Engram source root is not UTF-8")?.to_owned(),
-        "--json".into(), "--timeout-ms".into(), remaining.to_string()])
+        "--json".into()])
 }

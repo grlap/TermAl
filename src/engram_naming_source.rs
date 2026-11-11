@@ -15,9 +15,9 @@ impl AppState {
         &self, target: &EngramBindingTarget, root: &str, common_dir_key: &str,
         budget: Duration,
     ) -> Option<EngramExecutionSourceBasis> {
-        let budget = budget.min(ENGRAM_SOURCE_COMMAND_BUDGET);
         if budget.is_zero() { return None; }
-        let deadline = std::time::Instant::now() + budget;
+        let budget = engram_operation_timeout(budget);
+        let deadline = EngramSourcePhasePlan::from(std::time::Instant::now() + budget);
         let live = self.inner.lock().expect("state mutex poisoned")
             .engram_turn_basis_captures_live.clone();
         let state = self.clone();
@@ -28,7 +28,7 @@ impl AppState {
             &live,
             &self.capture_lifetime,
             ENGRAM_TURN_BASIS_CAPTURE_LIMIT,
-            budget,
+            deadline.remaining(),
             move || {
                 state
                     .engram_naming_source_basis_until(&target, &root, &common_dir_key, deadline)
@@ -39,8 +39,9 @@ impl AppState {
 
     fn engram_naming_source_basis_until(
         &self, target: &EngramBindingTarget, root: &str, common_dir_key: &str,
-        deadline: std::time::Instant,
+        deadline: impl Into<EngramSourcePhasePlan>,
     ) -> Result<EngramExecutionSourceBasis> {
+        let deadline = deadline.into();
         let current = |inner: &StateInner| {
             Self::engram_source_root_target_locked(inner, &target.connection.session_id)
                 .ok().flatten().is_some_and(|now|
@@ -50,7 +51,7 @@ impl AppState {
                         && now.external_ref == target.external_ref
                         && now.runtime_snapshot == target.runtime_snapshot)
         };
-        engram_source_before_deadline(deadline)?;
+        deadline.check()?;
         if !current(&self.inner.lock().expect("state mutex poisoned"))
             || !engram_naming_root_current(root, common_dir_key)
         {
@@ -68,13 +69,13 @@ impl AppState {
                 engram_source_owner_run(binary, cwd, args, until, limit)
             },
         )?;
-        let source_id = observation.into_source_id(deadline)?;
+        let source_id = observation.into_source_id(deadline.completion_deadline)?;
         if !current(&self.inner.lock().expect("state mutex poisoned"))
             || !engram_naming_root_current(root, common_dir_key)
         {
             bail!("naming source scope changed during capture");
         }
-        engram_source_before_deadline(deadline)?;
+        engram_source_before_deadline(deadline.completion_deadline)?;
         Ok(EngramExecutionSourceBasis {
             workspace_id: root.to_owned(), source_revision: String::new(),
             source_id: Some(source_id), source_root_generation: None, source_root_state: None,

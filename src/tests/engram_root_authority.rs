@@ -396,10 +396,9 @@ fn source_root_authority_shared_staging_and_cleanup_require_retained_association
 fn source_root_authority_fixture_setup_ack_deadline_distinguishes_expiry_from_owner_change() {
     for mode in ["standalone-expiry", "setup-success", "setup-expiry"] {
         let label = format!("authority-{mode}");
-        // Real time on purpose: the expiry modes let the acknowledgement
-        // deadline pass by sleeping past the RPC budget on the real clock; a
-        // scripted clock that nobody advances would never reach it.
-        let claimed = EOCheckedTurn::idle_real(&label, true);
+        // The persist fence orders the waiter before logical expiry.
+        let claimed = EOCheckedTurn::idle(&label, true);
+        let clock = claimed.state.engram_budget_clock();
         let store = naming_store(&claimed);
         let recorder = Arc::new(AuthorityTimeoutRecorder {
             control: claimed.transport.clone(),
@@ -410,7 +409,7 @@ fn source_root_authority_fixture_setup_ack_deadline_distinguishes_expiry_from_ow
         .unwrap()
         .unwrap();
         let rpc = target.settings.call_timeout();
-        assert_eq!(rpc, Duration::from_millis(250));
+        assert!(rpc >= ENGRAM_MIN_CALL_TIMEOUT);
         assert!(target.test_root_setup_deadline.is_none());
         let mut state = claimed.state.clone();
         let (tx, rx) = std::sync::mpsc::channel();
@@ -421,7 +420,7 @@ fn source_root_authority_fixture_setup_ack_deadline_distinguishes_expiry_from_ow
             let mut target = target;
             if mode != "standalone-expiry" {
                 target.test_root_setup_deadline = Some(worker.engram_budget_clock().now() +
-                    if success { DEADLOCK_GUARD } else { rpc });
+                    if success { rpc * 2 } else { rpc });
             }
             let deadline = target.root_operation_deadline(worker.engram_budget_clock().now());
             let binding = target.work_binding.as_ref().unwrap();
@@ -447,7 +446,8 @@ fn source_root_authority_fixture_setup_ack_deadline_distinguishes_expiry_from_ow
         if success {
             // The correct first ACK arrives after the unchanged RPC interval,
             // while the single explicit setup total is still funded.
-            std::thread::sleep(rpc + Duration::from_millis(25));
+            clock.wait_for_scripted_waiter();
+            clock.advance(rpc + Duration::from_millis(25));
             let guard = collect_persist_delta_from_shared_state(&state.inner, 0);
             persist_delta_with_fences(
                 &mut cache,
@@ -487,6 +487,8 @@ fn source_root_authority_fixture_setup_ack_deadline_distinguishes_expiry_from_ow
         } else {
             // Withhold the exact Prepared ACK until the total expires. This
             // distinguishes deadline failure from supersession or wrong content.
+            clock.wait_for_scripted_waiter();
+            clock.advance(rpc + Duration::from_millis(25));
             let error = task
                 .join()
                 .unwrap()
@@ -566,10 +568,9 @@ fn source_root_authority_fixture_setup_ack_deadline_distinguishes_expiry_from_ow
 #[test]
 fn source_root_authority_review_delayed_manual_writer_expires_without_owner_supersession() {
     let label = "authority-ack-contention-diagnostic";
-    // Real time on purpose: the worker's acknowledgement deadline must pass
-    // while the SQLite writer is held, which the test causes by sleeping past
-    // the RPC budget on the real clock.
-    let claimed = EOCheckedTurn::idle_real(label, true);
+    // The actual held writer orders the cause; logical time expires its ACK.
+    let claimed = EOCheckedTurn::idle(label, true);
+    let clock = claimed.state.engram_budget_clock();
     let store = naming_store(&claimed);
     let (binding,) = claimed.record_mut(|record| {
         (
@@ -612,7 +613,7 @@ fn source_root_authority_review_delayed_manual_writer_expires_without_owner_supe
     // Deliberately exceed the configured RPC-sized authority interval while
     // the actual SQLite writer is blocked. This is an ordered cause witness,
     // not a wall-time performance threshold or a retry-until-pass assertion.
-    std::thread::sleep(rpc_budget + Duration::from_millis(25));
+    clock.advance(rpc_budget + Duration::from_millis(25));
     drop(held);
     let error = task.join().unwrap().unwrap_err();
     assert!(
@@ -2174,14 +2175,14 @@ fn source_root_authority_review_writer_wait_uses_total_headroom_and_preserves_rp
             Some(&binding),
             Some(EngramNamedRootState::None),
             u64::MAX,
-            worker.engram_budget_clock().now() + TEST_PHASE_DEADLOCK_GUARD);
+            worker.engram_budget_clock().now() + rpc * 3);
         eprintln!("funded writer worker result: {result:?}");
         result
     });
     wait_for_sqlite_state_writer_issued_tickets(&writer, ticket);
     assert!(claimed.state.inner.inner.try_lock().is_ok());
     // Force the local SQL phase beyond the per-RPC interval. The existing
-    // fixture total headroom remains separate; no configured limit is raised.
+    // logical fixture total is separate from its real-time deadlock watchdog.
     // The worker measures its budget on the fixture's scripted clock, so the
     // interval passes on that clock while the writer is still held.
     claimed
@@ -2540,10 +2541,9 @@ fn source_root_authority_review_one_total_deadline_covers_prepare_read_and_publi
 #[test]
 fn source_root_authority_review_prepared_ack_deadline_explains_no_candidate_fence() {
     let label = "authority-prepared-ack-expiry";
-    // Real time on purpose: the worker's deadline is std::time::Instant::now()
-    // plus the total budget, and the test withholds the acknowledgement until
-    // that real deadline has passed.
-    let claimed = EOCheckedTurn::idle_real(label, true);
+    // Hold the exact Prepared ACK while the shared scripted clock expires.
+    let claimed = EOCheckedTurn::idle(label, true);
+    let clock = claimed.state.engram_budget_clock();
     let store = naming_store(&claimed);
     let binding = claimed.record_mut(|record| record.engram.work_binding.clone().unwrap());
     let target = AppState::engram_source_root_target_locked(&claimed.state.inner.lock().unwrap(), &claimed.session_id)
@@ -2557,7 +2557,7 @@ fn source_root_authority_review_prepared_ack_deadline_explains_no_candidate_fenc
     let worker_store = store.clone();
     let worker_binding = binding.clone();
     let task = std::thread::spawn(move || {
-        let deadline = std::time::Instant::now() + total;
+        let deadline = worker.engram_budget_clock().now() + total;
         let owner = worker
             .prepare_engram_authority_until(&worker_store, &worker_binding, deadline)
             .map_err(|error| ("prepare", error))?;
@@ -2580,6 +2580,8 @@ fn source_root_authority_review_prepared_ack_deadline_explains_no_candidate_fenc
     // Hold exactly the first acknowledgement until its existing total expires.
     // An absent second fence is then an identified Prepared deadline, not a
     // claim that the Candidate owner or canonical read was malformed.
+    clock.wait_for_scripted_waiter();
+    clock.advance(total + Duration::from_millis(1));
     let (phase, error) = task
         .join()
         .unwrap()

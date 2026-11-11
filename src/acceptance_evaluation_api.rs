@@ -21,32 +21,81 @@ const ACCEPTANCE_EVALUATION_SUBMIT_LABEL: &str = "acceptance-evaluation submissi
 // large one, so it is never the per-request read. The admitted set only spares
 // a wasted spawn: the tracker enforces the policy when the evaluation is
 // recorded. So a failed read (an older binary has no `show`) means "unknown",
-// never a refusal. Twenty seconds, doubled from ten on Greg's decision
-// (2026-09-28): under CPU load a healthy Engram process misses ten.
-const ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT: Duration = Duration::from_secs(20);
+// never a refusal. The ordinary minute-long operation window diagnoses
+// a slow read after ten seconds without interrupting it.
+const ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT: Duration = ENGRAM_MIN_CALL_TIMEOUT;
 const ACCEPTANCE_EVALUATION_STORE_CHANGED_ERROR: &str = "the project's tracker store changed since this evaluation was requested; request a new evaluation";
 
-/// One tracker call through the lock-retry runner: two command timeouts and
-/// the delay between them.
+/// Lock retry and its delay spend the same absolute operation budget.
 fn acceptance_evaluation_call_worst_case(timeout: Duration) -> Duration {
-    timeout * 2 + ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY
+    timeout
 }
 
-/// Worst-case time of one request: the windowed and the complete task read,
-/// every evidence continuation page, the policy read, the shared criterion
-/// evidence discovery budget, and the capture of the declared source
-/// fingerprint, bounded by the freeze budget. The request
-/// includes the core identity bracket inside the existing discovery allowance,
-/// not as additional command allowances; eligible task reads share it too.
-/// path's own deadline is this; the bridge's HTTP allowance is this and the
-/// evaluator's spawn on top (`DelegationLongCall::EvaluationRequest`), so the
-/// bridge never gives up on a request the backend is still serving.
+// Optional notes and assessment continuations share two operation windows of
+// actual I/O time. Before each call, one complete window and the mandatory
+// tail must fit. Fast pages can share the phase; an issued call is never cut.
+const ACCEPTANCE_OPTIONAL_EVIDENCE_BUDGET: Duration = ENGRAM_MIN_CALL_TIMEOUT.saturating_mul(2);
+
+/// Closing show/core, requested-claim maintenance (one admission window plus
+/// one issued overrun), policy and source capture keep independent funding.
+/// Committed-input preflight retains its existing remaining-request deadline;
+/// a slow metadata probe can still consume that tail's reserved time.
+fn acceptance_evaluation_closing_budget() -> Duration {
+    ENGRAM_WORK_BINDING_COMMAND_TIMEOUT * 2
+        + ENGRAM_MIN_CALL_TIMEOUT * 2
+        + ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT
+        + ENGRAM_SOURCE_METADATA_BUDGET.max(REVIEW_FREEZE_TIMEOUT)
+}
+
+/// The bounded mandatory evidence phase may admit one last full call near
+/// its deadline. That reply is kept; no subsequent unfunded read is issued.
+fn acceptance_evaluation_evidence_budget() -> Duration {
+    ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET + ENGRAM_MIN_CALL_TIMEOUT
+}
+
+/// Request-owned optional admission, shared by notes and assessments. Only
+/// tracker I/O spends this quota; mandatory reads do not consume it.
+struct AcceptanceOptionalEvidenceBudget(std::cell::Cell<Duration>);
+
+impl AcceptanceOptionalEvidenceBudget {
+    fn read(
+        &self,
+        deadline: std::time::Instant,
+        tail: Duration,
+        now: &impl Fn() -> std::time::Instant,
+        call: impl FnOnce(Duration) -> Result<Value, EngramTransportError>,
+    ) -> Option<Result<Value, EngramTransportError>> {
+        let started = now();
+        if self.0.get() < ENGRAM_MIN_CALL_TIMEOUT
+            || deadline.saturating_duration_since(started) < ENGRAM_MIN_CALL_TIMEOUT + tail
+        {
+            return None;
+        }
+        let result = call(ENGRAM_MIN_CALL_TIMEOUT);
+        self.0.set(self.0.get().saturating_sub(now().saturating_duration_since(started)));
+        Some(result)
+    }
+}
+
+/// Preliminary recovery has one admission window plus one issued overrun.
+/// Opening core/show and held/full each fund two calls. Optional I/O and the
+/// mandatory evidence phase are separate, followed by the closing tail.
+/// The bridge derives its allowance from this owner and adds spawn/delivery.
 fn acceptance_evaluation_request_tracker_budget() -> Duration {
-    let task_reads = 3 + (MAX_ACCEPTANCE_EVIDENCE_PAGES as u32 - 1);
-    acceptance_evaluation_call_worst_case(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT) * task_reads
-        + acceptance_evaluation_call_worst_case(ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT)
-        + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET
-        + REVIEW_FREEZE_TIMEOUT
+    ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET + ENGRAM_MIN_CALL_TIMEOUT
+        + ENGRAM_WORK_BINDING_COMMAND_TIMEOUT * 4
+        + ACCEPTANCE_OPTIONAL_EVIDENCE_BUDGET
+        + acceptance_evaluation_evidence_budget()
+        + acceptance_evaluation_closing_budget()
+}
+
+/// The existing clean-source preflight can admit metadata and then an
+/// observation near an enclosing deadline. Both keep their source window,
+/// followed by the request's independently funded final capture.
+/// Clients wait out those issued stages even if the server then refuses the
+/// expired request. This does not give preflight its own admission phase.
+fn acceptance_evaluation_request_overrun_budget() -> Duration {
+    ENGRAM_SOURCE_PROCESS_BUDGET * 2 + ENGRAM_SOURCE_METADATA_BUDGET
 }
 
 /// Said when a request could not take the content revision of the worktree
@@ -67,77 +116,12 @@ fn acceptance_evaluation_notices<const N: usize>(notices: [Option<String>; N]) -
     (!joined.is_empty()).then_some(joined)
 }
 
-/// What must still fit after a continuation page: that page, the complete
-/// task read, the caller's held-claims read, the policy read, criterion evidence
-/// discovery and the source capture. Paging stops once the
-/// deadline cannot fund it; the steps that decide the request are never the
-/// ones cut.
-/// Canonical discovery additionally reserves its closing show/core share from
-/// the same sixty-second deadline before any optional evidence paging.
+/// Mandatory work after optional notes: held/full, the bounded evidence
+/// phase including its last admitted call, and the independent closing tail.
 fn acceptance_evaluation_paging_reserve() -> Duration {
-    acceptance_evaluation_call_worst_case(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT) * 3
-        + acceptance_evaluation_call_worst_case(ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT)
-        + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET
-        + REVIEW_FREEZE_TIMEOUT
-}
-
-/// The tracker reads after optional notes paging that decide the request and
-/// draw on the discovery share: the held-claims read, the complete task read,
-/// one exact read per distinct selected record and the revalidation after
-/// them, and every page of the binding index. Engram returns that index at
-/// most eight criteria a page (fewer when bound rows fill its 16 KiB bound),
-/// so a task of `criteria` criteria takes at least ceil(criteria / 8) binding
-/// pages, kept within one and the reader's page bound. An unknown criteria
-/// count reserves the whole page bound.
-fn acceptance_mandatory_reads_after_paging(
-    requested: &[AcceptanceCriterionEvidenceRequest],
-    carried: &[AcceptanceSelectedEvidence],
-    criteria: Option<usize>,
-) -> u32 {
-    let selected = requested
-        .iter()
-        .flat_map(|link| &link.locators)
-        .chain(carried.iter().flat_map(|row| &row.locators))
-        .collect::<BTreeSet<_>>()
-        .len() as u32;
-    let binding_pages = criteria.map_or(MAX_ACCEPTANCE_BINDING_EVIDENCE_PAGES, |criteria| {
-        criteria
-            .div_ceil(8)
-            .clamp(1, MAX_ACCEPTANCE_BINDING_EVIDENCE_PAGES)
-    }) as u32;
-    2 + selected + u32::from(selected > 0) + binding_pages
-}
-
-/// How many criteria the task has, from the windowed show: Engram fits that
-/// receipt into its response bound by dropping whole criteria from the end of
-/// the list and reporting how many as `acceptance_omitted`. `None` when the
-/// show lists none, since the count is then unknown.
-fn acceptance_windowed_criteria_count(show: &Value) -> Option<usize> {
-    let work = show.pointer("/status/work")?;
-    let listed = work.get("acceptance")?.as_array()?.len();
-    let omitted = work
-        .get("acceptance_omitted")
-        .and_then(Value::as_u64)
-        .map_or(0, |omitted| usize::try_from(omitted).unwrap_or(usize::MAX));
-    Some(listed.saturating_add(omitted))
-}
-
-/// Whether another optional notes page still fits in the discovery share.
-/// It and every mandatory read after it may take as long as the slowest read
-/// so far, and the last read is funded only half the time then left, so one
-/// more such share is kept. Two lock-retry delays are kept besides, for this
-/// page's and the last read's; a retry an earlier read actually waited out is
-/// already part of the slowest read measured. When it does not fit, paging
-/// stops with the evidence read so far, rather than let a page outrun its time
-/// or starve the reads that decide the request.
-fn acceptance_paging_affordable(
-    now: std::time::Instant,
-    discovery_deadline: std::time::Instant,
-    slowest_read: Duration,
-    mandatory_reads: u32,
-) -> bool {
-    let needed = slowest_read * (mandatory_reads + 2) + ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY * 2;
-    now + needed <= discovery_deadline
+    ENGRAM_WORK_BINDING_COMMAND_TIMEOUT * 2
+        + acceptance_evaluation_evidence_budget()
+        + acceptance_evaluation_closing_budget()
 }
 
 /// How long a submission waits for the writer to acknowledge one state.
@@ -163,11 +147,12 @@ fn acceptance_evaluation_submit_budget() -> Duration {
     let call = acceptance_evaluation_call_worst_case(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT);
     let ordinary = call * 2
         + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT * 2
-        + REVIEW_FREEZE_TIMEOUT;
+        + REVIEW_FREEZE_TIMEOUT.max(ENGRAM_SOURCE_METADATA_BUDGET + ENGRAM_SOURCE_PROCESS_BUDGET);
     let refresh = call
         + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT * 5
-        + REVIEW_FREEZE_TIMEOUT
-        + acceptance_evaluation_request_tracker_budget();
+        + REVIEW_FREEZE_TIMEOUT.max(ENGRAM_SOURCE_METADATA_BUDGET + ENGRAM_SOURCE_PROCESS_BUDGET)
+        + acceptance_evaluation_request_tracker_budget()
+        + acceptance_evaluation_request_overrun_budget();
     ordinary.max(refresh)
 }
 
@@ -967,10 +952,10 @@ impl AppState {
         // One allowance covers preliminary recovery as well as all definitive
         // reads. Recover at most the requested work's existing Candidate, never
         // prepare a replacement or refresh every history.
-        let canonical_deadline =
-            Some((now() + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET).min(deadline));
+        let recovery_deadline = (now() + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET).min(deadline);
+        let optional = AcceptanceOptionalEvidenceBudget(std::cell::Cell::new(ACCEPTANCE_OPTIONAL_EVIDENCE_BUDGET));
         self.recover_acceptance_request_candidate_until(
-            parent_session_id, &work_ref, &read, canonical_deadline.expect("identity budget"), &now,
+            parent_session_id, &work_ref, &read, recovery_deadline, &now,
         )?;
         let (
             target,
@@ -1055,20 +1040,10 @@ impl AppState {
         core_args.extend(["core", "inspect", work_ref.as_str(), "--json"].map(str::to_owned));
         let mut discovery =
             self.acceptance_evidence_discovery_target(parent_session_id, &target.store)?;
-        // Start the canonical bracket before the anonymous agent window. One
-        // absolute allowance covers both core reads and all intervening reads.
-        let discovery_deadline =
-            canonical_deadline.map(|limit| limit - ACCEPTANCE_EVIDENCE_CLOSING_RESERVE);
-        // The slowest tracker read seen so far in this request: how long the
-        // optional notes pages, and the mandatory reads after them, may take.
-        let mut slowest_read = Duration::ZERO;
-        let opening_started = now();
-        let opening = read(
-            connection,
-            &core_args,
-            acceptance_criterion_evidence_read_timeout(discovery_deadline.expect("identity budget"), &now)?,
-        );
-        slowest_read = slowest_read.max(now().saturating_duration_since(opening_started));
+        // Identity brackets the complete request. Optional I/O cannot spend
+        // the mandatory tail, and each issued read keeps its full window.
+        let opening = read(connection, &core_args,
+            acceptance_criterion_evidence_read_timeout(deadline, &now)?);
         let opening = opening.map_err(|error| {
             if acceptance_core_inspect_unsupported(&error) {
                 ApiError::conflict("canonical work identity and source authority are unavailable: Engram does not support core inspect")
@@ -1091,14 +1066,8 @@ impl AppState {
         show_args
             .extend(["show", work_ref.as_str(), "--notes", "--gates", "--json"].map(str::to_owned));
         full_args.extend(["show", work_ref.as_str(), "--full", "--json"].map(str::to_owned));
-        let task_timeout = || {
-            discovery_deadline.map_or(Ok(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT), |limit| {
-                acceptance_criterion_evidence_read_timeout(limit, &now)
-            })
-        };
-        let show_started = now();
+        let task_timeout = || acceptance_criterion_evidence_read_timeout(deadline, &now);
         let show = read(connection, &show_args, task_timeout()?);
-        slowest_read = slowest_read.max(now().saturating_duration_since(show_started));
         let mut show =
             show.map_err(|e| acceptance_evaluation_transport_error("engram work show", e))?;
         if show.get("acceptance_basis").is_none() || show.get("evidence_basis").is_none() {
@@ -1128,29 +1097,6 @@ impl AppState {
         let mut notes_cursors = BTreeSet::new();
         // Ordinary legacy paging can shorten the brief. Once canonical
         // identity is acquired, contradictory carriers and page failures abort.
-        // The full binding list is read after paging. Every criterion may
-        // require a private scan, including continuations. Reserve its bounded
-        // complete scan rather than letting optional notes spend that time.
-        // The binding index itself admits at most 128 criteria. An unknown
-        // criteria count therefore reserves that whole supported bound.
-        let binding_session_read = discovery.target.is_some()
-            && discovery.identity.as_ref().is_some_and(|identity| identity.active_run_id.is_some());
-        let criteria = acceptance_windowed_criteria_count(&show);
-        let private_reads = criteria
-            .unwrap_or(MAX_ACCEPTANCE_BINDING_EVIDENCE_PAGES * 8)
-            .min(MAX_ACCEPTANCE_BINDING_EVIDENCE_PAGES * 8)
-            * MAX_ACCEPTANCE_BINDING_EVIDENCE_PAGES;
-        let mandatory_reads_after_paging = acceptance_mandatory_reads_after_paging(
-            &request.criterion_evidence,
-            automatic
-                .then(|| reuse.as_ref())
-                .flatten()
-                .and_then(|reservation| reservation.previous.acceptance_evaluation.as_ref())
-                .map(|target| target.selected_evidence.as_slice())
-                .unwrap_or_default(),
-            criteria,
-        ) + (1 + private_reads as u32) * u32::from(binding_session_read);
-
         let mut older_pages = Vec::new();
         let mut collected = acceptance_evidence_page_len(&show);
         let mut after = acceptance_evidence_continuation(&show);
@@ -1165,43 +1111,17 @@ impl AppState {
                 paging_stop = Some("entry_limit");
                 break;
             }
-            // Pre-issue budget limits can shorten the brief without outrunning
-            // the HTTP allowance or starving the reads that decide the request.
-            // Share the remaining discovery time between this optional page
-            // and the mandatory full read, funding both lock retries. The
-            // configured timeout is a cap, not a requirement to spend it all.
-            let page_timeout =
-                discovery_deadline.map_or(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT, |limit| {
-                    (limit
-                        .saturating_duration_since(now())
-                        .saturating_sub(ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY * 2)
-                        / 4)
-                    .min(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)
-                });
-            if now() + acceptance_evaluation_paging_reserve() > deadline
-                || page_timeout.is_zero()
-                || discovery_deadline.is_some_and(|limit| {
-                    !acceptance_paging_affordable(
-                        now(),
-                        limit,
-                        slowest_read,
-                        mandatory_reads_after_paging,
-                    )
-                })
-            {
-                paging_stop = Some("time_budget");
-                eprintln!(
-                    "acceptance evaluation> the read budget for `{work_ref}` is spent; the brief lists the evidence read so far"
-                );
-                break;
-            }
+            // Refused admission shortens the brief visibly; it never cuts
+            // an issued call or spends the mandatory tail.
             let mut page_args = show_args.clone();
             let json_flag = page_args.pop();
             page_args.extend(["--after".to_owned(), token]);
             page_args.extend(json_flag);
-            let page_started = now();
-            let page = read(connection, &page_args, page_timeout);
-            slowest_read = slowest_read.max(now().saturating_duration_since(page_started));
+            let Some(page) = optional.read(deadline, acceptance_evaluation_paging_reserve(), &now,
+                |timeout| read(connection, &page_args, timeout)) else {
+                paging_stop = Some("time_budget");
+                break;
+            };
             match page {
                 Ok(page) => {
                     if canonical_window.is_some() {
@@ -1392,9 +1312,8 @@ impl AppState {
             named_binding,
         };
 
-        let evidence_deadline = canonical_deadline
-            .unwrap_or_else(|| (now() + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET).min(deadline));
-        let body_deadline = discovery_deadline.unwrap_or(evidence_deadline);
+        let body_deadline = (now() + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET)
+            .min(deadline.checked_sub(acceptance_evaluation_closing_budget()).unwrap_or_else(&now));
         let mut selection_disclosures = Vec::new();
         let selections = if automatic {
             let old = reuse.as_ref().expect("automatic refresh has a reservation")
@@ -1423,17 +1342,16 @@ impl AppState {
             &now,
         )?;
         self.read_acceptance_verification_evidence(&target.store, &mut task, &discovery, body_deadline, &now)?;
-        // Whole assessments of the cited verification records, within the
-        // same discovery deadline as the record reads above: it already holds
-        // back the closing bracket's reserve, so it is not taken again. A
-        // failure leaves an incomplete summary, never a failed request.
+        // Assessments share the notes I/O quota. An unfunded continuation
+        // becomes a visible incomplete summary; closing identity is mandatory.
+        let optional_read = |connection: &EngramConnectionConfig, args: &[String], _timeout: Duration| {
+            optional.read(deadline, acceptance_evaluation_closing_budget(), &now,
+                |timeout| read(connection, args, timeout))
+                .unwrap_or_else(|| Err(EngramTransportError::deadline_before_launch(
+                    "optional evidence admission is exhausted; mandatory closing reads remain funded")))
+        };
         read_acceptance_obligation_assessments(
-            &mut task,
-            connection,
-            &show_args,
-            &read,
-            body_deadline,
-            &now,
+            &mut task, connection, &show_args, &optional_read, deadline, &now,
         );
         let mut obligation_assessments = std::mem::take(&mut task.obligation_assessments);
         // Request-local standing from the same closing canonical read, not a
@@ -1446,7 +1364,7 @@ impl AppState {
                 connection,
                 &show_args,
                 acceptance_criterion_evidence_read_timeout(
-                    evidence_deadline - ACCEPTANCE_EVIDENCE_CLOSING_RESERVE / 2,
+                    deadline,
                     &now,
                 )?,
             )
@@ -1457,7 +1375,7 @@ impl AppState {
             let closing = read(
                 connection,
                 &core_args,
-                acceptance_criterion_evidence_read_timeout(evidence_deadline, &now)?,
+                acceptance_criterion_evidence_read_timeout(deadline, &now)?,
             )
             .map_err(|error| {
                 acceptance_evaluation_transport_error(
@@ -1481,9 +1399,7 @@ impl AppState {
                 )),
             };
         }
-        if canonical_deadline.is_some() || !request.criterion_evidence.is_empty() {
-            acceptance_criterion_evidence_read_timeout(evidence_deadline, &now)?;
-        }
+        acceptance_criterion_evidence_read_timeout(deadline, &now)?;
         self.revalidate_acceptance_discovery_authority(
             parent_session_id,
             &target.store,
@@ -2099,7 +2015,7 @@ impl AppState {
         ) {
             let current = source_owner_session.as_deref().and_then(|parent|
                 self.acceptance_judged_commit(parent, FsPath::new(&source_root.root),
-                    std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT));
+                    std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT.max(ENGRAM_SOURCE_COMMAND_BUDGET)));
             if current.as_deref() == Some(commit) {
                 return Ok(declared);
             }

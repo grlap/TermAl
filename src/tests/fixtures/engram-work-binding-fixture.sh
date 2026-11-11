@@ -41,10 +41,14 @@ if [ "$mode" = held-missing ]; then
 fi
 if [ "$mode" = read-error ]; then
   printf '%s\n' 'database is locked' >&2
-  exit 6
+  exit 1
 fi
 if [ "$mode" = read-error-once ] && [ ! -e "$lock_retry_marker" ]; then
   printf retry > "$lock_retry_marker"
+  printf '%s\n' 'database is locked' >&2
+  exit 1
+fi
+if [ "$mode" = read-error-abnormal ]; then
   printf '%s\n' 'database is locked' >&2
   exit 6
 fi

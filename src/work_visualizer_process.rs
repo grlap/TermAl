@@ -59,11 +59,11 @@ fn run_work_read_command(
             "Work read command is too large; shorten filters or cursor",
         ));
     }
-    let output = run_bounded_read_command(
+    let output = run_engram_bounded_read_command(
         &mut command,
         std::time::Instant::now() + ENGRAM_WORK_BINDING_COMMAND_TIMEOUT,
         8 * 1024 * 1024,
-        true,
+        operation,
     )
     .map_err(|e| ApiError::bad_gateway(format!("{operation}: {e:#}")))?;
     let std::process::Output {

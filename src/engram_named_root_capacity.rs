@@ -19,10 +19,12 @@ const ENGRAM_ROOT_CLAIM_LAPSE_GRACE: Duration = Duration::from_secs(2 * 60 * 60)
 
 /// How long a release waits for a running reclamation pass to finish before
 /// answering that nothing was applied.
-const ENGRAM_NAMED_ROOT_RELEASE_FLIGHT_WAIT: Duration = Duration::from_secs(10);
+const ENGRAM_NAMED_ROOT_RELEASE_FLIGHT_WAIT: Duration =
+    Duration::from_secs(ENGRAM_NAMED_ROOT_DISPOSITION_BUDGET.as_secs() + 10);
 
 /// The authority budget a release spends under the single reclamation flight.
-const ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET: Duration = Duration::from_secs(10);
+const ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET: Duration =
+    Duration::from_secs(ENGRAM_ROOT_RECLAMATION_BUDGET.as_secs() + 10);
 
 /// Engram's refusal of a named-root read whose claim is no longer its run's
 /// claim: a newer claim replaced it, so the root's claim is closed.
@@ -216,12 +218,13 @@ const ENGRAM_NAMED_ROOT_DISPOSITION_COOLDOWN: Duration = Duration::from_secs(5 *
 /// disposition stops, counted from the pass's start (its canonical reads
 /// included): less than a release waits for that flight, so a release that
 /// arrives during a pass still applies.
-const ENGRAM_NAMED_ROOT_DISPOSITION_BUDGET: Duration = Duration::from_secs(8);
+const ENGRAM_NAMED_ROOT_DISPOSITION_BUDGET: Duration = Duration::from_secs(
+    ENGRAM_ROOT_RECLAMATION_BUDGET.as_secs() + ENGRAM_MIN_CALL_TIMEOUT.as_secs() + 10,
+);
 
 /// The time left in the pass's budget that a tracker read needs to start:
-/// the bound on one production Work read (`ENGRAM_WORK_BINDING_COMMAND_TIMEOUT`
-/// outside tests), so a read never carries the pass past its budget.
-const ENGRAM_NAMED_ROOT_DISPOSITION_READ_RESERVE: Duration = Duration::from_secs(6);
+/// the bound on one Work read, so admission leaves a full operation window.
+const ENGRAM_NAMED_ROOT_DISPOSITION_READ_RESERVE: Duration = ENGRAM_MIN_CALL_TIMEOUT;
 
 /// How many item tracker reads one disposition pass may make.
 const ENGRAM_NAMED_ROOT_DISPOSITION_READ_LIMIT: usize = 8;

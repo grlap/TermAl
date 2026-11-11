@@ -108,6 +108,7 @@ export const helperTestArgs = Object.freeze([
 export const helperSupportFiles = Object.freeze([
   "scripts/source-id-budget.mjs",
   "scripts/source-id-budget-ms.json",
+  "scripts/engram-call-budget-ms.json",
   "scripts/cleanup-report.mjs",
   "scripts/export-review-attempt.mjs",
   nodeDurationReporterFile,

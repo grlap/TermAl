@@ -127,9 +127,10 @@ fn unstaged_connection_setup_fails_on_the_readiness_budget_when_a_launch_expires
         };
 
         assert!(
-            error
-                .message
-                .contains("Engram readiness exceeded the 20 second enablement deadline"),
+            error.message.contains(&format!(
+                "Engram readiness exceeded the {} second enablement deadline",
+                ENGRAM_READINESS_TIMEOUT.as_secs()
+            )),
             "{label}: the setup must fail on the product's readiness budget: {}",
             error.message
         );
@@ -162,9 +163,10 @@ fn an_expired_launch_fails_readiness_with_the_budget_it_enforced() {
     };
 
     assert!(
-        error
-            .message
-            .contains("Engram readiness exceeded the 20 second enablement deadline"),
+        error.message.contains(&format!(
+            "Engram readiness exceeded the {} second enablement deadline",
+            ENGRAM_READINESS_TIMEOUT.as_secs()
+        )),
         "an expired launch must fail on the product's readiness budget: {}",
         error.message
     );

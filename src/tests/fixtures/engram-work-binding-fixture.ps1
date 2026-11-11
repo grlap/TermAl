@@ -40,10 +40,14 @@ if ($mode -eq "held-missing") {
 }
 if ($mode -eq "read-error") {
     [Console]::Error.WriteLine("database is locked")
-    exit 6
+    exit 1
 }
 if ($mode -eq "read-error-once" -and -not (Test-Path -LiteralPath $lockRetryMarker)) {
     Set-Content -LiteralPath $lockRetryMarker -Value "retry" -NoNewline
+    [Console]::Error.WriteLine("database is locked")
+    exit 1
+}
+if ($mode -eq "read-error-abnormal") {
     [Console]::Error.WriteLine("database is locked")
     exit 6
 }

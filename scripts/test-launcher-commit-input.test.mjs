@@ -642,7 +642,7 @@ test("an edit after admitted capture is refused before any stage", async (t) => 
     let calls = 0;
     const commitInputStatus = async (...args) => {
       calls += 1;
-      const observed = captureOwnerStatus(...args);
+      const observed = await captureOwnerStatus(...args);
       writeFileSync(join(root, "tracked.txt"), "edited after admission\n");
       return observed;
     };

@@ -49,7 +49,7 @@ const ENGRAM_VERIFICATION_RECORD_STATE_FILE: &str = "engram-verification-record-
 /// The most one pass over the registered runs may take, on its own thread
 /// (src/engram_retry_schedule.rs), so it never holds up the owed binds; each
 /// Engram call and durability wait gets what is left of it.
-const ENGRAM_VERIFICATION_RECORD_TICK_BUDGET: Duration = Duration::from_secs(20);
+const ENGRAM_VERIFICATION_RECORD_TICK_BUDGET: Duration = ENGRAM_MIN_CALL_TIMEOUT;
 
 /// How long the settlement of a held receipt waits for its associations to be
 /// read back durable when no tick budget bounds it.

@@ -258,13 +258,13 @@ fn acceptance_omissions_page_limit_and_time_budget_keep_the_last_read_cut() {
         let start = std::time::Instant::now();
         let now = || {
             start
-                + if timed && calls.load(Ordering::SeqCst) >= 4 {
-                    Duration::from_secs(30)
+                + if timed {
+                    ENGRAM_MIN_CALL_TIMEOUT * calls.load(Ordering::SeqCst).saturating_sub(2) as u32
                 } else {
                     Duration::ZERO
                 }
         };
-        let deadline = start + acceptance_evaluation_paging_reserve() + Duration::from_secs(25);
+        let deadline = start + acceptance_evaluation_request_tracker_budget();
         let response = state
             .request_acceptance_evaluation_until(
                 &parent,

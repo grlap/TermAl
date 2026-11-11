@@ -3,11 +3,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { sourceOwnerPinValid } from "./test-launcher-input.mjs";
-import { sourceIdBudgetMs, sourceMetadataHttpBudgetMs } from "./source-id-budget.mjs";
+import { engramOperationBudgetMs, sourceMetadataBudgetMs, sourceMetadataHttpBudgetMs, warnSlowEngramOperation } from "./source-id-budget.mjs";
 
 const contextVariables = ["TERMAL_BASE_URL", "TERMAL_SESSION_ID", "TERMAL_CLI"];
-const registrationBudgetMs = 8_000; // POST/confirmation ACK, never a source observation.
-const sourceRegistrationBudgetMs = sourceIdBudgetMs + registrationBudgetMs;
+// A held-claim read admitted near the host's shared deadline keeps its full
+// operation window. Fund that overrun as well as admission and reply delivery.
+export const registrationBudgetMs = engramOperationBudgetMs * 2 + 3_000;
+export const sourceRegistrationBudgetMs = sourceMetadataBudgetMs + registrationBudgetMs;
 const responseByteLimit = 65_536;
 const contract = "termal-durable-test-run-registration";
 const version = 1;
@@ -75,6 +77,7 @@ export async function sourceOwnerMetadata(env = process.env) {
   const { session, base } = hostConfiguration(env);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), sourceMetadataHttpBudgetMs);
+  const warning = warnSlowEngramOperation("source owner metadata");
   try {
     const url = new URL(`/api/sessions/${encodeURIComponent(session)}/source-owner`, base);
     const response = await fetch(url, { signal: controller.signal, redirect: "error" });
@@ -88,7 +91,7 @@ export async function sourceOwnerMetadata(env = process.env) {
     // without copying exception messages, credentials or response bodies.
     throw new Error(`source owner metadata unavailable (${failureCategory(error, controller.signal)}; ${transportCode(error)}); no tests started`,
       { cause: error });
-  } finally { clearTimeout(timeout); }
+  } finally { clearTimeout(timeout); clearTimeout(warning); }
 }
 
 async function readResponse(response) {
@@ -358,6 +361,12 @@ async function queryRegisteredRun(request, runDirectory, configuration, deadline
 }
 
 export async function registerTestRun(request, runDirectory, env = process.env) {
+  const warning = warnSlowEngramOperation("test run registration");
+  try { return await registerTestRunWithin(request, runDirectory, env); }
+  finally { clearTimeout(warning); }
+}
+
+async function registerTestRunWithin(request, runDirectory, env) {
   if (!hasTermalContext(env)) {
     const registration = { state: "untracked", reason: "standalone invocation has no TermAl host/session environment" };
     console.log(`UNTRACKED ${request.runId}: ${registration.reason}`);

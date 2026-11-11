@@ -74,6 +74,10 @@ fn current_capture_cancellation() -> Option<Arc<CaptureCancellation>> {
 }
 
 fn check_capture_cancellation() -> Result<()> {
+    check_capture_cancellation_at(std::time::Instant::now())
+}
+
+fn check_capture_cancellation_at(now: std::time::Instant) -> Result<()> {
     if let Some(cancel) = current_capture_cancellation() {
         if cancel.state.lock().unwrap().stopped {
             return Err(io::Error::new(
@@ -84,7 +88,7 @@ fn check_capture_cancellation() -> Result<()> {
         }
         if cancel
             .deadline
-            .is_some_and(|deadline| std::time::Instant::now() >= deadline)
+            .is_some_and(|deadline| now >= deadline)
         {
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
@@ -256,8 +260,8 @@ impl CaptureLifetime {
         )
     }
 
-    // Delivery is a long-lived loop, not one capture. Its nested captures get
-    // their own existing budget; shutdown still cancels its in-flight child.
+    // Observer workers may run several separately bounded operations. Each
+    // nested capture keeps its own budget; shutdown still cancels every child.
     fn spawn_observer(
         self: &Arc<Self>,
         name: &str,

@@ -2,8 +2,8 @@
 // the state's budget clock, included into test_run_registration_history.rs for
 // its HistoryService (the real router and an actual SQLite fence writer).
 // Owns: the real-time deadline still measured from the instant before the
-// capture lock, a writer held past 5 s of real time still acknowledging while the
-// scripted clock has not advanced, and an advanced scripted clock still giving
+// capture lock, a held writer acknowledging after an observed scripted-clock
+// wait without advancing that clock, and an advanced scripted clock still giving
 // the typed durability-pending reply. Does not own history reads, the
 // structural history case, or the scheduled real-time measurement.
 // New file, not split from another.
@@ -62,35 +62,33 @@ fn finish_clock_service(mut service: HistoryService, outcome: std::thread::Resul
 
 #[test]
 fn the_real_clock_deadline_is_measured_from_the_instant_before_the_capture_lock() {
-    // Production: the deadline is exactly the pre-lock instant plus 5 s, so a
+    // Production: the deadline starts at the pre-lock instant, so a
     // capture-lock wait still counts against the budget, as before.
     let requested = std::time::Instant::now() - Duration::from_secs(2);
     assert_eq!(test_run_registration_deadline(&EngramBudgetClock::Real, requested),
-        requested + Duration::from_secs(5));
+        requested + TEST_RUN_REGISTRATION_DURABILITY_BUDGET);
     // A scripted fixture clock measures from its own reading instead.
     let clock = EngramBudgetClock::scripted();
     clock.advance(Duration::from_secs(7));
-    assert_eq!(test_run_registration_deadline(&clock, requested), clock.now() + Duration::from_secs(5));
+    assert_eq!(test_run_registration_deadline(&clock, requested), clock.now() + TEST_RUN_REGISTRATION_DURABILITY_BUDGET);
 }
 
 #[test]
-fn a_registration_whose_writer_is_held_past_five_real_seconds_acknowledges_on_the_unadvanced_scripted_clock() {
+fn a_held_registration_waits_on_the_scripted_clock_before_its_durable_ack() {
     let _placement = TestTempRootDirectoryScope::repository_local();
     let (service, root, owner, clock) = clock_service("held-writer");
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let (id, directory) = clock_registration_request(&root, &owner, "held");
         let (reached, release) = service.hold_next_writer_tick();
         let scripted_start = clock.now();
-        let timed = std::time::Instant::now();
         let post = post_clock_registration(&service.url, &owner, &id, &directory, "held");
         reached.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap();
-        // The schedule hook, not load, holds the writer. Real time passes the
-        // production 5 s budget while nothing advances the scripted clock.
-        std::thread::sleep(Duration::from_millis(5_200));
+        // Observe the actual fence waiter on this scripted clock while the
+        // writer is held. A regression to the real clock registers no waiter.
+        clock.wait_for_scripted_waiter();
         assert_eq!(clock.now(), scripted_start, "nothing advanced the scripted budget clock");
         release.send(()).unwrap();
         let (status, ack) = post.join().unwrap();
-        assert!(timed.elapsed() >= Duration::from_secs(5), "the writer was held past 5 s of real time");
         assert_eq!(status, reqwest::StatusCode::CREATED, "{ack}");
         assert_eq!(ack, json!({"contract":"termal-durable-test-run-registration",
             "version":1,"runId":id,"registered":true}));
@@ -116,7 +114,7 @@ fn advancing_the_scripted_clock_past_the_budget_still_gives_the_typed_durability
         // The fence is queued behind the held writer and its waiter is on the
         // scripted clock; only then does the budget elapse, by advancing it.
         clock.wait_for_scripted_waiter();
-        clock.advance(Duration::from_secs(5) + Duration::from_millis(1));
+        clock.advance(TEST_RUN_REGISTRATION_DURABILITY_BUDGET + Duration::from_millis(1));
         let (status, body) = post.join().unwrap();
         release.send(()).unwrap();
         assert_eq!(status, reqwest::StatusCode::SERVICE_UNAVAILABLE, "{body}");
@@ -129,9 +127,11 @@ fn advancing_the_scripted_clock_past_the_budget_still_gives_the_typed_durability
         assert_eq!(body["retry"]["mode"], "same_request");
         let message = body["error"].as_str().unwrap();
         for field in ["phase=durability_wait", "category=deadline", "fenceError=Deadline",
-            "fenceBudgetMs=5000", "fenceRemainingMs=0", "durabilityConfirmed=false"] {
+            "fenceRemainingMs=0", "durabilityConfirmed=false"] {
             assert!(message.contains(field), "{field} missing from {message}");
         }
+        let budget_field = format!("fenceBudgetMs={}", TEST_RUN_REGISTRATION_DURABILITY_BUDGET.as_millis());
+        assert!(message.contains(&budget_field), "{budget_field} missing from {message}");
     }));
     finish_clock_service(service, outcome);
 }

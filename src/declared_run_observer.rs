@@ -7,11 +7,11 @@
 
 include!("declared_run_task_end.rs");
 
-// The owner may use 30 s to capture source. Opening also reserves the existing
+// The owner may use 60 s to capture source. Opening also reserves the existing
 // authority-read budget for declaration/preimage and publication stages;
-// registration durability itself is unchanged. Expiry withholds credit,
+// registration durability has its own window. Expiry withholds credit,
 // not dispatch. Every source stage derives its cap from the same budget.
-const NATIVE_S0_CAPTURE_BUDGET: Duration = ENGRAM_SOURCE_COMMAND_BUDGET;
+const NATIVE_S0_CAPTURE_BUDGET: Duration = ENGRAM_SOURCE_METADATA_BUDGET;
 const NATIVE_S0_AUTHORITY_MARGIN: Duration = TEST_RUN_REGISTRATION_DURABILITY_BUDGET;
 
 fn native_opening_authority_deadline(clock: &EngramBudgetClock, capture_deadline: std::time::Instant,
@@ -207,6 +207,7 @@ impl AppState {
     // S0 identity. The public project-root metadata GET remains separate.
     fn capture_declared_run_opening_with_owner(
         &self, session_id: &str, pending: &DeclaredRunTurn, deadline: std::time::Instant,
+        source_plan: EngramSourcePhasePlan,
         mut run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize)
             -> Result<std::process::Output>,
     ) -> Result<(DeclaredRunSnapshot, EngramSourceOwnerAuthority)> {
@@ -221,7 +222,9 @@ impl AppState {
         let binary = resolve_engram_source_program(FsPath::new(configured),
             FsPath::new(&authority.project_root), deadline)?;
         let measurement = pending.timings.begin("source_owner_observation");
-        let (pin, observation) = engram_source_owner_observe_with(&binary, root, &cwd, deadline, &mut run)?;
+        // The outer window also funds declaration and publication. Source
+        // receives its own operation window, leaving that authority reserve.
+        let (pin, observation) = engram_source_owner_observe_with(&binary, root, &cwd, source_plan, &mut run)?;
         let observed_at = test_run_timestamp();
         drop(measurement);
         let mut snapshot = declared_run_snapshot_with_owner(root, &pin, deadline,
@@ -274,7 +277,8 @@ impl AppState {
         // END already froze this judgment before returning to provider-event
         // processing. Registration waits cannot substitute a later artifact.
         let check = end.check.clone();
-        let deadline = std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT;
+        let deadline = EngramSourcePhasePlan::from(std::time::Instant::now()
+            + REVIEW_FREEZE_TIMEOUT.max(ENGRAM_SOURCE_COMMAND_BUDGET));
         let live = self.inner.lock().expect("state mutex poisoned").engram_turn_basis_captures_live.clone();
         let declaration = start.declaration.clone();
         let source_owner = start.source.source_owner.clone();
@@ -290,12 +294,12 @@ impl AppState {
                 &live,
                 &self.capture_lifetime,
                 ENGRAM_TURN_BASIS_CAPTURE_LIMIT,
-                deadline.saturating_duration_since(std::time::Instant::now()),
+                deadline.remaining(),
                 move || {
                     let capture = || {
                         #[cfg(test)]
                         if let Some(capture) = source_capture {
-                            return capture(&declaration, &source_owner, deadline);
+                            return capture(&declaration, &source_owner, deadline.completion_deadline);
                         }
                         declared_run_source(&declaration, &source_owner, deadline)
                     };
@@ -493,7 +497,9 @@ impl AppState {
         let slot = DeclaredRunWorkerSlot(live);
         let state = self.clone();
         let failed = execution.clone();
-        if let Err(error) = self.capture_lifetime.spawn("native-declared-run", move || {
+        // Durability, registration source, and END capture have separate
+        // windows; worker age must not shorten a later stage's operation.
+        if let Err(error) = self.capture_lifetime.spawn_observer("native-declared-run", move || {
             let _slot = slot;
             if let Err(error) = state.drive_native_declared_run(&execution) {
                 let session_id = {
@@ -736,7 +742,9 @@ impl AppState {
             return;
         }
         let clock = self.engram_budget_clock();
-        let deadline = now() + NATIVE_S0_CAPTURE_BUDGET + NATIVE_S0_AUTHORITY_MARGIN;
+        let admitted_at = now();
+        let source_plan = EngramSourcePhasePlan::at(admitted_at + ENGRAM_SOURCE_COMMAND_BUDGET, admitted_at);
+        let deadline = admitted_at + NATIVE_S0_CAPTURE_BUDGET + NATIVE_S0_AUTHORITY_MARGIN;
         let live = self.inner.lock().expect("state mutex poisoned").engram_turn_basis_captures_live.clone();
         let expected_keys = pending.keys.clone();
         let capture_state = self.clone();
@@ -757,7 +765,7 @@ impl AppState {
             move || {
                 let owner_capture = || {
                     capture_state.capture_declared_run_opening_with_owner(
-                        &capture_session, &capture_pending, deadline, engram_source_owner_run)
+                        &capture_session, &capture_pending, deadline, source_plan, engram_source_owner_run)
                 };
                 #[cfg(test)]
                 let captured = match snapshot_capture {

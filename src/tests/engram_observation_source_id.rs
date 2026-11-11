@@ -425,7 +425,17 @@ fn observation_capture_consumes_the_pinned_owner_and_discards_failure_payloads()
         .inner
         .lock()
         .unwrap()
-        .test_observation_source_owner = Some(Arc::new(move |_, _, args, _, _| {
+        .test_observation_source_owner = Some(Arc::new(move |_, _, args, until, _| {
+        if current_capture_cancellation().is_some() {
+            // Advance only the cancellation observation, not real time. The
+            // real check worker must still permit this admitted source call
+            // beyond the unrelated Git capture window.
+            let after_git_window =
+                std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT + Duration::from_millis(1);
+            assert!(after_git_window < until);
+            check_capture_cancellation_at(after_git_window)?;
+            assert_eq!(capture_deadline(until), until);
+        }
         assert!(
             inner
                 .upgrade()

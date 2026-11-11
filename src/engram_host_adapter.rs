@@ -9,11 +9,13 @@
 
 #[cfg(test)]
 const ENGRAM_CONTROL_SCHEMA_VERSION: u16 = 1;
-/// The longest a project may bound one Engram control call (`deadline_ms`),
-/// and the bound when it sets none. Doubled from ten seconds on Greg's
-/// decision (2026-09-28): under CPU load a healthy call misses a ten-second
-/// deadline, in the running host as in the tests.
-const ENGRAM_MAX_CALL_TIMEOUT_MS: u64 = 20_000;
+/// Ordinary Engram operations get at least one minute. A slow operation is
+/// diagnosed after ten seconds without interrupting it.
+// Shared with the launcher's budget owner: operation minimum, process delivery.
+const ENGRAM_CALL_BUDGET_MS: [u64; 2] = include!("../scripts/engram-call-budget-ms.json");
+const ENGRAM_MIN_CALL_TIMEOUT: Duration = Duration::from_millis(ENGRAM_CALL_BUDGET_MS[0]);
+const ENGRAM_CALL_WARNING_AFTER: Duration = Duration::from_secs(10);
+const ENGRAM_MAX_CALL_TIMEOUT_MS: u64 = 60_000;
 const ENGRAM_DEFAULT_CALL_TIMEOUT_MS: u64 = ENGRAM_MAX_CALL_TIMEOUT_MS;
 /// Test process startup allows the call bound plus one second for cleanup
 /// ownership to publish its terminal state.
@@ -47,21 +49,47 @@ const ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 // so tests keep a much shorter bound: a hung fixture must fail the suite
 // quickly instead of holding it for the production window.
 #[cfg(test)]
-const ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT: Duration = Duration::from_secs(30);
-// Engram's current store-open path may wait up to five seconds on SQLite's
-// writer lock. Bound the held-claims read (`engram_held_claims.rs`) above that
-// healthy contention window; a timeout or lock error remains an error, never
-// `None`. Not one of the doubled load-sensitive limits: it bounds that lock
-// contention, not a process slowed by CPU load, and doubling it too is a
-// separate decision.
-#[cfg(not(test))]
-const ENGRAM_WORK_BINDING_COMMAND_TIMEOUT: Duration = Duration::from_secs(6);
-// The Rust suite spawns many fixture processes concurrently. Preserve the
-// production lock-contention deadline while giving test subprocess scheduling
-// enough headroom under full-suite load.
-#[cfg(test)]
-const ENGRAM_WORK_BINDING_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+const ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT: Duration = ENGRAM_MIN_CALL_TIMEOUT;
+const ENGRAM_WORK_BINDING_COMMAND_TIMEOUT: Duration = ENGRAM_MIN_CALL_TIMEOUT;
 const ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY: Duration = Duration::from_millis(250);
+
+// Outer budgets decide whether to admit another call. Once admitted, a call
+// retains its minimum operation window even near the end of that budget.
+fn engram_operation_timeout(requested: Duration) -> Duration {
+    if requested.is_zero() {
+        requested
+    } else {
+        requested.max(ENGRAM_MIN_CALL_TIMEOUT)
+    }
+}
+
+fn warn_slow_engram_call(started: std::time::Instant, warned: &mut bool, operation: &str) {
+    let elapsed = started.elapsed();
+    if !*warned && elapsed >= ENGRAM_CALL_WARNING_AFTER {
+        *warned = true;
+        eprintln!("engram warning> {operation} still running after {} ms", elapsed.as_millis());
+    }
+}
+
+fn receive_engram_call<T>(
+    receiver: &mpsc::Receiver<T>,
+    started: std::time::Instant,
+    timeout: Duration,
+    operation: &str,
+) -> Result<T, mpsc::RecvTimeoutError> {
+    let mut warned = false;
+    loop {
+        warn_slow_engram_call(started, &mut warned, operation);
+        let remaining = timeout.saturating_sub(started.elapsed());
+        let wait = if warned { remaining } else {
+            remaining.min(ENGRAM_CALL_WARNING_AFTER.saturating_sub(started.elapsed()))
+        };
+        match receiver.recv_timeout(wait) {
+            Err(mpsc::RecvTimeoutError::Timeout) if started.elapsed() < timeout => continue,
+            result => return result,
+        }
+    }
+}
 
 const ENGRAM_CONTROL_MAX_FRAME_BYTES: usize = 256 * 1_024;
 // Resource policy, not a measured upper bound on reports. Doctor reports
@@ -175,7 +203,7 @@ impl EngramProjectSettings {
         Duration::from_millis(
             self.deadline_ms
                 .unwrap_or(ENGRAM_DEFAULT_CALL_TIMEOUT_MS)
-                .max(1),
+                .max(ENGRAM_MIN_CALL_TIMEOUT.as_millis() as u64),
         )
     }
 }
@@ -356,6 +384,7 @@ fn run_engram_diagnostic_args_until(
     doctor_timeout: Duration,
     host_workdir: &FsPath,
 ) -> std::result::Result<std::process::Output, ApiError> {
+    let observed_at = std::time::Instant::now();
     // Only registered test fixtures separate startup from the measured budget.
     // These bindings are absent from production builds.
     #[cfg(test)]
@@ -469,7 +498,9 @@ fn run_engram_diagnostic_args_until(
             doctor_timeout.as_secs()
         )));
     }
+    let mut warned = false;
     let status = loop {
+        warn_slow_engram_call(observed_at, &mut warned, diagnostic);
         match process.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if std::time::Instant::now() < deadline => {
@@ -657,6 +688,22 @@ enum EngramControlRequest {
     },
 }
 
+impl EngramControlRequest {
+    fn operation(&self) -> &'static str {
+        match self {
+            Self::WorkSessionRead { .. } => "work_session_read",
+            Self::ExecutionObserve { .. } => "execution_observe",
+            Self::AcceptanceBindingRead { .. } => "acceptance_binding_read",
+            Self::AcceptanceVerificationRead { .. } => "acceptance_verification_read",
+            Self::NamedRootRead { .. } => "named_root_read",
+            Self::NamedRootSightingRead { .. } => "named_root_sighting_read",
+            Self::NamedRootBind { .. } => "named_root_bind",
+            Self::VerificationBind { .. } => "verification_bind",
+            Self::VerificationRecord { .. } => "verification_record",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct EngramControlWorkBinding {
     root_execution_id: String,
@@ -823,6 +870,14 @@ impl EngramTransportError {
             process_never_started: false,
             request_never_sent: false,
             control_process: None,
+        }
+    }
+
+    fn deadline_before_launch(message: impl Into<String>) -> Self {
+        Self {
+            process_never_started: true,
+            request_never_sent: true,
+            ..Self::deadline(message)
         }
     }
 
@@ -1375,29 +1430,8 @@ fn run_engram_json_command_with_lock_retry(
     label: &str,
     host_workdir: &FsPath,
 ) -> std::result::Result<Value, EngramTransportError> {
-    let started_at = std::time::Instant::now();
-    let first = run_engram_json_command(connection, args, timeout, label, host_workdir);
-    match first {
-        Err(error)
-            if error.kind == EngramTransportErrorKind::Transport
-                && error
-                    .message
-                    .to_ascii_lowercase()
-                    .contains("database is locked") =>
-        {
-            std::thread::sleep(ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY);
-            let remaining = timeout
-                .checked_sub(started_at.elapsed())
-                .filter(|remaining| !remaining.is_zero())
-                .ok_or_else(|| {
-                    EngramTransportError::deadline(
-                        "Work-binding budget exhausted during lock retry",
-                    )
-                })?;
-            run_engram_json_command(connection, args, remaining, label, host_workdir)
-        }
-        result => result,
-    }
+    let output = run_engram_cli_command_with_lock_retry(connection, args, timeout, label, host_workdir)?;
+    decode_engram_cli_json(output, label)
 }
 
 /// Exit status and captured streams of one bounded Engram CLI call. A non-zero
@@ -1478,10 +1512,33 @@ fn run_engram_cli_command_with_lock_retry(
     label: &str,
     host_workdir: &FsPath,
 ) -> std::result::Result<EngramCliOutput, EngramTransportError> {
-    retry_engram_cli_command_on_locked_store(
-        || run_engram_cli_command(connection, args, timeout, label, host_workdir),
+    let timeout = engram_operation_timeout(timeout);
+    if timeout.is_zero() {
+        return Err(EngramTransportError::deadline_before_launch("Engram admission budget exhausted before process launch"));
+    }
+    let started = std::time::Instant::now();
+    let mut warned = false;
+    retry_engram_cli_command_with_budget(
+        |_| {
+            run_engram_cli_command_until(connection, args, started, timeout, label, host_workdir, &mut warned)
+        },
+        || started.elapsed(),
+        timeout,
         std::thread::sleep,
     )
+}
+
+fn retry_engram_cli_command_with_budget(
+    mut run: impl FnMut(Duration) -> std::result::Result<EngramCliOutput, EngramTransportError>,
+    mut elapsed: impl FnMut() -> Duration,
+    timeout: Duration,
+    sleep: impl FnOnce(Duration),
+) -> std::result::Result<EngramCliOutput, EngramTransportError> {
+    retry_engram_cli_command_on_locked_store(|| {
+        let remaining = timeout.checked_sub(elapsed()).filter(|remaining| !remaining.is_zero())
+            .ok_or_else(|| EngramTransportError::deadline("Engram call budget exhausted during lock retry"))?;
+        run(remaining)
+    }, sleep)
 }
 
 /// The retry policy apart from the process it runs: exactly one more attempt,
@@ -1507,6 +1564,10 @@ fn run_engram_json_command(
     host_workdir: &FsPath,
 ) -> std::result::Result<Value, EngramTransportError> {
     let output = run_engram_cli_command(connection, args, timeout, label, host_workdir)?;
+    decode_engram_cli_json(output, label)
+}
+
+fn decode_engram_cli_json(output: EngramCliOutput, label: &str) -> std::result::Result<Value, EngramTransportError> {
     if !output.success {
         let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
         return Err(EngramTransportError::transport(if detail.is_empty() {
@@ -1529,6 +1590,37 @@ fn engram_cli_command_never_ran(error: &EngramTransportError) -> bool {
     error.process_never_started || error.kind == EngramTransportErrorKind::LocalState
 }
 
+// The process wait remains in the CLI owner; injectable clock and polling
+// boundaries let fixture calls exercise slow responses without real delays.
+fn wait_engram_cli_command<T>(
+    mut poll: impl FnMut() -> std::io::Result<Option<T>>,
+    mut elapsed: impl FnMut() -> Duration,
+    mut pause: impl FnMut(),
+    timeout: Duration,
+    warning_after: Duration,
+    label: &str,
+    mut warn: impl FnMut(Duration),
+) -> std::result::Result<T, EngramTransportError> {
+    let mut warned = false;
+    loop {
+        let spent = elapsed();
+        if !warned && spent >= warning_after {
+            warned = true;
+            warn(spent);
+        }
+        match poll() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) if spent < timeout => pause(),
+            Ok(None) => return Err(EngramTransportError::deadline(format!(
+                "Engram {label} exceeded {} ms", timeout.as_millis()
+            ))),
+            Err(error) => return Err(EngramTransportError::transport(format!(
+                "failed waiting for Engram {label}: {error}"
+            ))),
+        }
+    }
+}
+
 fn run_engram_cli_command(
     connection: &EngramConnectionConfig,
     args: &[&str],
@@ -1536,6 +1628,21 @@ fn run_engram_cli_command(
     label: &str,
     host_workdir: &FsPath,
 ) -> std::result::Result<EngramCliOutput, EngramTransportError> {
+    run_engram_cli_command_until(connection, args, std::time::Instant::now(), engram_operation_timeout(timeout), label, host_workdir, &mut false)
+}
+
+fn run_engram_cli_command_until(
+    connection: &EngramConnectionConfig,
+    args: &[&str],
+    started: std::time::Instant,
+    timeout: Duration,
+    label: &str,
+    host_workdir: &FsPath,
+    warned: &mut bool,
+) -> std::result::Result<EngramCliOutput, EngramTransportError> {
+    if started.elapsed() >= timeout {
+        return Err(EngramTransportError::deadline_before_launch("Engram admission budget exhausted before process launch"));
+    }
     let mut command = engram_host_command(
         &connection.binary_path,
         &connection.project_root,
@@ -1584,30 +1691,23 @@ fn run_engram_cli_command(
         })?;
     let stdout_reader = spawn_engram_cli_output_reader(stdout, label);
     let stderr_reader = spawn_engram_cli_output_reader(stderr, label);
-    let deadline = std::time::Instant::now() + timeout;
-    let status = loop {
-        match process.try_wait() {
-            Ok(Some(status)) => break Ok(status),
-            Ok(None) if std::time::Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            Ok(None) => {
-                let _ = process_tree.terminate(&process);
-                let _ = process.wait();
-                break Err(EngramTransportError::deadline(format!(
-                    "Engram {label} exceeded {} ms",
-                    timeout.as_millis()
-                )));
-            }
-            Err(error) => {
-                let _ = process_tree.terminate(&process);
-                let _ = process.wait();
-                break Err(EngramTransportError::transport(format!(
-                    "failed waiting for Engram {label}: {error}"
-                )));
-            }
-        }
-    };
+    let warning_after = if *warned { Duration::MAX } else { ENGRAM_CALL_WARNING_AFTER };
+    let status = wait_engram_cli_command(
+        || process.try_wait(),
+        || started.elapsed(),
+        || std::thread::sleep(Duration::from_millis(5)),
+        timeout,
+        warning_after,
+        label,
+        |elapsed| {
+            *warned = true;
+            eprintln!("engram warning> {label} still running after {} ms", elapsed.as_millis());
+        },
+    );
+    if status.is_err() {
+        let _ = process_tree.terminate(&process);
+        let _ = process.wait();
+    }
     let stdout = join_engram_cli_output(stdout_reader, label, "stdout")?;
     let stderr = join_engram_cli_output(stderr_reader, label, "stderr")?;
     let status = status?;
@@ -1778,7 +1878,7 @@ impl EngramHostAdapter {
         timeout: Duration,
     ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
         self.transport
-            .read_observation_policy(connection, store, timeout, &self.host_workdir)
+            .read_observation_policy(connection, store, engram_operation_timeout(timeout), &self.host_workdir)
     }
 
     fn request(
@@ -1787,13 +1887,20 @@ impl EngramHostAdapter {
         request: &EngramControlRequest,
         timeout: Duration,
     ) -> std::result::Result<Value, EngramTransportError> {
+        if timeout.is_zero() {
+            let mut error = EngramTransportError::deadline_before_launch(
+                "Engram admission budget exhausted before process launch",
+            );
+            error.causal_failure = Some(EngramCausalFailure::request(&error, request));
+            return Err(error);
+        }
         // Every work-session answer re-reads what this connection supports,
         // under the child that answered it: the child serving before the call
         // and after it must be the same one. A respawn under the call (or a
         // first start, which no earlier reading names) leaves the answer
         // unattributed, so the connection is read afresh.
         let before = self.transport.connection_generation(&connection.session_id);
-        let reply = self.transport.request(connection, request, timeout);
+        let reply = self.transport.request(connection, request, engram_operation_timeout(timeout));
         let after = self.transport.connection_generation(&connection.session_id);
         if before.is_some() && before == after {
             self.capabilities.note_reply(connection, after, request, &reply);
@@ -1816,7 +1923,7 @@ impl EngramHostAdapter {
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
         self.transport
-            .read_work_binding(connection, preference, timeout)
+            .read_work_binding(connection, preference, engram_operation_timeout(timeout))
     }
 
     // A pure identity/capability read on the ordinary child, never a control
@@ -1827,6 +1934,7 @@ impl EngramHostAdapter {
         store: &EngramAuthorityStoreKey,
         timeout: Duration,
     ) -> Result<String, EngramTransportError> {
+        let timeout = engram_operation_timeout(timeout);
         let started = std::time::Instant::now();
         let read = || {
             let remaining = timeout.saturating_sub(started.elapsed());
@@ -1859,7 +1967,7 @@ impl EngramHostAdapter {
         connection: &EngramConnectionConfig,
         timeout: Duration,
     ) -> std::result::Result<EngramHeldClaims, EngramTransportError> {
-        self.transport.read_held_claims(connection, timeout)
+        self.transport.read_held_claims(connection, engram_operation_timeout(timeout))
     }
 
     fn verification_record_route_support(

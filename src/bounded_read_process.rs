@@ -84,6 +84,8 @@ thread_local! {
 
 struct BoundedReadObservation {
     started: std::time::Instant,
+    warning_operation: Option<String>,
+    warned: bool,
     stage: &'static str,
     launch_lock_wait: Option<Duration>,
     read_deadline: Option<std::time::Instant>,
@@ -98,6 +100,7 @@ impl BoundedReadObservation {
     fn new() -> Self {
         Self {
             started: std::time::Instant::now(), stage: "spawn",
+            warning_operation: None, warned: false,
             // The legacy Windows Command path does not expose its lock wait.
             launch_lock_wait: if cfg!(windows) { None } else { Some(Duration::ZERO) },
             read_deadline: None,
@@ -106,6 +109,12 @@ impl BoundedReadObservation {
             lock_observation: host_command::telemetry::Observation::new(),
             #[cfg(test)]
             timing_phases: Vec::new(),
+        }
+    }
+
+    fn warn_if_slow(&mut self) {
+        if let Some(operation) = self.warning_operation.as_deref() {
+            warn_slow_engram_call(self.started, &mut self.warned, operation);
         }
     }
 
@@ -158,6 +167,23 @@ fn run_bounded_read_command(
         let _ = own_tree;
         run_bounded_read_windows_with_setup(command, deadline, output_limit, |_| Ok(()))
     }
+}
+
+// Engram reads retain the same process/cancellation/cleanup owner as Git
+// reads, with an operation-named soft warning. No extra watcher is spawned.
+fn run_engram_bounded_read_command(
+    command: &mut BoundedReadCommand,
+    deadline: std::time::Instant,
+    output_limit: usize,
+    operation: &str,
+) -> Result<std::process::Output> {
+    let mut observed = BoundedReadObservation::new();
+    observed.warning_operation = Some(operation.to_owned());
+    #[cfg(windows)]
+    let result = run_bounded_read_windows_observed(command, deadline, output_limit, |_| Ok(()), &mut observed);
+    #[cfg(not(windows))]
+    let result = run_bounded_read_process_input_observed(command, deadline, output_limit, true, |_| Ok(()), None, &mut observed);
+    result.map_err(|error| observed.failure(error))
 }
 
 // Fixed host-owned Git batch input only; no caller-controlled executable,
@@ -302,9 +328,18 @@ fn run_bounded_read_windows_observed(
         observed.stage = "wait";
         #[cfg(test)]
         let wait_started = std::time::Instant::now();
-        let status = process
-            .wait_timeout(deadline.saturating_duration_since(std::time::Instant::now()))?
-            .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "bounded read deadline exceeded"))?;
+        let status = loop {
+            observed.warn_if_slow();
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            let wait = if observed.warning_operation.is_some() && !observed.warned {
+                remaining.min(ENGRAM_CALL_WARNING_AFTER.saturating_sub(observed.started.elapsed()))
+            } else { remaining };
+            match process.wait_timeout(wait)? {
+                Some(status) => break status,
+                None if std::time::Instant::now() < deadline => continue,
+                None => return Err(io::Error::new(io::ErrorKind::TimedOut, "bounded read deadline exceeded").into()),
+            }
+        };
         #[cfg(test)]
         observed.timing_phases.push(("wait", wait_started.elapsed()));
         if let Some(job) = &capture_job {
@@ -545,6 +580,7 @@ fn run_bounded_read_process_input_observed(
         }
         observed.stage = "wait";
         loop {
+            observed.warn_if_slow();
             check_capture_cancellation()?;
             if read_child_has_exited(&process)? {
                 break;

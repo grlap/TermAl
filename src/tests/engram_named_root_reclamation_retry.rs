@@ -27,7 +27,7 @@ impl EngramControlTransport for ColdStartRootReader {
                 assert!(prepared.process.try_wait().unwrap().is_none());
                 assert!(!prepared.worker_finished.load(std::sync::atomic::Ordering::Acquire));
                 // Retention is the real-process witness. Reclamation consumes
-                // a scripted proof so its fixture's 250 ms bound never measures
+                // a scripted proof so its logical budget never measures
                 // OS scheduling or the control fixture's response latency.
                 return self.control.request(connection, request, timeout);
             }
@@ -35,7 +35,7 @@ impl EngramControlTransport for ColdStartRootReader {
             connection.binary_path = real_engram_control_fixture_path();
             connection.home = self.home.clone();
             // A cold startup deterministically spends this call's budget.
-            return self.process.request(&connection, request, Duration::ZERO);
+            return self.process.request(&connection, request, Duration::from_nanos(1));
         }
         self.control.request(connection, request, timeout)
     }

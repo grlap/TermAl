@@ -26,8 +26,11 @@ pub(super) fn source_owner_reply(args: &[String]) -> std::process::Output {
         assert_eq!(args[0], "source");
         assert_eq!(args[1], "--root");
         assert_eq!(args[3], "--json");
-        assert_eq!(args[4], "--timeout-ms");
-        assert!((1..=30000).contains(&args[5].parse::<u64>().unwrap()));
+        assert_eq!(
+            args.len(),
+            4,
+            "use the owner's supported default, without a timeout override"
+        );
         source_owner_output(1, serde_json::to_vec(&json!({
             "version":1, "status":"unavailable", "root":args[2], "source":null, "tree":null,
             "entries":[], "refusal":{"code":"input_unavailable","message":"fixture is not a repository"},
@@ -103,7 +106,9 @@ fn source_owner_unix_scripts_are_refused_before_probing_explicit_or_searched_pat
 fn source_owner_metadata_pins_bytes_and_actual_source_schema_without_claiming_a_verdict() {
     let root = TestTempRoot::create("source-owner-meta");
     let binary = source_owner_fixture_binary(&root);
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let opened = std::time::Instant::now();
+    let deadline = opened + Duration::from_secs(2);
+    let mut admitted_deadline = None;
     let mut calls = 0;
     let pin = engram_source_owner_metadata_with(
         &binary,
@@ -113,9 +118,13 @@ fn source_owner_metadata_pins_bytes_and_actual_source_schema_without_claiming_a_
         |actual, cwd, args, until, limit| {
             assert_eq!(actual, fs::canonicalize(&binary).unwrap());
             assert_eq!(cwd, root.as_ref());
-            assert_eq!(
-                until, deadline,
-                "both calls share the shorter caller deadline"
+            assert!(
+                until >= opened + Duration::from_secs(60),
+                "a short caller cannot truncate the observation"
+            );
+            assert!(
+                until >= *admitted_deadline.get_or_insert(until),
+                "the source phase must retain the longer existing window"
             );
             assert_eq!(
                 limit,
@@ -186,6 +195,97 @@ fn source_owner_metadata_refuses_missing_relative_replaced_and_expired_programs(
     assert!(
         error.to_string().contains("changed during probing"),
         "{error:#}"
+    );
+}
+
+#[test]
+fn source_owner_preserves_a_longer_observation_deadline() {
+    let root = TestTempRoot::create("source-owner-long-window");
+    let binary = source_owner_fixture_binary(&root);
+    let deadline = std::time::Instant::now() + Duration::from_secs(180);
+    let mut calls = 0;
+    engram_source_owner_metadata_with(&binary, &root, &root, deadline, |_, _, args, until, _| {
+        assert_eq!(
+            until, deadline,
+            "a longer operation window must not be shortened"
+        );
+        calls += 1;
+        Ok(source_owner_reply(args))
+    })
+    .unwrap();
+    assert_eq!(calls, 2);
+}
+
+#[test]
+fn a_late_version_reply_leaves_the_source_its_full_default_window() {
+    let root = TestTempRoot::create("source-owner-late-version");
+    let binary = source_owner_fixture_binary(&root);
+    let started = std::time::Instant::now();
+    let plan = EngramSourcePhasePlan::at(started + ENGRAM_SOURCE_COMMAND_BUDGET, started);
+    let clock = std::cell::Cell::new(started);
+    let envelope = super::engram_source_command::source_envelope(&root, "clean");
+    let expected: EngramSourceId = serde_json::from_value(envelope["source_id"].clone()).unwrap();
+    let mut calls = Vec::new();
+    let (pin, observation) = engram_source_owner_observe_with_clock(
+        &binary,
+        &root,
+        &root,
+        plan,
+        |_, _, args, until, _| {
+            calls.push(args[0].clone());
+            if args == ["--version"] {
+                // Script a successful probe near the end of its admitted window.
+                clock.set(until - Duration::from_secs(1));
+                Ok(source_owner_reply(args))
+            } else {
+                assert_eq!(
+                    args.len(),
+                    4,
+                    "both old and new owners use their own default"
+                );
+                let finished = clock.get() + ENGRAM_MIN_CALL_TIMEOUT;
+                if finished >= until {
+                    bail!("the enclosing host deadline cut the source short");
+                }
+                clock.set(finished);
+                Ok(source_owner_output(
+                    0,
+                    serde_json::to_vec(&envelope).unwrap(),
+                ))
+            }
+        },
+        || clock.get(),
+    )
+    .unwrap();
+    assert_eq!(
+        observation
+            .into_source_id(plan.completion_deadline)
+            .unwrap(),
+        expected
+    );
+    assert_eq!(pin.source_version, 1);
+    assert_eq!(
+        calls,
+        ["--version", "source"],
+        "a slow success must not resend"
+    );
+    assert!(
+        clock.get() < plan.completion_deadline,
+        "the caller funds both phases"
+    );
+}
+
+#[test]
+fn a_spent_admitted_plan_is_not_refreshed_by_a_nested_owner() {
+    let root = TestTempRoot::create("source-owner-spent-plan");
+    let binary = source_owner_fixture_binary(&root);
+    let admitted = std::time::Instant::now() - ENGRAM_SOURCE_METADATA_BUDGET;
+    let plan = EngramSourcePhasePlan::at(admitted + ENGRAM_SOURCE_COMMAND_BUDGET, admitted);
+    assert!(
+        engram_source_owner_metadata_with(&binary, &root, &root, plan, |_, _, _, _, _| panic!(
+            "queueing cannot admit a fresh operation window"
+        ))
+        .is_err()
     );
 }
 

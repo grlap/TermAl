@@ -158,7 +158,9 @@ impl<T: Clone + Send + 'static> EngramCapture<T> {
         });
         let filling = pending.clone();
         let worker = EngramCaptureWorker::start(workers);
-        if let Err(error) = lifetime.spawn("termal-check-capture", move || {
+        // The source/toolchain reader owns its absolute operation deadline.
+        // A second worker-age cap would shorten a later admitted source call.
+        if let Err(error) = lifetime.spawn_observer("termal-check-capture", move || {
             let value = capture();
             drop(worker);
             filling.finish(value);

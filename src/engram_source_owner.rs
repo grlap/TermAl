@@ -119,11 +119,11 @@ fn engram_source_owner_run(
             command.env_remove(key);
         }
     }
-    run_bounded_read_command(&mut command, deadline, limit, true)
+    run_engram_bounded_read_command(&mut command, deadline, limit, "source observation")
 }
 
 fn engram_source_owner_metadata_with(
-    configured: &FsPath, root: &FsPath, cwd: &FsPath, deadline: std::time::Instant,
+    configured: &FsPath, root: &FsPath, cwd: &FsPath, deadline: impl Into<EngramSourcePhasePlan>,
     run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize) -> Result<std::process::Output>,
 ) -> Result<EngramSourceOwnerPin> {
     engram_source_owner_observe_with(configured, root, cwd, deadline, run)
@@ -133,11 +133,33 @@ fn engram_source_owner_metadata_with(
 // Bootstrap and the first measurement share this actual observation. Metadata-only
 // callers discard its verdict; a caller measuring now consumes it without a
 // second source invocation. It is never evidence for a later capture or root.
+#[cfg(test)]
+thread_local! {
+    // One source-admission sample, installed by the version callback on the
+    // same capture worker. It never changes filesystem or authority clocks.
+    static TEST_ENGRAM_SOURCE_OWNER_NOW: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+}
+
 fn engram_source_owner_observe_with(
-    configured: &FsPath, root: &FsPath, cwd: &FsPath, deadline: std::time::Instant,
-    mut run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize) -> Result<std::process::Output>,
+    configured: &FsPath, root: &FsPath, cwd: &FsPath, deadline: impl Into<EngramSourcePhasePlan>,
+    run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize) -> Result<std::process::Output>,
 ) -> Result<(EngramSourceOwnerPin, EngramSourceObservation)> {
-    let deadline = deadline.min(std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET);
+    engram_source_owner_observe_with_clock(configured, root, cwd, deadline.into(), run, || {
+        #[cfg(test)]
+        if let Some(now) = TEST_ENGRAM_SOURCE_OWNER_NOW.with(|clock| clock.take()) {
+            return now;
+        }
+        std::time::Instant::now()
+    })
+}
+
+fn engram_source_owner_observe_with_clock(
+    configured: &FsPath, root: &FsPath, cwd: &FsPath, plan: EngramSourcePhasePlan,
+    mut run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize) -> Result<std::process::Output>,
+    now: impl Fn() -> std::time::Instant,
+) -> Result<(EngramSourceOwnerPin, EngramSourceObservation)> {
+    plan.check()?;
+    let deadline = plan.probe_deadline;
     let binary = resolve_engram_source_program(configured, root, deadline)?;
     let sha256 = engram_source_binary_hash(&binary, deadline)?;
     let version = run(&binary, cwd, &["--version".into()], deadline, 4096)?;
@@ -151,6 +173,7 @@ fn engram_source_owner_observe_with(
         bail!("Engram source owner version probe returned unsupported output");
     }
     let root = fs::canonicalize(root).context("Engram source owner project root is unavailable")?;
+    let deadline = plan.source_deadline_at(now())?;
     let args = engram_source_command_args(&root, deadline)?;
     let output = run(&binary, cwd, &args, deadline, ENGRAM_SOURCE_JSON_LIMIT + 1)?;
     if !output.stderr.is_empty() {
@@ -182,27 +205,31 @@ fn engram_source_owner_observe_with(
 // local changes; it imposes no clean-commit policy on future consumers.
 #[cfg_attr(not(test), allow(dead_code))]
 fn engram_source_id_until(
-    pin: &EngramSourceOwnerPin, root: &FsPath, deadline: std::time::Instant,
+    pin: &EngramSourceOwnerPin, root: &FsPath, deadline: impl Into<EngramSourcePhasePlan>,
 ) -> Result<EngramSourceId> {
     engram_source_id_with(pin, root, deadline, engram_source_owner_run)
 }
 
 fn engram_source_id_with(
-    pin: &EngramSourceOwnerPin, root: &FsPath, deadline: std::time::Instant,
+    pin: &EngramSourceOwnerPin, root: &FsPath, deadline: impl Into<EngramSourcePhasePlan>,
     mut run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize)
         -> Result<std::process::Output>,
 ) -> Result<EngramSourceId> {
-    engram_source_observation_with(pin, root, deadline, &mut run)?.into_source_id(deadline)
+    let plan = deadline.into();
+    engram_source_observation_with(pin, root, plan, &mut run)?.into_source_id(plan.completion_deadline)
 }
 
 fn engram_source_observation_with(
-    pin: &EngramSourceOwnerPin, root: &FsPath, deadline: std::time::Instant,
+    pin: &EngramSourceOwnerPin, root: &FsPath, deadline: impl Into<EngramSourcePhasePlan>,
     mut run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize)
         -> Result<std::process::Output>,
 ) -> Result<EngramSourceObservation> {
-    let deadline = deadline.min(std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET);
+    let plan = deadline.into();
+    plan.check()?;
+    let deadline = plan.source_admission_deadline;
     let binary = engram_source_owner_verify_bytes(pin, deadline)?;
     let root = fs::canonicalize(root).context("Engram source root is unavailable")?;
+    let deadline = plan.source_deadline_at(std::time::Instant::now())?;
     let args = engram_source_command_args(&root, deadline)?;
     let output = run(&binary, &root, &args, deadline, ENGRAM_SOURCE_JSON_LIMIT + 1)?;
     engram_source_before_deadline(deadline)?;
@@ -256,23 +283,25 @@ fn engram_source_owner_error(error: anyhow::Error) -> ApiError {
 }
 
 impl AppState {
-    fn source_owner_metadata_until(&self, session: &str, deadline: std::time::Instant)
+    fn source_owner_metadata_until(&self, session: &str, deadline: impl Into<EngramSourcePhasePlan>)
         -> Result<EngramSourceOwnerPin, ApiError>
     {
         self.source_owner_metadata_with(session, deadline, engram_source_owner_run)
     }
 
-    fn source_owner_metadata_with(&self, session: &str, deadline: std::time::Instant,
+    fn source_owner_metadata_with(&self, session: &str, deadline: impl Into<EngramSourcePhasePlan>,
         run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize) -> Result<std::process::Output>)
         -> Result<EngramSourceOwnerPin, ApiError>
     {
         self.source_owner_metadata_snapshot_with(session, deadline, run).map(|(pin, _)| pin)
     }
 
-    fn source_owner_metadata_snapshot_with(&self, session: &str, deadline: std::time::Instant,
+    fn source_owner_metadata_snapshot_with(&self, session: &str, deadline: impl Into<EngramSourcePhasePlan>,
         run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize) -> Result<std::process::Output>)
         -> Result<(EngramSourceOwnerPin, EngramSourceOwnerAuthority), ApiError>
     {
+        let plan = deadline.into();
+        plan.check().map_err(engram_source_owner_error)?;
         let authority = engram_source_owner_authority_locked(
             &self.inner.lock().expect("state mutex poisoned"), session)?;
         let configured = authority.settings.binary_path.as_deref()
@@ -281,14 +310,14 @@ impl AppState {
         let cwd = engram_host_workdir(self.persistence_path.as_ref())
             .map_err(|error| engram_source_owner_error(error.into()))?;
         let pin = engram_source_owner_metadata_with(FsPath::new(configured),
-            FsPath::new(&authority.project_root), &cwd, deadline, run)
+            FsPath::new(&authority.project_root), &cwd, plan, run)
             .map_err(engram_source_owner_error)?;
         let current = engram_source_owner_authority_locked(
             &self.inner.lock().expect("state mutex poisoned"), session)?;
         if current != authority {
             return Err(ApiError::conflict("source owner session or project configuration changed during probing"));
         }
-        engram_source_before_deadline(deadline).map_err(engram_source_owner_error)?;
+        engram_source_before_deadline(plan.completion_deadline).map_err(engram_source_owner_error)?;
         Ok((pin, authority))
     }
 }
@@ -302,7 +331,7 @@ async fn get_session_source_owner(
     }
     let _permit = ENGRAM_SOURCE_OWNER_PERMITS.clone().try_acquire_owned()
         .map_err(|_| ApiError::from_status(StatusCode::TOO_MANY_REQUESTS, "source owner probe busy"))?;
-    let deadline = std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET;
+    let deadline = EngramSourcePhasePlan::from(std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET);
     run_blocking_api(move || {
         let _permit = _permit;
         state.source_owner_metadata_until(&session, deadline).map(Json)

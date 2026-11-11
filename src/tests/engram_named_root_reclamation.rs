@@ -206,7 +206,7 @@ fn refuse_next_publication(claimed: &EOCheckedTurn, phase: &'static str) -> Arc<
     let observed = refused.clone();
     claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = Some(Arc::new(move |at| {
         if at == phase && !observed.swap(true, std::sync::atomic::Ordering::SeqCst) {
-            clock.advance(Duration::from_secs(3));
+            clock.advance(ENGRAM_MIN_CALL_TIMEOUT + Duration::from_millis(1));
         }
     }));
     refused
@@ -294,9 +294,9 @@ fn an_interrupted_publication_is_finished_by_the_next_background_pass() {
 }
 
 /// A same-path naming returns its root's generation only with the root confirmed,
-/// even when its opening pass couldn't finish the stranded publication: a later
-/// prepare in the same naming recovers the candidate, and the naming publishes
-/// what that left. A guard of that supported path: no fix of this item changed it.
+/// even when the preceding opening pass could not finish its stranded
+/// publication. The naming recovers that exact candidate and publishes it;
+/// the first naming request still succeeds without a replacement bind.
 #[test]
 fn a_same_path_naming_clears_a_candidate_its_opening_pass_could_not_finish() {
     let (claimed, tree) = root_fixture("root-candidate-same-path");
@@ -309,6 +309,14 @@ fn a_same_path_naming_clears_a_candidate_its_opening_pass_could_not_finish() {
     assert!(refused.load(std::sync::atomic::Ordering::SeqCst));
     assert_eq!(authority_owner(&claimed, &entry).phase, EngramAuthorityPhase::Candidate);
     let opening_refused = refuse_next_publication(&claimed, "before_recovery_publication");
+
+    // Naming defers its unfunded optional maintenance. Exercise the actual
+    // preceding opening owner explicitly, so its fault cannot instead expire
+    // the mandatory recovery in the naming request below.
+    claimed.state.recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
+    assert!(opening_refused.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(authority_owner(&claimed, &entry).phase, EngramAuthorityPhase::Candidate);
+    assert!(unresolved_reason(&claimed, &entry).is_some());
 
     let named = request_fixture_name(&claimed, Some(&tree));
 

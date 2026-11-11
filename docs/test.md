@@ -483,7 +483,8 @@ failure, and include a bounded host reason when available. The same operation
 nonce and attempt ordinal correlate launcher and host diagnostics; the run id
 and request digest identify the immutable input. Host diagnostics include phase elapsed
 time, StateInner acquisition/hold time, and available fence progress/error.
-The original shared 8 s client budget and 5 s host fence budget still apply.
+The host's claim/durability allowance is 60 s. The client funds that window,
+an admitted held-read overrun and delivery: 123 s ordinary, 247 s with the source pin.
 Host phase traces are transient (16 completed phases and 8 lock observations,
 with error JSON detail capped at 2048 bytes); launcher errors remain in the run
 results. These diagnostics do not prove COMMIT, settlement or a safe restart,
@@ -502,9 +503,11 @@ Engram executable, its measured digest and actual version, and the source JSON
 schema validated from an `engram source --root <project-root> --json` response.
 It returns no source verdict or store details. A well-formed unavailable source
 response can establish schema support; it cannot establish clean-source evidence.
-The hash, version and schema probes share an aggregate thirty-second budget,
-including parsing. The metadata GET's client allowance is that budget plus
-five seconds for HTTP delivery (35 s). The host resolves a configured native command in its own
+One admitted phase plan funds version/preparation and source measurement,
+each with at least 60 s plus 2 s process delivery, including pin checks and parsing.
+Existing longer version deadlines stay longer. The default aggregate is 124 s;
+the metadata GET's client allowance adds five seconds for HTTP delivery (129 s).
+The host resolves a configured native command in its own
 absolute PATH directories, rejects distinct competing programs, and returns an
 absolute pin. It never searches cwd, relative PATH entries or batch shims;
 the launcher performs no PATH discovery. Missing or relative path configuration, changed bytes, malformed
@@ -516,10 +519,13 @@ joins the immutable request identity. The host independently verifies it against
 the initiating session's project configuration before registration, rechecks
 configuration and executable bytes before publication, and persists the pin
 without changing historical registrations. This source probe has the shared
-30 s source budget; the outer host deadline adds the existing 5 s claim/durability
-allowance. Claim/durability still receive at most 5 s after probing, within that
-outer deadline. Pinned registration's client deadline adds the existing 8 s
-ACK allowance to the source budget (38 s). Omitting the field preserves legacy identity and behavior;
+124 s metadata plan; the outer host deadline adds a 60 s claim/durability
+allowance. Claim/durability receive that allowance after probing, within the
+outer deadline. The registration client also funds a full admitted held-read
+overrun and response delivery: 123 s for ordinary registration and 247 s with
+the source pin. Those claim windows use `scripts/engram-call-budget-ms.json`,
+shared with the host's minimum operation window rather than its source budget.
+The server's publication deadline is unchanged. Omitting the field preserves legacy identity and behavior;
 the outer registration POST remains `runId` plus `runDirectory`.
 Pinned registration requires a visible native local root session, including on
 replay. An ACK retry also requires the configured executable still to match its
@@ -562,8 +568,8 @@ establishes the pin's source schema, rather than issuing a second full read.
 It retains that invocation's root and observation time; a separate GET or later
 capture cannot relabel it as fresh evidence. Subsequent measurements reuse only
 the executable pin and perform a fresh source capture. Each observation has its
-own maximum thirty-second deadline, including its byte checks and parsing;
-an intentionally shorter outer caller deadline is preserved.
+own sixty-second deadline, including its byte checks and parsing. An expired
+caller cannot admit new work; an admitted observation gets at least sixty seconds.
 Fixture construction uses the existing finite Git setup budget. Run this test
 only in an authorized focused slot; it is not part of the default FULL suite.
 Each measurement prints bounded operation timings and its remaining budget.
@@ -581,15 +587,26 @@ successful fixtures are removed normally.
 The host's `engram_source_id_until` takes an explicit executable pin, an
 already-authorized root and the caller's absolute deadline. It returns
 the complete typed value, including local changes, after byte-pin checks,
-bounded execution and strict parsing. The maximum thirty-second budget is
-shared by those operations; a shorter caller deadline stays shorter.
-The owner receives `--timeout-ms` up to `30000`. Activate this host change
-with an Engram build that accepts that bound; there is no version-dependent
-fallback. Source deadlines derive from `scripts/source-id-budget-ms.json`.
-Outer process delivery adds 2 s, metadata HTTP adds 5 s, and pinned registration
-adds its existing ACK/durability allowances as described above. The ACK
-allowance remains 8 s, host claim/durability remains 5 s, and named-root
-reclamation keeps its separate 8 s budget.
+bounded execution and strict parsing. A single admitted plan retains the
+absolute phase deadlines through queues and nested helpers; it is not floored
+again at each nesting level. Version/preparation and source measurement each
+keep at least 60 s plus process delivery, and existing longer deadlines remain.
+The source command omits `--timeout-ms`, letting either owner use its supported default.
+Before the Engram sync, the source owner's own default is 30 s; TermAl no longer
+imposes a source limit and waits at least 60 s plus overhead.
+This does not claim a 60 s end-to-end owner limit before the sync.
+Source deadlines derive from `scripts/source-id-budget-ms.json` and the shared
+operation/delivery pair in `scripts/engram-call-budget-ms.json`.
+Calls still pending after ten seconds log an operation-named warning without
+aborting or resending. Launcher source reads are asynchronous so this diagnostic
+can run while the owner process is working.
+Outer process delivery adds 2 s and metadata HTTP adds 5 s. Pinned registration
+funds source measurement and the separate 60 s host claim/durability stage,
+with the admitted held-read overrun and client delivery allowance described above. Native opening
+likewise funds the 124 s metadata plan and reserves 60 s for authority work.
+Reclamation has a 60 s read pass within a 130 s disposition allowance counted
+from the pass's start, including the read and its admitted overrun;
+its scheduling cadence and retry hints remain independent of these limits.
 JSON is limited to one MiB, with one trailing LF allowed outside that limit.
 Unavailable, incoherent, oversized or late input is an error with no fallback.
 Equality compares every field of this object, excluding the envelope's
@@ -1133,7 +1150,7 @@ or inconsistent authority still refuses registration.
 An unavailable Engram service or an unavailable selected claim refuses the
 launch before tests start; a
 changed claim fence requires naming the root again. This read shares the
-registration's five-second durability budget. Replay keeps the original
+registration's sixty-second claim/durability budget. Replay keeps the original
 association and does not read the claim again. Automatic selection does not
 downgrade or retry a refused committed registration. Its error preserves the
 cause and suggests renewing the claim or naming the root again, or explicitly

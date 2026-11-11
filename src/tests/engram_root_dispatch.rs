@@ -185,15 +185,7 @@ fn root_ordinary_send_preserves_passive_unknown_binding_bytes_without_replay() {
 }
 
 #[test]
-fn root_default_work_service_call_budget_is_twenty_seconds() {
-    assert_eq!(
-        EngramProjectSettings::default().call_timeout(),
-        Duration::from_secs(20)
-    );
-}
-
-#[test]
-fn a_project_may_bound_an_engram_call_up_to_twenty_seconds() {
+fn a_project_rejects_deadlines_outside_the_supported_range() {
     let state = test_app_state();
     let update = |deadline_ms| {
         state
@@ -207,18 +199,16 @@ fn a_project_may_bound_an_engram_call_up_to_twenty_seconds() {
             .err()
             .expect("an unknown project is never updated")
     };
-    for refused in [0, 20_001] {
+    for refused in [0, ENGRAM_MAX_CALL_TIMEOUT_MS + 1] {
         let error = update(refused);
         assert_eq!(error.status, StatusCode::BAD_REQUEST, "{refused}");
         assert!(
-            error
-                .message
-                .contains("Engram deadline must be between 1 and 20000 ms"),
+            error.message.contains("Engram deadline must be between "),
             "{refused}: {}",
             error.message
         );
     }
-    let error = update(20_000);
+    let error = update(ENGRAM_MAX_CALL_TIMEOUT_MS);
     assert_eq!(error.status, StatusCode::NOT_FOUND, "{}", error.message);
     assert!(
         error.message.contains("project not found"),

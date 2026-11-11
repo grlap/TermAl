@@ -248,6 +248,10 @@ if ($initialMode.StartsWith("fixture-stderr-")) {
 [Console]::Out.Flush()
 
 while ($null -ne ($line = [Console]::In.ReadLine())) {
+    $frameLog = Join-Path $engramHome 'control-frames.jsonl'
+    if (Test-Path -LiteralPath $frameLog) {
+        [IO.File]::AppendAllText($frameLog, $line + "`n")
+    }
     $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
     if ($mode -eq "fixture-stderr-exit") { exit 0 }
     if ($mode -eq "fixture-eof") {

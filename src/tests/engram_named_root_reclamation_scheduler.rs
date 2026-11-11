@@ -118,7 +118,7 @@ fn named_root_reclamation_scheduler_plans_with_state_lock_available() {
     assert_eq!(claimed.state.schedule_engram_root_reclamation(true),
         "no eligible reclamation pass was scheduled");
     assert_eq!(claimed.state.inner.lock().unwrap().engram_root_reclamation.next_due,
-        Some(now + ENGRAM_ROOT_RECLAMATION_BUDGET));
+        Some(now + ENGRAM_ROOT_RECLAMATION_INTERVAL));
     assert_eq!(claimed.state.schedule_engram_root_reclamation(false),
         "the recurring pass is not due yet");
     assert_eq!(*observations.borrow(), vec![
@@ -236,5 +236,5 @@ fn named_root_reclamation_scheduler_reserves_one_flight_during_unlocked_planning
     assert_eq!(phases.get(), 2);
     let inner = claimed.state.inner.lock().unwrap();
     assert!(inner.engram_root_reclamation.flight.is_none(), "empty planning releases its flight");
-    assert_eq!(inner.engram_root_reclamation.next_due, Some(now + ENGRAM_ROOT_RECLAMATION_BUDGET));
+    assert_eq!(inner.engram_root_reclamation.next_due, Some(now + ENGRAM_ROOT_RECLAMATION_INTERVAL));
 }

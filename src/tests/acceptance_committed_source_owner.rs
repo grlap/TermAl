@@ -9,6 +9,69 @@ fn owner_deadline() -> std::time::Instant {
 }
 
 #[test]
+fn committed_preflight_keeps_long_host_deadlines_and_issues_owner_compatible_arguments() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let (state, parent, _store, named_root) = named_root_parent();
+    let head = commit_named_root(&named_root);
+    acceptance_owner_reports(&state, &parent, &named_root, Vec::new(), Vec::new());
+    let transport = install_sighting_transport(&state, &named_root, 1, json!({"state":"absent"}));
+    let registration = register_committed_run(
+        &state,
+        &parent,
+        &named_root,
+        committed_results("passed", input_record(&head, "clean")),
+    );
+    host_observed(&state, &registration, &head, acknowledged("received"));
+    let capture = state
+        .inner
+        .lock()
+        .unwrap()
+        .test_acceptance_source_owner_capture
+        .clone()
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let count = calls.clone();
+    let deadline = std::time::Instant::now() + acceptance_evaluation_request_tracker_budget();
+    state
+        .inner
+        .lock()
+        .unwrap()
+        .test_acceptance_source_owner_capture =
+        Some(Arc::new(move |binary, cwd, args, until, limit| {
+            assert_eq!(
+                until, deadline,
+                "an early capture preserves the existing longer deadline"
+            );
+            assert!(
+                !args.iter().any(|arg| arg.starts_with("--timeout-ms")),
+                "the actual committed-input preflight must work with either owner's default"
+            );
+            count.fetch_add(1, Ordering::SeqCst);
+            capture(binary, cwd, args, until, limit)
+        }));
+    assert_eq!(
+        decide_by(&state, &parent, deadline),
+        Ok(AcceptanceCommittedInputDecision::Admitted(
+            AcceptanceCommittedInputAdmission {
+                native_source: None,
+                run_id: COMMITTED_RUN_ID.to_owned(),
+                commit: head,
+            }
+        ))
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "initial clean observation and final revalidation, no source fallback or resend"
+    );
+    assert_eq!(
+        sighting_reads(&transport),
+        0,
+        "committed admission does not fall back to sighting"
+    );
+}
+
+#[test]
 fn acceptance_uses_the_owner_verdict_without_a_local_git_predicate() {
     let (state, parent, _store, named_root) = named_root_parent();
     let head = commit_named_root(&named_root);

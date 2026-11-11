@@ -1507,10 +1507,7 @@ fn received_notice_other_root_read_cannot_restart_its_authority_deadline() {
         .turn
         .transport
         .on_next_held_claim_read(move |timeout| {
-            assert!(
-                timeout > Duration::ZERO && timeout <= Duration::from_secs(1),
-                "{timeout:?}"
-            );
+            assert!(timeout == ENGRAM_MIN_CALL_TIMEOUT, "{timeout:?}");
             assert!(
                 state.inner.is_not_held_by_current_thread_for_test(),
                 "authority reads cannot hold the shared state lock"

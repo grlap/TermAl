@@ -196,7 +196,8 @@ impl AppState {
         root: &FsPath,
         deadline: std::time::Instant,
     ) -> Option<EngramSourceId> {
-        let deadline = deadline.min(std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET);
+        let deadline = EngramSourcePhasePlan::from(deadline);
+        deadline.check().ok()?;
         #[cfg(test)]
         let metadata = self
             .inner
@@ -206,7 +207,7 @@ impl AppState {
             .clone();
         #[cfg(test)]
         let measured = match metadata {
-            Some(measure) => measure(self, session, deadline),
+            Some(measure) => measure(self, session, deadline.probe_deadline),
             None => {
                 self.source_owner_metadata_snapshot_with(session, deadline, engram_source_owner_run)
             }
@@ -215,6 +216,7 @@ impl AppState {
         let measured =
             self.source_owner_metadata_snapshot_with(session, deadline, engram_source_owner_run);
         let (pin, authority) = measured.ok()?;
+        let deadline = deadline.following_observation();
         #[cfg(test)]
         let capture = self
             .inner
@@ -246,7 +248,7 @@ impl AppState {
         {
             return None;
         }
-        let source = observed.into_source_id(deadline).ok()?;
+        let source = observed.into_source_id(deadline.completion_deadline).ok()?;
         test_run_commit_id_valid(&source.commit).then_some(source)
     }
 }

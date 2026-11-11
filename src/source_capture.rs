@@ -51,7 +51,10 @@ fn bounded_source_capture<T: Send + 'static>(
     }
     let release = Release(live.clone());
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-    let spawned = lifetime.spawn("termal-source-capture", move || {
+    let started = std::time::Instant::now();
+    // The caller's wait can expire while the worker remains owned. Nested
+    // operations keep their own deadlines; shutdown still cancels and joins.
+    let spawned = lifetime.spawn_observer("termal-source-capture", move || {
         let _release = release;
         let _ = sender.send(capture());
     });
@@ -59,5 +62,5 @@ fn bounded_source_capture<T: Send + 'static>(
         eprintln!("engram> no thread for a source capture: {error}");
         return None;
     }
-    receiver.recv_timeout(budget).ok().flatten()
+    receive_engram_call(&receiver, started, budget, "source capture").ok().flatten()
 }

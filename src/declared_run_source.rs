@@ -113,14 +113,16 @@ impl DeclaredRunFirstTool {
 fn declared_run_source(
     binding: &EngramDeclaredBinding,
     pin: &EngramSourceOwnerPin,
-    deadline: std::time::Instant,
+    deadline: impl Into<EngramSourcePhasePlan>,
 ) -> Result<DeclaredRunSource> {
     declared_run_source_with_timings(binding, pin, deadline, None)
 }
 
-fn declared_run_source_with_timings(binding: &EngramDeclaredBinding, pin: &EngramSourceOwnerPin, deadline: std::time::Instant,
+fn declared_run_source_with_timings(binding: &EngramDeclaredBinding, pin: &EngramSourceOwnerPin, deadline: impl Into<EngramSourcePhasePlan>,
     timings: Option<Arc<SourceReadTimings>>) -> Result<DeclaredRunSource> {
-    declared_run_source_with_owner(binding, pin, deadline, timings, engram_source_id_until)
+    let plan = deadline.into();
+    declared_run_source_with_owner(binding, pin, plan.completion_deadline, timings,
+        |pin, root, _| engram_source_id_until(pin, root, plan))
 }
 
 fn declared_run_source_with_owner(binding: &EngramDeclaredBinding, pin: &EngramSourceOwnerPin, deadline: std::time::Instant,

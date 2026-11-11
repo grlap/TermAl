@@ -9,6 +9,65 @@
 // child module uses). New module.
 use super::*;
 
+#[test]
+fn optional_maintenance_defers_instead_of_consuming_mandatory_naming_control() {
+    let clock = EngramBudgetClock::scripted();
+    let mut control = ENGRAM_MIN_CALL_TIMEOUT;
+    let optional_started = std::cell::Cell::new(false);
+    engram_source_root_optional_control_within(
+        &clock,
+        &mut control,
+        ENGRAM_SOURCE_ROOT_NAMING_BUDGET,
+        |_| {
+            optional_started.set(true);
+            clock.advance(ENGRAM_MIN_CALL_TIMEOUT);
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert!(
+        !optional_started.get(),
+        "unfunded maintenance cannot consume the mandatory naming allowance"
+    );
+    let mut mandatory_finished = false;
+    engram_source_root_control_within(
+        &clock,
+        &mut control,
+        ENGRAM_SOURCE_ROOT_NAMING_BUDGET,
+        |_| {
+            clock.advance(ENGRAM_MIN_CALL_TIMEOUT / 2);
+            mandatory_finished = true;
+            Ok(())
+        },
+    )
+    .expect("deferred slow maintenance cannot turn a valid mandatory reply into a budget refusal");
+    assert!(mandatory_finished);
+
+    // When a full optional share and the mandatory reserve both fit, the
+    // maintenance owner is actually invoked and charged to the shared clock.
+    control = ENGRAM_MIN_CALL_TIMEOUT * 3;
+    optional_started.set(false);
+    engram_source_root_optional_control_within(
+        &clock,
+        &mut control,
+        ENGRAM_SOURCE_ROOT_NAMING_BUDGET,
+        |_| {
+            optional_started.set(true);
+            clock.advance(ENGRAM_MIN_CALL_TIMEOUT / 2);
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert!(
+        optional_started.get(),
+        "funded maintenance must not be disabled unconditionally"
+    );
+    assert!(
+        control > ENGRAM_MIN_CALL_TIMEOUT,
+        "maintenance left the mandatory reserve"
+    );
+}
+
 mod durability_pending {
     include!("durability_pending_naming.rs");
 }
@@ -227,11 +286,9 @@ fn source_root_review_round_six_partial_sweeps_ignore_filtered_reads() {
 
 fn partial_root_reader_keeps_progress(interleave_filtered: bool) {
     let label = "partial-lifecycle-read";
-    // Real time on purpose: the removed-root reads below take their deadline
-    // from TEST_ENGRAM_REMOVED_ROOT_READ_CLOCK, a deterministic sample
-    // sequence that the reader consults only on the real clock (a scripted
-    // clock would bypass it and the deadline would never pass).
-    let mut claimed = EOCheckedTurn::idle_real(label, true);
+    // Both preliminary authority recovery and removed-journal reads spend
+    // the same controlled clock; no owner can evade the admission window.
+    let mut claimed = EOCheckedTurn::idle(label, true);
     let worktree = naming_worktree(&claimed.root);
     request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
     replace_naming_session(&mut claimed, label);
@@ -264,12 +321,30 @@ fn partial_root_reader_keeps_progress(interleave_filtered: bool) {
             }
             inner.engram_named_root_journal.push(journal);
         }
+        // A retained journal and its canonical read association are one
+        // fixture fact. Seed both when cloning the sixteen original runs.
+        let retained = inner
+            .engram_named_root_journal
+            .iter()
+            .map(|journal| journal.read_binding.clone().unwrap())
+            .collect();
+        inner
+            .engram_work_naming_history
+            .iter_mut()
+            .find(|history| history.work_id == original.read_binding.as_ref().unwrap().work_id)
+            .unwrap()
+            .unresolved_runs = retained;
     }
-    // The test clock exhausts the deadline after exactly one attempted read.
+    // Each admitted claim completes its reads after the admission deadline.
     // One rotation of sixteen attempts must visit all sixteen identities,
     // regardless of elapsed transport/persistence time or machine load.
-    for _ in 0..16 {
-        resolve_removed_roots_with_one_attempt(&claimed, None);
+    for next in 0..16 {
+        let attempted = resolve_removed_roots_with_one_attempt(&claimed, None);
+        assert_eq!(
+            attempted,
+            format!("batch-claim-{next:02}"),
+            "re-discovery preserves unread order while failed attempts move behind it"
+        );
         if interleave_filtered {
             let cursor = claimed
                 .state
@@ -279,7 +354,11 @@ fn partial_root_reader_keeps_progress(interleave_filtered: bool) {
                 .engram_root_read_cursor
                 .clone();
             // A requested-claim read must not reset the unfiltered sweep cursor.
-            resolve_removed_roots_with_one_attempt(&claimed, Some("batch-claim-00"));
+            assert_eq!(
+                resolve_removed_roots_with_one_attempt(&claimed, Some("batch-claim-00")),
+                "batch-claim-00",
+                "a filtered pass reads only its requested claim"
+            );
             assert_eq!(
                 claimed.state.inner.lock().unwrap().engram_root_read_cursor,
                 cursor
@@ -301,29 +380,74 @@ fn partial_root_reader_keeps_progress(interleave_filtered: bool) {
     );
 }
 
-fn resolve_removed_roots_with_one_attempt(claimed: &EOCheckedTurn, claim: Option<&str>) {
-    struct ClearClock;
-    impl Drop for ClearClock {
-        fn drop(&mut self) {
-            TEST_ENGRAM_REMOVED_ROOT_READ_CLOCK.with(|clock| *clock.borrow_mut() = None);
+// Both maintenance owners share the fixture's monotonic clock. Each actual
+// read completes after the admission window, while still inside its own RPC
+// allowance. Count admitted claim identities: recovery may read one claim
+// twice while settling the same admitted authority transition.
+struct SlowMaintenanceReader {
+    control: Arc<ScriptedEngramControlTransport>,
+    clock: EngramBudgetClock,
+    reads: Mutex<Vec<(String, Duration)>>,
+}
+impl EngramControlTransport for SlowMaintenanceReader {
+    fn request(
+        &self,
+        connection: &EngramConnectionConfig,
+        request: &EngramControlRequest,
+        timeout: Duration,
+    ) -> Result<Value, EngramTransportError> {
+        let result = self.control.request(connection, request, timeout);
+        if let EngramControlRequest::NamedRootRead { claim_id, .. } = request {
+            self.reads.lock().unwrap().push((claim_id.clone(), timeout));
+            self.clock.advance(Duration::from_secs(3));
         }
+        result
     }
-    let start = std::time::Instant::now();
-    let mut samples = 0;
-    TEST_ENGRAM_REMOVED_ROOT_READ_CLOCK.with(|clock| {
-        *clock.borrow_mut() = Some(Box::new(move || {
-            samples += 1;
-            if samples <= 2 {
-                start
-            } else {
-                start + Duration::from_secs(2)
-            }
-        }));
+    fn shutdown_session(&self, session: &str) {
+        self.control.shutdown_session(session);
+    }
+}
+
+fn resolve_removed_roots_with_one_attempt(claimed: &EOCheckedTurn, claim: Option<&str>) -> String {
+    let clock = claimed.state.engram_budget_clock();
+    let reader = Arc::new(SlowMaintenanceReader {
+        control: claimed.transport.clone(),
+        clock: clock.clone(),
+        reads: Mutex::new(Vec::new()),
     });
-    let _clear = ClearClock;
+    claimed.state.install_test_engram_transport(reader.clone());
+    let started = clock.now();
+    claimed.state.resolve_removed_engram_roots(
+        &claimed.session_id,
+        claim,
+        ENGRAM_MIN_CALL_TIMEOUT * 3,
+    );
     claimed
         .state
-        .resolve_removed_engram_roots(&claimed.session_id, claim, Duration::from_secs(2));
+        .install_test_engram_transport(claimed.transport.clone());
+    let reads = reader.reads.lock().unwrap();
+    assert_eq!(
+        reads.len(),
+        1,
+        "the pass completes exactly its admitted read: {reads:?}"
+    );
+    assert!(clock.elapsed_since(started) > Duration::from_secs(2));
+    assert!(
+        reads
+            .iter()
+            .all(|(_, timeout)| *timeout >= ENGRAM_MIN_CALL_TIMEOUT),
+        "an issued call is never aborted at the admission deadline: {reads:?}"
+    );
+    assert_eq!(
+        reads
+            .iter()
+            .map(|(claim, _)| claim)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        1,
+        "no next claim is admitted after the two-second maintenance window: {reads:?}"
+    );
+    reads[0].0.clone()
 }
 
 #[test]
@@ -1881,55 +2005,78 @@ fn source_root_readback_requires_durable_guards_and_keeps_known_history_idempote
 }
 
 #[test]
-fn source_root_control_phases_share_the_remaining_allowance_and_reject_late_replies() {
-    let mut remaining = Duration::from_secs(1);
+fn source_root_control_keeps_completed_calls_and_refuses_the_next_unfunded_phase() {
+    let clock = EngramBudgetClock::scripted();
+    let mut remaining = ENGRAM_MIN_CALL_TIMEOUT;
     engram_source_root_control_within(
-        &EngramBudgetClock::Real,
+        &clock,
         &mut remaining,
-        Duration::from_secs(2),
-        |budget| {
-            assert_eq!(budget, Duration::from_secs(1));
-            std::thread::sleep(Duration::from_millis(2));
+        ENGRAM_SOURCE_ROOT_NAMING_BUDGET,
+        |_| {
+            clock.advance(ENGRAM_MIN_CALL_TIMEOUT * 7 / 12);
             Ok(())
         },
     )
     .unwrap();
-    assert!(remaining < Duration::from_secs(1));
     let after_first = remaining;
-    engram_source_root_control_within(
-        &EngramBudgetClock::Real,
+    let receipt = engram_source_root_control_within(
+        &clock,
         &mut remaining,
-        Duration::from_secs(2),
+        ENGRAM_SOURCE_ROOT_NAMING_BUDGET,
         |budget| {
             assert_eq!(
                 budget, after_first,
                 "a second phase cannot refresh the allowance"
             );
-            Ok(())
+            // Both calls finish within their own operation windows, although
+            // together they exceed the shared admission allowance.
+            clock.advance(ENGRAM_MIN_CALL_TIMEOUT / 2);
+            Ok("applied binding receipt")
         },
     )
-    .unwrap();
-    let error = engram_source_root_control_within(
-        &EngramBudgetClock::Real,
-        &mut remaining,
-        Duration::from_nanos(1),
-        |_| {
-            std::thread::sleep(Duration::from_millis(1));
-            Ok(())
-        },
-    )
-    .unwrap_err();
-    assert!(error.message.contains("after its budget"));
-    remaining = Duration::ZERO;
+    .expect("an admitted call's completed reply must not become a budget failure");
+    assert_eq!(receipt, "applied binding receipt");
     assert!(
         engram_source_root_control_within::<()>(
-            &EngramBudgetClock::Real,
+            &clock,
             &mut remaining,
-            Duration::from_secs(2),
+            ENGRAM_SOURCE_ROOT_NAMING_BUDGET,
             |_| { panic!("an exhausted allowance must not start another phase") }
         )
         .is_err()
     );
+}
+
+#[test]
+fn source_root_control_keeps_the_original_failure_after_an_admitted_overrun() {
+    for pending in [false, true] {
+        let clock = EngramBudgetClock::scripted();
+        let mut remaining = ENGRAM_MIN_CALL_TIMEOUT / 2;
+        let identity = json!({"intent": "original-binding"});
+        let error = engram_source_root_control_within::<()>(
+            &clock,
+            &mut remaining,
+            ENGRAM_SOURCE_ROOT_NAMING_BUDGET,
+            |_| {
+                clock.advance(ENGRAM_MIN_CALL_TIMEOUT);
+                Err(if pending {
+                    ApiError::enqueued_durability_deadline("fence pending", identity.clone())
+                } else {
+                    ApiError::conflict("binding changed")
+                })
+            },
+        )
+        .unwrap_err();
+        if pending {
+            assert!(error.is_enqueued_durability_deadline());
+            assert_eq!(error.durability_deadline.unwrap().identity, identity);
+            assert_eq!(error.message, "fence pending");
+        } else {
+            assert_eq!(error.status, StatusCode::CONFLICT);
+            assert_eq!(error.message, "binding changed");
+            assert!(!error.is_enqueued_durability_deadline());
+        }
+    }
 }
 
 #[test]

@@ -6,7 +6,9 @@
 /// something to settle a second, so a pass makes at most twice this many, and
 /// the pass's shared budget and each root's cooldown bound them all.
 const ENGRAM_ROOT_RECLAMATION_READ_LIMIT: usize = 8;
-const ENGRAM_ROOT_RECLAMATION_BUDGET: Duration = Duration::from_secs(2);
+const ENGRAM_ROOT_RECLAMATION_BUDGET: Duration = ENGRAM_MIN_CALL_TIMEOUT;
+// Scheduling cadence is independent of the admitted operation's hard limit.
+const ENGRAM_ROOT_RECLAMATION_INTERVAL: Duration = Duration::from_secs(2);
 const ENGRAM_ROOT_RECLAMATION_COOLDOWN: Duration = Duration::from_secs(30);
 /// The least of a pass's shared budget a planned root's recovery starts
 /// with: its per-root share. A scheduling floor only, not a budget that
@@ -603,7 +605,7 @@ impl AppState {
             inner.engram_root_reclamation.deferred = None;
             let id = Uuid::new_v4().to_string();
             inner.engram_root_reclamation.flight = Some(id.clone());
-            inner.engram_root_reclamation.next_due = Some(now + ENGRAM_ROOT_RECLAMATION_BUDGET);
+            inner.engram_root_reclamation.next_due = Some(now + ENGRAM_ROOT_RECLAMATION_INTERVAL);
             (id, snapshot)
         };
         // Reserve the flight before unlocking: another scheduler or an

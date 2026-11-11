@@ -4566,6 +4566,94 @@ fn delegation_followup_http_budget_covers_release_reconciliation_and_restore() {
 }
 
 #[test]
+fn evaluation_bridge_returns_the_reply_after_scripted_source_overrun() {
+    for status in [200, 409] {
+        let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |_| {
+            (status, if status == 200 { json!({"source":"observed"}) }
+                else { json!({"error":"source preflight expired after its issued observation"}) })
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url).unwrap();
+        let started = std::time::Instant::now();
+        let clock = std::cell::Cell::new(started
+            + acceptance_evaluation_request_tracker_budget() - Duration::from_millis(1));
+        let result = bridge.post_long_call_with_sender(
+            DelegationLongCall::EvaluationRequest,
+            "/api/sessions/session-parent/acceptance-evaluations",
+            &json!({"workRef":"w-task"}),
+            |request| {
+                // A late version reply leaves two issued preflight source
+                // stages, followed by the separately funded final capture.
+                // Advance virtual time, never wall time.
+                clock.set(clock.get() + ENGRAM_SOURCE_PROCESS_BUDGET - Duration::from_millis(1));
+                clock.set(clock.get() + ENGRAM_SOURCE_PROCESS_BUDGET - Duration::from_millis(1));
+                clock.set(clock.get() + ENGRAM_SOURCE_METADATA_BUDGET - Duration::from_millis(1));
+                let request = request.build().unwrap();
+                let elapsed = clock.get().duration_since(started);
+                assert!(elapsed + termal_delegation_turn_delivery_budget()
+                    < *request.timeout().unwrap(),
+                    "the HTTP caller must retain the issued source reply");
+                bridge.client.execute(request)
+            },
+        );
+        if status == 200 {
+            assert_eq!(result.unwrap(), json!({"source":"observed"}));
+        } else {
+            let error = result.unwrap_err();
+            assert!(error.downcast_ref::<TermalDelegationApiError>().is_some());
+            assert!(!termal_delegation_outcome_is_unknown(&error), "{error:#}");
+            assert!(error.to_string().contains("source preflight expired"));
+        }
+        server.join().unwrap();
+        assert_eq!(requests.lock().unwrap().len(), 1, "no request replay");
+    }
+}
+
+#[test]
+fn naming_bridge_keeps_a_completed_reply_after_scripted_control_overrun() {
+    for status in [200, 409] {
+        let reply = if status == 200 { json!({"generation":7,"root":"recorded-root"}) }
+            else { json!({"error":"binding refused after its admitted control read"}) };
+        let response = reply.clone();
+        let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |_| {
+            (status, response.clone())
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url).unwrap();
+        let started = std::time::Instant::now();
+        let clock = std::cell::Cell::new(started
+            + ENGRAM_SOURCE_ROOT_NAMING_BUDGET - Duration::from_millis(1));
+        let body = json!({"work":"fixture-work","path":"recorded-root"});
+        let result = bridge.post_long_call_with_sender(
+            DelegationLongCall::SourceRootNaming,
+            "/api/sessions/session-parent/engram-source-root",
+            &body,
+            |request| {
+                // The last control read was admitted before naming's shared
+                // allowance expired. It retains its full operation window.
+                clock.set(clock.get() + ENGRAM_MIN_CALL_TIMEOUT - Duration::from_millis(1));
+                let request = request.build().unwrap();
+                assert!(clock.get().duration_since(started) < *request.timeout().unwrap(),
+                    "the HTTP caller must retain the completed control reply");
+                bridge.client.execute(request)
+            },
+        );
+        if status == 200 {
+            assert_eq!(result.unwrap(), reply);
+        } else {
+            let error = result.unwrap_err();
+            assert!(error.downcast_ref::<TermalDelegationApiError>().is_some());
+            assert!(!termal_delegation_outcome_is_unknown(&error), "{error:#}");
+            assert!(error.to_string().contains("binding refused after its admitted control read"));
+        }
+        server.join().unwrap();
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 1, "no naming replay");
+        assert_eq!(requests[0].method, "POST");
+        assert_eq!(requests[0].path, "/api/sessions/session-parent/engram-source-root");
+        assert_eq!(serde_json::from_str::<Value>(&requests[0].body).unwrap(), body);
+    }
+}
+
+#[test]
 fn delegation_mcp_transport_errors_name_the_allowance_that_ran_out() {
     // No URL may name port 99999, so each request fails as it is built, with
     // no socket involved; the error carries the wait that call was given, not

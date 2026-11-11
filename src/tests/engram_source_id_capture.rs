@@ -24,16 +24,25 @@ fn source_owner_first_observation_supplies_pin_and_identity_without_a_second_sou
     let first = source_envelope(&root, "clean");
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     let mut calls = Vec::new();
+    let mut operation_deadline = None;
     let (pin, observation) = engram_source_owner_observe_with(
         &binary,
         &root,
         &root,
         deadline,
         |_, _, args, until, _| {
-            assert_eq!(
-                until, deadline,
-                "bootstrap retains a shorter outer deadline"
+            assert!(
+                until > deadline,
+                "an admitted source operation keeps its minimum window"
             );
+            if let Some(first_deadline) = operation_deadline {
+                assert!(
+                    until >= first_deadline,
+                    "the source retains the probe's existing longer window"
+                );
+            } else {
+                operation_deadline = Some(until);
+            }
             calls.push(args[0].clone());
             Ok(if args[0] == "--version" {
                 source_owner_reply(args)
@@ -64,7 +73,10 @@ fn source_owner_first_observation_supplies_pin_and_identity_without_a_second_sou
     let actual = engram_source_id_with(&pin, &root, later_deadline, |_, _, args, until, _| {
         later_calls += 1;
         assert_eq!(args[0], "source");
-        assert_eq!(until, later_deadline);
+        assert!(
+            until > later_deadline,
+            "a later admitted capture gets its operation window"
+        );
         Ok(source_owner_output(0, serde_json::to_vec(&later).unwrap()))
     })
     .unwrap();
@@ -104,9 +116,9 @@ fn source_owner_capture_returns_complete_clean_and_dirty_objects_under_the_same_
                 calls += 1;
                 assert_eq!(program, fs::canonicalize(&binary).unwrap());
                 assert_eq!(cwd, fs::canonicalize(&root).unwrap());
-                assert_eq!(
-                    until, deadline,
-                    "pin checks, process and parsing share the shorter deadline"
+                assert!(
+                    until > deadline,
+                    "a short caller window cannot abort an admitted source call"
                 );
                 assert_eq!(limit, ENGRAM_SOURCE_JSON_LIMIT + 1);
                 assert_eq!(args[0], "source");
@@ -118,8 +130,7 @@ fn source_owner_capture_returns_complete_clean_and_dirty_objects_under_the_same_
                         .unwrap()
                 );
                 assert_eq!(args[3], "--json");
-                assert_eq!(args[4], "--timeout-ms");
-                assert!((1..=2000).contains(&args[5].parse::<u64>().unwrap()));
+                assert_eq!(args.len(), 4, "the owner's default is not overridden");
                 Ok(source_owner_output(0, serde_json::to_vec(&value).unwrap()))
             })
             .unwrap();

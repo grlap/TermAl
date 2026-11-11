@@ -84,14 +84,19 @@ impl DelegationLongCall {
         match self {
             Self::Spawn => turn_delivery,
             Self::EvaluationRequest => {
-                acceptance_evaluation_request_tracker_budget() + turn_delivery
+                acceptance_evaluation_request_tracker_budget()
+                    + acceptance_evaluation_request_overrun_budget()
+                    + turn_delivery
             }
             Self::EvaluationSubmit => acceptance_evaluation_submit_budget(),
-            Self::SourceRootNaming => ENGRAM_SOURCE_ROOT_NAMING_BUDGET,
+            // A call admitted just before a shared phase expires retains its
+            // full minimum window. Keep the client alive for that overrun.
+            Self::SourceRootNaming => ENGRAM_SOURCE_ROOT_NAMING_BUDGET + ENGRAM_MIN_CALL_TIMEOUT,
             Self::NamedRootRelease => {
                 ENGRAM_NAMED_ROOT_RELEASE_FLIGHT_WAIT
                     + ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET
                     + ENGRAM_NAMED_ROOT_RELEASE_PERSIST_BUDGET * 2
+                    + ENGRAM_MIN_CALL_TIMEOUT
             }
             Self::ReviewFreeze => REVIEW_FREEZE_TIMEOUT + REVIEW_FREEZE_OBSERVER_GRACE,
             Self::Followup => termal_delegation_followup_recovery_allowance() + turn_delivery,
@@ -235,17 +240,29 @@ impl TermalDelegationMcpBridge {
     /// A single-attempt POST for `call`, waited on for its allowance; a
     /// transport error names that wait.
     fn post_long_call(&self, call: DelegationLongCall, path: &str, body: &Value) -> Result<Value> {
+        self.post_long_call_with_sender(call, path, body, |request| request.send())
+    }
+
+    // Keep request construction and response classification together while
+    // allowing a scripted transport clock to check issued-stage overruns.
+    fn post_long_call_with_sender(
+        &self,
+        call: DelegationLongCall,
+        path: &str,
+        body: &Value,
+        send: impl FnOnce(reqwest::blocking::RequestBuilder)
+            -> reqwest::Result<reqwest::blocking::Response>,
+    ) -> Result<Value> {
         let allowance = self.allowance(call);
         self.decode_response_for_request_within(
             "POST",
             path,
             allowance,
             Some(body),
-            self.client
+            send(self.client
                 .post(self.url(path))
                 .timeout(allowance)
-                .json(body)
-                .send(),
+                .json(body)),
         )
     }
 

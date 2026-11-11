@@ -148,6 +148,16 @@ fn real_process_work_binding_reader_reads_the_held_claims() {
         error.message
     );
 
+    fs::write(&project_file, "read-error-abnormal").unwrap();
+    let error = read_binding().expect_err("lock text with an abnormal exit must not gain a retry");
+    assert_eq!(error.kind, EngramTransportErrorKind::Transport);
+    assert!(error.message.contains("database is locked"));
+    assert_eq!(
+        read_phases(),
+        ["held"],
+        "only a confirmed exit-1 lock may retry"
+    );
+
     // An Engram build that predates the command fails every bind, so the
     // failure says what would fix it.
     fs::write(&project_file, "held-missing").expect("held-missing fixture mode should write");

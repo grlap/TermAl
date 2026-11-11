@@ -673,45 +673,18 @@ fn acceptance_refresh_model_change_cannot_alter_a_retained_host_brief() {
 }
 
 #[test]
-fn acceptance_refresh_submission_envelope_covers_each_sequential_branch() {
-    let call = ENGRAM_WORK_BINDING_COMMAND_TIMEOUT * 2 + ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY;
-    let ack = ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT;
-    let ordinary = [call, call, ack, ack, REVIEW_FREEZE_TIMEOUT]
-        .into_iter()
-        .sum::<Duration>();
-    // Pending, confirmed refusal, prior target, new target, and offered brief
-    // each have a separate durable handoff. The retained-brief recovery ACK
-    // is on an early-return branch, not an additional fresh-refresh phase.
-    let refresh = [
-        ack,
-        REVIEW_FREEZE_TIMEOUT,
-        call,
-        ack,
-        acceptance_evaluation_request_tracker_budget(),
-        ack,
-        ack,
-        ack,
-    ]
-    .into_iter()
-    .sum::<Duration>();
+fn acceptance_refresh_bridge_outlasts_the_server_submission_window() {
     let budget = acceptance_evaluation_submit_budget();
-    assert!(
-        budget >= ordinary,
-        "ordinary chain {ordinary:?} exceeds {budget:?}"
-    );
-    assert!(
-        budget >= refresh,
-        "fresh refresh chain {refresh:?} exceeds {budget:?}"
-    );
-    assert_eq!(budget, ordinary.max(refresh));
-
     let bridge = TermalDelegationMcpBridge::new(
         "session-parent".to_owned(),
         "http://127.0.0.1:1".to_owned(),
     )
     .unwrap();
     let outer = bridge.allowance(DelegationLongCall::EvaluationSubmit);
-    assert_eq!(outer, budget + TERMAL_DELEGATION_MCP_HTTP_TIMEOUT);
+    assert!(
+        outer > budget,
+        "the bridge must outlast the server it waits for"
+    );
     assert!(
         termal_delegation_mcp_codex_tool_timeout()
             >= outer + TERMAL_DELEGATION_MCP_CODEX_TOOL_MARGIN

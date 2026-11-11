@@ -874,6 +874,7 @@ fn engram_test_context_reads() -> &'static Mutex<BTreeMap<PathBuf, TestEngramCon
 fn run_engram_context_nudge(
     target: &EngramContextNudgeTarget,
 ) -> std::result::Result<String, String> {
+    let started = std::time::Instant::now();
     #[cfg(test)]
     {
         let read = engram_test_context_reads().lock().unwrap().remove(&target.project_root);
@@ -960,28 +961,16 @@ fn run_engram_context_nudge(
     let stdout_reader = spawn_engram_cli_output_reader(stdout, ENGRAM_CONTEXT_NUDGE_READER_LABEL);
     let stderr_reader = spawn_engram_cli_output_reader(stderr, ENGRAM_CONTEXT_NUDGE_READER_LABEL);
     let timeout = target.timeout;
-    let deadline = std::time::Instant::now() + timeout;
-    let status = loop {
-        match process.try_wait() {
-            Ok(Some(status)) => break Ok(status),
-            Ok(None) if std::time::Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            Ok(None) => {
-                let _ = process_tree.terminate(&process);
-                let _ = process.wait();
-                break Err(format!(
-                    "`engram work next` exceeded {} ms",
-                    timeout.as_millis()
-                ));
-            }
-            Err(error) => {
-                let _ = process_tree.terminate(&process);
-                let _ = process.wait();
-                break Err(format!("failed waiting for `engram work next`: {error}"));
-            }
-        }
-    };
+    let status = wait_engram_cli_command(
+        || process.try_wait(), || started.elapsed(),
+        || std::thread::sleep(Duration::from_millis(5)), timeout,
+        ENGRAM_CALL_WARNING_AFTER, "work next",
+        |elapsed| eprintln!("engram warning> work next still running after {} ms", elapsed.as_millis()),
+    ).map_err(|error| error.message);
+    if status.is_err() {
+        let _ = process_tree.terminate(&process);
+        let _ = process.wait();
+    }
     let stdout = join_engram_cli_output(stdout_reader, ENGRAM_CONTEXT_NUDGE_READER_LABEL, "stdout")
         .map_err(|error| error.message)?;
     let stderr = join_engram_cli_output(stderr_reader, ENGRAM_CONTEXT_NUDGE_READER_LABEL, "stderr")

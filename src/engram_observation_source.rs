@@ -24,7 +24,7 @@ fn engram_observation_same_source(
 
 impl AppState {
     // Root/store/configuration are pinned before I/O and checked again after
-    // it. Both owner probes share one deadline and executable custody check.
+    // it. Owner phases retain one admitted plan and executable custody check.
     // An unavailable owner supplies no sighting and no diagnostic payload.
     fn engram_observation_source_capture(
         &self, session: &str, place: &EngramBasisPlace, budget: Duration,
@@ -37,9 +37,9 @@ impl AppState {
                 return capture(place, budget).map_err(EngramObservationSourceRefusal::Legacy);
             }
         }
-        let deadline = std::time::Instant::now() + budget.min(ENGRAM_SOURCE_COMMAND_BUDGET);
+        let deadline = EngramSourcePhasePlan::from(std::time::Instant::now() + engram_operation_timeout(budget));
         let measured = || -> Result<EngramExecutionSourceBasis> {
-            engram_source_before_deadline(deadline)?;
+            deadline.check()?;
             let scope = EngramRuntimeClosingScope::capture(
                 &self.inner.lock().expect("state mutex poisoned"), session,
             ).map_err(anyhow::Error::msg)?;
@@ -78,7 +78,7 @@ impl AppState {
                     engram_source_owner_run(binary, cwd, args, until, limit)
                 },
             )?;
-            let source_id = observation.into_source_id(deadline)?;
+            let source_id = observation.into_source_id(deadline.completion_deadline)?;
             scope.require_current(&self.inner.lock().expect("state mutex poisoned"), session)
                 .map_err(|_| anyhow::anyhow!("observation authority changed during capture"))?;
             if let EngramBasisPlace::Named { root: named, common_dir_key } = place {
@@ -92,7 +92,7 @@ impl AppState {
             let workspace_id = fs::canonicalize(&root)?.to_string_lossy().into_owned();
             engram_observation_text(&workspace_id, ENGRAM_OBSERVATION_MAX_SOURCE_BYTES, "workspace_id")
                 .map_err(anyhow::Error::msg)?;
-            engram_source_before_deadline(deadline)?;
+            engram_source_before_deadline(deadline.completion_deadline)?;
             Ok(EngramExecutionSourceBasis {
                 workspace_id,
                 source_revision: String::new(), source_id: Some(source_id),

@@ -6,8 +6,8 @@ import { createHash } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { homedir } from "node:os";
-import { spawnSync } from "node:child_process";
-import { sourceProcessBudgetMs } from "./source-id-budget.mjs";
+import { execFile } from "node:child_process";
+import { sourceProcessBudgetMs, warnSlowEngramOperation } from "./source-id-budget.mjs";
 
 // Binary selection is setup, not another source predicate. Never search PATH or
 // build an owner during admission. Tests explicitly select their current build.
@@ -185,7 +185,22 @@ export function sourceIdDifference(before, after) {
   return Buffer.from(lines.join("\n")).subarray(0, 4096).toString("utf8") + "\nComplete observations: results.json sourceIdBefore/sourceIdAfter";
 }
 
-export function captureCommitInputStatus(startDirectory = process.cwd(), sourceEnv = process.env, { run = spawnSync, pin } = {}) {
+export function runSourceCommand(binary, args, options) {
+  return new Promise((resolveResult) => {
+    const child = execFile(binary, args, options, (error, stdout, stderr) => {
+      const interrupted = error && (error.killed || error.signal || typeof error.code !== "number");
+      resolveResult({
+        status: error ? (interrupted ? null : error.code) : 0,
+        signal: error?.signal ?? null,
+        error: interrupted ? error : undefined,
+        stdout, stderr,
+      });
+    });
+    child.stdin?.end();
+  });
+}
+
+export async function captureCommitInputStatus(startDirectory = process.cwd(), sourceEnv = process.env, { run = runSourceCommand, pin } = {}) {
   // A native host's metadata pin is authoritative. Hostless setup is never a
   // fallback after a metadata refusal or an executable mismatch.
   const binary = pin ? verifySourceOwnerPin(pin) : sourceBinaryPath(sourceEnv);
@@ -193,64 +208,67 @@ export function captureCommitInputStatus(startDirectory = process.cwd(), sourceE
   const unavailable = (message, refusal) => Object.assign(new Error(
     `committed input unavailable (${binary}; ${pin ? "host-selected owner" : "set ENGRAM_SOURCE_BINARY to select an owner"}): ${message.slice(0, 4096)}`),
   { code: "ENGRAM_SOURCE_UNAVAILABLE", ...(refusal ? { refusal } : {}) });
-  const result = run(binary, ["source", "--root", root, "--json"], {
-    cwd: root, env: sourceEnv, encoding: null, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
-    // The owner enforces thirty seconds. Allow bounded process startup and a
-    // final unavailable envelope, without extending the owner's usable budget.
-    timeout: sourceProcessBudgetMs, maxBuffer: SOURCE_JSON_BYTES + 1,
-  });
-  if (pin && verifySourceOwnerPin(pin) !== binary) throw unavailable("source owner executable changed during capture");
-  if (result.error || result.signal || ![0, 1].includes(result.status)) {
-    throw unavailable(result.error?.message ?? `owner exited ${result.status ?? "without a status"}${result.signal ? ` (${result.signal})` : ""}`);
-  }
-  const output = result.stdout;
-  if (!Buffer.isBuffer(output) || output.length > SOURCE_JSON_BYTES + 1 || result.stderr?.length) {
-    throw unavailable("owner output exceeded its bound or carried process stderr");
-  }
-  let observation;
+  const warning = warnSlowEngramOperation("source observation");
   try {
-    const json = new TextDecoder("utf-8", { fatal: true }).decode(output);
-    if (Buffer.byteLength(json.replace(/\n$/u, "")) > SOURCE_JSON_BYTES) throw new Error("JSON byte limit");
-    observation = JSON.parse(json);
-  } catch { throw unavailable("owner returned malformed, non-UTF-8 or oversized JSON"); }
-  if (!fieldsExactly(observation, ["version", "status", "root", "source", "tree", "entries", "refusal", "source_id"])
-      || observation.version !== 1 || !["clean", "not_clean", "unavailable"].includes(observation.status)
-      || !Array.isArray(observation.entries)) throw unavailable("owner returned an unsupported JSON v1 envelope");
-  const refused = observation.status === "unavailable";
-  if (refused) {
-    if (result.status !== 1 || observation.source !== null || observation.tree !== null || observation.entries.length !== 0
-        || observation.source_id !== null
-        || !(observation.root === null || (sourceText(observation.root) && isAbsolute(observation.root)))
-        || !fieldsExactly(observation.refusal, ["code", "message"]) || !sourceCodes.has(observation.refusal.code)
-        || !sourceText(observation.refusal.message) || Buffer.byteLength(observation.refusal.message) > 4096) {
-      throw unavailable("owner returned an inconsistent unavailable envelope");
+    const result = await run(binary, ["source", "--root", root, "--json"], {
+      cwd: root, env: sourceEnv, encoding: null, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+      // Owners choose their supported default (30 s before the sync, 60 s
+      // after it). Fund the larger default plus process/envelope delivery.
+      timeout: sourceProcessBudgetMs, maxBuffer: SOURCE_JSON_BYTES + 1,
+    });
+    if (pin && verifySourceOwnerPin(pin) !== binary) throw unavailable("source owner executable changed during capture");
+    if (result.error || result.signal || ![0, 1].includes(result.status)) {
+      throw unavailable(result.error?.message ?? `owner exited ${result.status ?? "without a status"}${result.signal ? ` (${result.signal})` : ""}`);
     }
-    throw unavailable(`${observation.refusal.code}: ${observation.refusal.message}`, observation.refusal);
-  }
-  if (result.status !== 0 || observation.refusal !== null || !sourceText(observation.root) || !isAbsolute(observation.root)
-      || typeof observation.source !== "string" || !/^git-commit:[a-f0-9]{40}$/u.test(observation.source)
-      || typeof observation.tree !== "string" || !/^[a-f0-9]{40}$/u.test(observation.tree)
-      || (observation.status === "clean") !== (observation.entries.length === 0)) {
-    throw unavailable("owner returned an inconsistent completed envelope");
-  }
-  const sourceId = sourceValue(observation.source_id);
-  if (sourceId === null || sourceId.commit !== observation.source.slice("git-commit:".length)
-      || sourceId.tree !== observation.tree
-      || (observation.status === "clean" && (sourceId.changes.length
-        || sourceId.submodules.some((child) => child.changes.length)))) {
-    throw unavailable("owner returned an inconsistent source_id");
-  }
-  for (const entry of observation.entries) {
-    const renamed = /[RC]/u.test(entry?.status ?? "");
-    if (!fieldsExactly(entry, renamed ? ["status", "path", "origin"] : ["status", "path"])
-        || typeof entry.status !== "string" || !/^[ A-Z?!]{2}$/u.test(entry.status)
-        || !sourceText(entry.path) || (renamed && !sourceText(entry.origin))) {
-      throw unavailable("owner returned malformed changed-path metadata");
+    const output = result.stdout;
+    if (!Buffer.isBuffer(output) || output.length > SOURCE_JSON_BYTES + 1 || result.stderr?.length) {
+      throw unavailable("owner output exceeded its bound or carried process stderr");
     }
-  }
-  try {
-    if (realpathSync.native(observation.root) !== realpathSync.native(root)) throw new Error("root mismatch");
-  } catch { throw unavailable("owner canonical root differs from the requested root or cannot be resolved"); }
-  return { root: observation.root, commit: observation.source.slice("git-commit:".length), tree: observation.tree,
-    status: observation.status, entries: observation.entries, sourceId };
+    let observation;
+    try {
+      const json = new TextDecoder("utf-8", { fatal: true }).decode(output);
+      if (Buffer.byteLength(json.replace(/\n$/u, "")) > SOURCE_JSON_BYTES) throw new Error("JSON byte limit");
+      observation = JSON.parse(json);
+    } catch { throw unavailable("owner returned malformed, non-UTF-8 or oversized JSON"); }
+    if (!fieldsExactly(observation, ["version", "status", "root", "source", "tree", "entries", "refusal", "source_id"])
+        || observation.version !== 1 || !["clean", "not_clean", "unavailable"].includes(observation.status)
+        || !Array.isArray(observation.entries)) throw unavailable("owner returned an unsupported JSON v1 envelope");
+    const refused = observation.status === "unavailable";
+    if (refused) {
+      if (result.status !== 1 || observation.source !== null || observation.tree !== null || observation.entries.length !== 0
+          || observation.source_id !== null
+          || !(observation.root === null || (sourceText(observation.root) && isAbsolute(observation.root)))
+          || !fieldsExactly(observation.refusal, ["code", "message"]) || !sourceCodes.has(observation.refusal.code)
+          || !sourceText(observation.refusal.message) || Buffer.byteLength(observation.refusal.message) > 4096) {
+        throw unavailable("owner returned an inconsistent unavailable envelope");
+      }
+      throw unavailable(`${observation.refusal.code}: ${observation.refusal.message}`, observation.refusal);
+    }
+    if (result.status !== 0 || observation.refusal !== null || !sourceText(observation.root) || !isAbsolute(observation.root)
+        || typeof observation.source !== "string" || !/^git-commit:[a-f0-9]{40}$/u.test(observation.source)
+        || typeof observation.tree !== "string" || !/^[a-f0-9]{40}$/u.test(observation.tree)
+        || (observation.status === "clean") !== (observation.entries.length === 0)) {
+      throw unavailable("owner returned an inconsistent completed envelope");
+    }
+    const sourceId = sourceValue(observation.source_id);
+    if (sourceId === null || sourceId.commit !== observation.source.slice("git-commit:".length)
+        || sourceId.tree !== observation.tree
+        || (observation.status === "clean" && (sourceId.changes.length
+          || sourceId.submodules.some((child) => child.changes.length)))) {
+      throw unavailable("owner returned an inconsistent source_id");
+    }
+    for (const entry of observation.entries) {
+      const renamed = /[RC]/u.test(entry?.status ?? "");
+      if (!fieldsExactly(entry, renamed ? ["status", "path", "origin"] : ["status", "path"])
+          || typeof entry.status !== "string" || !/^[ A-Z?!]{2}$/u.test(entry.status)
+          || !sourceText(entry.path) || (renamed && !sourceText(entry.origin))) {
+        throw unavailable("owner returned malformed changed-path metadata");
+      }
+    }
+    try {
+      if (realpathSync.native(observation.root) !== realpathSync.native(root)) throw new Error("root mismatch");
+    } catch { throw unavailable("owner canonical root differs from the requested root or cannot be resolved"); }
+    return { root: observation.root, commit: observation.source.slice("git-commit:".length), tree: observation.tree,
+      status: observation.status, entries: observation.entries, sourceId };
+  } finally { clearTimeout(warning); }
 }

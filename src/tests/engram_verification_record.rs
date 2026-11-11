@@ -3169,6 +3169,7 @@ fn only_a_definite_refusal_rejects_the_record_and_any_other_answer_resends_it_un
 #[test]
 fn a_tick_keeps_to_its_own_budget_and_stops_between_runs_on_shutdown() {
     let fixture = RunFixture::new("verification-record-tick-budget");
+    let clock = fixture.state.select_test_scripted_engram_budget_clock();
     let (session, transport) = engram_session(&fixture, true);
     set_call_deadline(&fixture, 600_000);
     let mut first = record_run(
@@ -3220,9 +3221,22 @@ fn a_tick_keeps_to_its_own_budget_and_stops_between_runs_on_shutdown() {
         "exactly one run was looked at"
     );
 
-    // Each call gets at most what is left of the pass's own budget, never
-    // the connection's longer per-call deadline.
+    // Admission stops at the tick deadline; an issued record keeps its
+    // full operation window, independently of the configured 600s setting.
+    let mut third = record_run(
+        &fixture,
+        "test-record-budget-c",
+        commit_request(&fixture.root),
+        commit_results(),
+    );
+    initiated_by(&mut third, &session);
+    register(&fixture, &[&third]);
     let budget = Duration::from_secs(30);
+    *transport.observe.lock().unwrap() = Some(Box::new(move |request| {
+        if matches!(request, EngramControlRequest::VerificationRecord { .. }) {
+            clock.advance(budget + Duration::from_millis(1));
+        }
+    }));
     let before = transport.timeouts.lock().unwrap().len();
     transport.script(Ok(work_supported(&session)));
     transport.script(Ok(receipt_for("failed")));
@@ -3233,8 +3247,14 @@ fn a_tick_keeps_to_its_own_budget_and_stops_between_runs_on_shutdown() {
     assert_eq!(transport.sent_records().len(), 2);
     assert!(!timeouts.is_empty());
     assert!(
-        timeouts.iter().all(|timeout| *timeout <= budget),
+        timeouts
+            .iter()
+            .all(|timeout| *timeout == ENGRAM_MIN_CALL_TIMEOUT),
         "{timeouts:?}"
+    );
+    assert!(
+        !frozen(&third),
+        "no next run is admitted after the tick expires"
     );
 }
 

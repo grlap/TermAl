@@ -5537,6 +5537,210 @@ fn engram_cli_stream_failures_name_the_operation_that_ran() {
     );
 }
 
+#[test]
+fn engram_cli_lock_retry_spends_one_absolute_budget_including_its_delay() {
+    let spent = std::cell::Cell::new(Duration::ZERO);
+    let budgets = std::cell::RefCell::new(Vec::new());
+    let result = retry_engram_cli_command_with_budget(
+        |remaining| {
+            budgets.borrow_mut().push(remaining);
+            if budgets.borrow().len() == 1 {
+                spent.set(Duration::from_secs(25));
+                Ok(cli_output(false, "", "database is locked"))
+            } else {
+                Ok(cli_output(true, "recorded", ""))
+            }
+        },
+        || spent.get(),
+        Duration::from_secs(60),
+        |delay| spent.set(spent.get() + delay),
+    )
+    .unwrap();
+    assert!(result.success);
+    assert_eq!(
+        *budgets.borrow(),
+        [Duration::from_secs(60), Duration::from_millis(34_750)]
+    );
+
+    budgets.borrow_mut().clear();
+    spent.set(Duration::ZERO);
+    let error = retry_engram_cli_command_with_budget(
+        |remaining| {
+            budgets.borrow_mut().push(remaining);
+            spent.set(Duration::from_millis(59_900));
+            Ok(cli_output(false, "", "database is locked"))
+        },
+        || spent.get(),
+        Duration::from_secs(60),
+        |delay| spent.set(spent.get() + delay),
+    )
+    .unwrap_err();
+    assert_eq!(error.kind, EngramTransportErrorKind::Deadline);
+    assert_eq!(
+        budgets.borrow().len(),
+        1,
+        "an expired budget must not start another process"
+    );
+    assert!(
+        !engram_cli_command_never_ran(&error),
+        "the first attempt already ran"
+    );
+}
+
+#[test]
+fn engram_calls_do_not_inherit_a_legacy_short_limit_or_shorten_a_longer_one() {
+    struct ObservedTimeouts(std::sync::Mutex<Vec<Duration>>);
+    impl EngramControlTransport for ObservedTimeouts {
+        fn request(
+            &self,
+            _: &EngramConnectionConfig,
+            _: &EngramControlRequest,
+            timeout: Duration,
+        ) -> Result<Value, EngramTransportError> {
+            self.0.lock().unwrap().push(timeout);
+            Ok(json!({}))
+        }
+        fn shutdown_session(&self, _: &str) {}
+    }
+    let (state, project, _, root) = fixture();
+    install_store(&state, &project, &root);
+    let connection = state
+        .work_read_snapshot(&project, None)
+        .unwrap()
+        .1
+        .unwrap()
+        .connection;
+    let transport = Arc::new(ObservedTimeouts(std::sync::Mutex::new(Vec::new())));
+    let adapter = EngramHostAdapter {
+        host_workdir: root,
+        transport: transport.clone(),
+        capabilities: Arc::default(),
+    };
+    let settings = EngramProjectSettings {
+        deadline_ms: Some(2_000),
+        ..Default::default()
+    };
+    adapter
+        .request(
+            &connection,
+            &EngramControlRequest::WorkSessionRead {},
+            settings.call_timeout(),
+        )
+        .unwrap();
+    // A nearly-spent outer admission budget cannot truncate an issued call.
+    adapter
+        .request(
+            &connection,
+            &EngramControlRequest::WorkSessionRead {},
+            Duration::from_millis(1),
+        )
+        .unwrap();
+    adapter
+        .request(
+            &connection,
+            &EngramControlRequest::WorkSessionRead {},
+            Duration::from_secs(180),
+        )
+        .unwrap();
+    assert_eq!(
+        *transport.0.lock().unwrap(),
+        [
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+            Duration::from_secs(180)
+        ]
+    );
+}
+
+#[test]
+fn engram_cli_exhausted_admission_never_starts_or_resends_a_process() {
+    let root = TestTempRoot::create("engram-cli-expired-admission");
+    let connection = EngramConnectionConfig {
+        binary_path: root.join("must-not-resolve-or-start.exe"),
+        project_file: root.join(".engram-project"),
+        home: root.join("home"),
+        project_root: root.to_path_buf(),
+        actor_id: "fixture".to_owned(),
+        actor_context: None,
+        session_id: "fixture".to_owned(),
+    };
+    for retry in [false, true] {
+        let result = if retry {
+            run_engram_cli_command_with_lock_retry(
+                &connection,
+                &["work", "show"],
+                Duration::ZERO,
+                ACCEPTANCE_EVALUATION_READER_LABEL,
+                &root,
+            )
+        } else {
+            run_engram_cli_command(
+                &connection,
+                &["work", "show"],
+                Duration::ZERO,
+                ACCEPTANCE_EVALUATION_READER_LABEL,
+                &root,
+            )
+        };
+        let error = result
+            .err()
+            .expect("an expired admission cannot launch the configured executable");
+        assert_eq!(error.kind, EngramTransportErrorKind::Deadline);
+        assert!(error.request_never_sent && error.process_never_started);
+        assert!(engram_cli_command_never_ran(&error));
+    }
+}
+
+#[test]
+fn engram_cli_slow_fixture_warns_once_and_completes_without_a_resend() {
+    let elapsed = std::cell::Cell::new(Duration::ZERO);
+    let warnings = std::cell::RefCell::new(Vec::new());
+    let polls = std::cell::Cell::new(0);
+    let result = wait_engram_cli_command(
+        || {
+            polls.set(polls.get() + 1);
+            Ok((elapsed.get() >= Duration::from_millis(35)).then_some("recorded"))
+        },
+        || elapsed.get(),
+        || elapsed.set(elapsed.get() + Duration::from_millis(5)),
+        Duration::from_millis(60),
+        Duration::from_millis(10),
+        ACCEPTANCE_EVALUATION_SUBMIT_LABEL,
+        |elapsed| warnings.borrow_mut().push(elapsed),
+    );
+    assert_eq!(result.unwrap(), "recorded");
+    assert_eq!(warnings.into_inner(), [Duration::from_millis(10)]);
+    assert_eq!(polls.get(), 8);
+}
+
+#[test]
+fn engram_cli_past_deadline_keeps_the_unknown_outcome_without_lock_retry() {
+    let elapsed = std::cell::Cell::new(Duration::ZERO);
+    let warnings = std::cell::RefCell::new(Vec::new());
+    let attempts = std::cell::Cell::new(0);
+    let result = retry_engram_cli_command_on_locked_store(
+        || {
+            attempts.set(attempts.get() + 1);
+            wait_engram_cli_command::<EngramCliOutput>(
+                || Ok(None),
+                || elapsed.get(),
+                || elapsed.set(elapsed.get() + Duration::from_millis(5)),
+                Duration::from_millis(60),
+                Duration::from_millis(10),
+                ACCEPTANCE_EVALUATION_SUBMIT_LABEL,
+                |elapsed| warnings.borrow_mut().push(elapsed),
+            )
+        },
+        |_| panic!("an unknown write must not be retried as a locked store"),
+    );
+    let error = result.unwrap_err();
+    assert_eq!(error.kind, EngramTransportErrorKind::Deadline);
+    assert!(!engram_cli_command_never_ran(&error));
+    assert_eq!(attempts.get(), 1);
+    assert_eq!(warnings.into_inner(), [Duration::from_millis(10)]);
+    assert_eq!(elapsed.get(), Duration::from_millis(60));
+}
+
 // ---- request budget ------------------------------------------------------
 
 /// A 100-note catalog: the bounded request always stops before its last page.
@@ -5579,33 +5783,7 @@ fn endless_evidence_reader(
 }
 
 #[test]
-fn acceptance_request_budget_covers_every_read_with_its_retry() {
-    let call = ENGRAM_WORK_BINDING_COMMAND_TIMEOUT * 2 + ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY;
-    let policy =
-        ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT * 2 + ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY;
-    assert_eq!(MAX_ACCEPTANCE_EVIDENCE_PAGES, 8);
-    // Two task reads, seven continuation pages, one held-claims read,
-    // one policy read, and the
-    // source capture under the freeze budget.
-    assert_eq!(
-        acceptance_evaluation_request_tracker_budget(),
-        call * 10 + policy + REVIEW_FREEZE_TIMEOUT + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET
-    );
-    assert_eq!(
-        acceptance_evaluation_paging_reserve(),
-        call * 3 + policy + REVIEW_FREEZE_TIMEOUT + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET
-    );
-    // Ordinary replay and confirmed refresh are different sequential chains.
-    assert_eq!(
-        acceptance_evaluation_submit_budget(),
-        (call * 2 + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT * 2 + REVIEW_FREEZE_TIMEOUT).max(
-            call + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT * 5
-                + REVIEW_FREEZE_TIMEOUT
-                + acceptance_evaluation_request_tracker_budget()
-        )
-    );
-
-    // The arithmetic names exactly the reads a maximal request performs.
+fn acceptance_request_bounds_endless_paging_and_completes_its_mandatory_reads() {
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
     let calls = Arc::new(AtomicUsize::new(0));
@@ -5635,7 +5813,10 @@ fn acceptance_request_stops_paging_once_its_deadline_cannot_fund_another_page() 
                 Duration::ZERO
             }
     };
-    let deadline = start + acceptance_evaluation_paging_reserve() + Duration::from_secs(25);
+    let deadline = start
+        + acceptance_evaluation_paging_reserve()
+        + ENGRAM_MIN_CALL_TIMEOUT
+        + Duration::from_secs(25);
     let response = state
         .request_acceptance_evaluation_until(
             &parent,
@@ -5665,6 +5846,61 @@ fn acceptance_request_stops_paging_once_its_deadline_cannot_fund_another_page() 
         .err()
         .expect("expired mandatory identity cannot mint a token");
     assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn optional_full_window_pages_leave_held_full_policy_and_closing_reads_funded() {
+    let (state, project, parent, root) = fixture();
+    install_store(&state, &project, &root);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let reader = endless_evidence_reader(calls.clone());
+    let elapsed = std::cell::Cell::new(Duration::ZERO);
+    let stages = std::cell::RefCell::new(Vec::new());
+    let start = std::time::Instant::now();
+    let response = state
+        .request_acceptance_evaluation_until(
+            &parent,
+            evaluation_request(None),
+            |connection, args, timeout| {
+                assert!(timeout >= ENGRAM_MIN_CALL_TIMEOUT);
+                let page = args.iter().any(|arg| arg == "--after");
+                let stage = if page {
+                    "page"
+                } else if args.iter().any(|arg| arg == "held") {
+                    "held"
+                } else if args.iter().any(|arg| arg == "--full") {
+                    "full"
+                } else if args.first().map(String::as_str) == Some("control-policy") {
+                    "policy"
+                } else if stages.borrow().iter().any(|stage| *stage == "page") {
+                    "closing"
+                } else {
+                    "opening"
+                };
+                stages.borrow_mut().push(stage);
+                let result = reader(connection, args, timeout);
+                if stage != "opening" {
+                    elapsed.set(elapsed.get() + ENGRAM_MIN_CALL_TIMEOUT);
+                }
+                result
+            },
+            start + acceptance_evaluation_request_tracker_budget(),
+            || start + elapsed.get(),
+        )
+        .expect("optional reads cannot consume the mandatory tail");
+    assert_eq!(
+        *stages.borrow(),
+        [
+            "opening", "opening", "page", "page", "held", "full", "closing", "closing", "policy"
+        ]
+    );
+    let wire = serde_json::to_value(response).unwrap();
+    assert_eq!(wire["mode"], "same_session");
+    assert_eq!(wire["evidenceOmissions"]["unread"]["reason"], "time_budget");
+    assert_eq!(
+        wire["evidenceOmissions"]["unread"]["continuation"],
+        "token-3"
+    );
 }
 
 // ---- one active evaluation per task --------------------------------------

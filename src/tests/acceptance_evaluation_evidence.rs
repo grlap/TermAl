@@ -533,7 +533,10 @@ fn criterion_evidence_request_closing_core_spends_the_original_deadline() {
                 assert!(timeout <= ENGRAM_WORK_BINDING_COMMAND_TIMEOUT);
                 if args.iter().any(|arg| arg == "inspect") {
                     if cores.fetch_add(1, std::sync::atomic::Ordering::SeqCst) != 0 {
-                        elapsed.store(61, std::sync::atomic::Ordering::SeqCst);
+                        elapsed.store(
+                            acceptance_evaluation_request_tracker_budget().as_secs() as usize + 1,
+                            std::sync::atomic::Ordering::SeqCst,
+                        );
                     }
                     Ok(canonical_core_receipt())
                 } else if args.iter().any(|arg| arg == "--full") {

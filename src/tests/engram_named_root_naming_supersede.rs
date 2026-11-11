@@ -354,7 +354,7 @@ fn post_read_naming_owner_recovery_keeps_its_limit_deadline_and_binding_fence() 
         let result = request_fixture_name(&claimed, Some(&tree));
         TEST_ENGRAM_DURING_ROOT_LIFECYCLE_READ.with(|hook| hook.borrow_mut().take());
         let error = result.expect_err("bounded recovery cannot complete under this fault");
-        assert_eq!(error.status, if fault == "deadline" { StatusCode::BAD_GATEWAY } else { StatusCode::CONFLICT },
+        assert_eq!(error.status, StatusCode::CONFLICT,
             "{fault}: {}", error.message);
         assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst),
             if fault == "repeated" { 1 + ENGRAM_NAMING_SUPERSEDED_RETRIES } else { 1 },

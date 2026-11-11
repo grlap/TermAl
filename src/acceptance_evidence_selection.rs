@@ -9,9 +9,6 @@ include!("acceptance_obligation_assessment.rs");
 const MAX_ACCEPTANCE_SELECTED_RECORDS: usize = 16;
 const MAX_ACCEPTANCE_BINDING_EVIDENCE_PAGES: usize = 16;
 const ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET: Duration = Duration::from_secs(60);
-// Reserve a share of the same deadline for the closing show/core bracket.
-// Each closing call funds its lock retry from the remaining share.
-const ACCEPTANCE_EVIDENCE_CLOSING_RESERVE: Duration = Duration::from_secs(20);
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 struct AcceptanceEvidenceIdentity {
@@ -304,16 +301,16 @@ fn acceptance_criterion_evidence_read_timeout(
     deadline: std::time::Instant,
     now: &impl Fn() -> std::time::Instant,
 ) -> Result<Duration, ApiError> {
-    // The CLI runner may retry once after a lock delay. Fund both attempts
-    // inside the discovery deadline instead of extending the HTTP request.
+    // A lock retry spends this same operation window. The discovery budget
+    // controls admission of the next call, never an earlier abort of a call
+    // that was already admitted.
     let remaining = deadline.saturating_duration_since(now());
-    let timeout = remaining.saturating_sub(ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY) / 2;
-    if timeout.is_zero() {
+    if remaining.is_zero() {
         return Err(ApiError::conflict(
             "criterion evidence read budget was spent; no evaluation was started",
         ));
     }
-    Ok(timeout.min(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT))
+    Ok(engram_operation_timeout(remaining.min(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)))
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]

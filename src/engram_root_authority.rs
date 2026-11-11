@@ -176,6 +176,24 @@ fn engram_retain_recovery_run(
     runs.push(binding.clone());
 }
 
+// Discovery must not reset the fair queue on every bounded pass. Attempted
+// failures still use retain_recovery_run to rotate behind the other runs.
+fn engram_discover_recovery_run(
+    history: &mut EngramWorkNamingHistory,
+    binding: &EngramControlWorkBinding,
+) {
+    if history.run_is_retired(binding) {
+        return;
+    }
+    if let Some(known) = history.unresolved_runs.iter_mut()
+        .find(|known| engram_same_recovery_run(known, binding)) {
+        // A renewal still refreshes revision/fence, without moving this run.
+        *known = binding.clone();
+    } else {
+        history.retain_recovery_run(binding);
+    }
+}
+
 /// Order candidates from the shared off-lock reader projection. Preserve
 /// the namer's preference and original session order without building targets.
 fn engram_root_recovery_readers<'a>(
@@ -1059,6 +1077,20 @@ impl AppState {
         settle_abandoned_writes: bool,
         reclamation: Option<(&EngramWorkSourceRoot, &EngramRootReclamationRoute)>,
     ) -> Result<(), ApiError> {
+        self.recover_engram_authority_batch_admitting_until(
+            store, owner, deadline, None, settle_abandoned_writes, reclamation,
+        )
+    }
+
+    fn recover_engram_authority_batch_admitting_until(
+        &self,
+        store: &EngramAuthorityStoreKey,
+        owner: &EngramAuthorityTransition,
+        deadline: std::time::Instant,
+        admission_deadline: Option<std::time::Instant>,
+        settle_abandoned_writes: bool,
+        reclamation: Option<(&EngramWorkSourceRoot, &EngramRootReclamationRoute)>,
+    ) -> Result<(), ApiError> {
         let required_selection = reclamation.map(|(root, _)| root);
         let clock = self.engram_budget_clock();
         let budget = deadline.saturating_duration_since(clock.now());
@@ -1166,7 +1198,12 @@ impl AppState {
         // Console lines are written after the state guard is released:
         // a slow console must not extend the lock every session waits on.
         let mut console = EngramRetainedRunConsole { state: self, lines: Vec::new() };
-        for binding in runs {
+        for (index, binding) in runs.into_iter().enumerate() {
+            // The outer maintenance owner already admitted the first run.
+            // Additional associations are new work, not completion of it.
+            if index > 0 && admission_deadline.is_some_and(|until| clock.now() >= until) {
+                break;
+            }
             let left = deadline.saturating_duration_since(clock.now());
             let Some(_read_budget) = left.checked_sub(reserve).filter(|left| !left.is_zero())
             else {
@@ -1494,6 +1531,8 @@ impl AppState {
         remaining_work: Option<&BTreeSet<String>>,
     ) -> BTreeSet<String> {
         let clock = self.engram_budget_clock();
+        // Stop admitting new work after the existing maintenance share.
+        // An admitted work item keeps its own operation window below.
         let deadline = clock.now() + budget.min(Duration::from_secs(2));
         let (store, runs, root_runs) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -1638,6 +1677,7 @@ impl AppState {
             if left.is_zero() {
                 break;
             }
+            let operation_deadline = clock.now() + ENGRAM_MIN_CALL_TIMEOUT;
             attempted.insert(binding.work_id.clone());
             self.inner
                 .lock()
@@ -1648,7 +1688,7 @@ impl AppState {
             // would retain the run again, so a read left unanswered would
             // re-withhold a work that had only to publish.
             if self
-                .recover_engram_authority_candidate_until(&store, &binding.work_id, deadline)
+                .recover_engram_authority_candidate_until(&store, &binding.work_id, operation_deadline)
                 .is_err()
             {
                 continue;
@@ -1666,8 +1706,7 @@ impl AppState {
                 )
             };
             if settled {
-                let read_deadline =
-                    deadline - deadline.saturating_duration_since(clock.now()) / 4;
+                let read_deadline = operation_deadline;
                 if retired
                     || !root_runs.iter().any(|root| engram_same_recovery_run(root, &binding))
                     || self.engram_settled_root_read_learns_nothing(
@@ -1677,10 +1716,14 @@ impl AppState {
                     continue;
                 }
             }
-            if let Ok(owner) = self.prepare_engram_authority_until(&store, &binding, deadline) {
+            if let Ok(owner) = self.prepare_engram_authority_until(&store, &binding, operation_deadline) {
                 let _ =
-                    self.recover_engram_authority_batch_until(&store, &owner, deadline, true, None);
-                let _ = self.publish_engram_authority_until(&store, &owner, deadline);
+                    self.recover_engram_authority_batch_admitting_until(
+                        &store, &owner, operation_deadline, Some(deadline), true, None,
+                    );
+                // Publish what this bounded pass actually read. The general
+                // publication helper would start another recovery batch.
+                let _ = self.publish_engram_authority_image_until(&store, &owner, operation_deadline);
             }
         }
         attempted
@@ -2170,7 +2213,7 @@ impl AppState {
             .collect::<Vec<_>>();
         let history = &mut inner.engram_work_naming_history[index];
         for retained in journal_runs {
-            history.retain_recovery_run(&retained);
+            engram_discover_recovery_run(history, &retained);
         }
         if let Some(previous) = history
             .transition
@@ -2178,9 +2221,9 @@ impl AppState {
             .filter(|previous| previous.phase != EngramAuthorityPhase::Published)
             .map(|previous| previous.binding.clone())
         {
-            history.retain_recovery_run(&previous);
+            engram_discover_recovery_run(history, &previous);
         }
-        history.retain_recovery_run(binding);
+        engram_discover_recovery_run(history, binding);
         // Only a run left to read explains the wait. An owner of a retired
         // run reads nothing, so it must not leave a reason nothing clears.
         if !history.unresolved_runs.is_empty() {

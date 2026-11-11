@@ -183,7 +183,7 @@ fn test_run_diagnostic_id(value: &str) -> String {
 }
 
 // Claim/durability allowance, not a source-capture budget.
-const TEST_RUN_REGISTRATION_DURABILITY_BUDGET: Duration = Duration::from_secs(5);
+const TEST_RUN_REGISTRATION_DURABILITY_BUDGET: Duration = ENGRAM_MIN_CALL_TIMEOUT;
 
 /// The shared claim-read and durability deadline. On real time it is measured
 /// from `requested`, before either authority lock; a scripted fixture clock measures from its own
@@ -325,7 +325,8 @@ impl TestRunRegistrationDiagnostics {
             self.attempt_id, test_run_diagnostic_id(run_id),
             self.operation_id, self.attempt_ordinal, self.server_instance, self.method,
             self.request_digest.as_deref().unwrap_or("unavailable"),
-            if self.method == "POST" { "5000" } else { "not_applicable" },
+            if self.method == "POST" { TEST_RUN_REGISTRATION_DURABILITY_BUDGET.as_millis().to_string() }
+                else { "not_applicable".to_owned() },
             self.fence_deadline.map(|deadline| deadline.saturating_duration_since(self.fence_clock.now()).as_millis().to_string()).unwrap_or_else(|| "not_started".to_owned()),
             self.durability_confirmed, self.published, test_run_truncate(&locks, 384), test_run_truncate(&spans, 640),
         );
@@ -557,7 +558,7 @@ impl AppState {
         #[cfg(test)]
         if let Some(verify) = verify {
             return self.register_test_run_inner_with_source_owner_reserved(session_id, request, diagnostics, native,
-                |state, session, deadline| verify(state, session, deadline));
+                |state, session, deadline| verify(state, session, deadline.probe_deadline));
         }
         self.register_test_run_inner_with_source_owner_reserved(session_id, request, diagnostics, native,
             |state, session, deadline| state.source_owner_metadata_snapshot_with(
@@ -573,13 +574,14 @@ impl AppState {
         verify_source_owner: impl FnOnce(&AppState, &str, std::time::Instant)
             -> Result<(EngramSourceOwnerPin, EngramSourceOwnerAuthority), ApiError>,
     ) -> Result<RegisterTestRunResponse, ApiError> {
-        self.register_test_run_inner_with_source_owner_reserved(session_id, request, diagnostics, None, verify_source_owner)
+        self.register_test_run_inner_with_source_owner_reserved(session_id, request, diagnostics, None,
+            |state, session, plan| verify_source_owner(state, session, plan.probe_deadline))
     }
 
     fn register_test_run_inner_with_source_owner_reserved(
         &self, session_id: &str, request: RegisterTestRunRequest,
         diagnostics: &mut TestRunRegistrationDiagnostics, native: Option<&DeclaredRunReservation>,
-        verify_source_owner: impl FnOnce(&AppState, &str, std::time::Instant)
+        verify_source_owner: impl FnOnce(&AppState, &str, EngramSourcePhasePlan)
             -> Result<(EngramSourceOwnerPin, EngramSourceOwnerAuthority), ApiError>,
     ) -> Result<RegisterTestRunResponse, ApiError> {
         if !request.run_id.starts_with("test-")
@@ -694,7 +696,7 @@ impl AppState {
         let requested = std::time::Instant::now();
         let clock = self.engram_budget_clock();
         let source_owner = test_run_request_source_owner(&value)?;
-        let source_budget = source_owner.as_ref().map_or(Duration::ZERO, |_| ENGRAM_SOURCE_COMMAND_BUDGET);
+        let source_budget = source_owner.as_ref().map_or(Duration::ZERO, |_| ENGRAM_SOURCE_METADATA_BUDGET);
         let deadline = test_run_registration_deadline(&clock, requested) + source_budget;
         diagnostics.fence_deadline = Some(deadline);
         diagnostics.fence_clock = clock.clone();
@@ -703,7 +705,7 @@ impl AppState {
             // Source gets the shared capture budget. Claim/durability retain
             // their own allowance within the derived outer deadline.
             let (actual, authority) = verify_source_owner(self, session_id,
-                requested + ENGRAM_SOURCE_COMMAND_BUDGET)?;
+                EngramSourcePhasePlan::at(requested + ENGRAM_SOURCE_COMMAND_BUDGET, requested))?;
             if &actual != expected {
                 return Err(ApiError::conflict("test run source owner pin does not match the configured executable"));
             }

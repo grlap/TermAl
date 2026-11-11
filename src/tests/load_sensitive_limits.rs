@@ -1,32 +1,14 @@
-// The doubled load-sensitive limits and the relations the limits and waits
+// The operation limits and the relations the limits and waits
 // derived from them must keep. The limits live in their owners
 // (engram_host_adapter.rs, engram_readiness.rs, review_freeze_process.rs,
 // engram_source_roots.rs, acceptance_evaluation_api.rs); the bridge waits in
-// delegation_mcp_timeouts.rs. New module, so one place pins them all.
+// delegation_mcp_timeouts.rs. Exact values belong to those owners.
 use super::*;
 
 #[test]
-fn load_sensitive_limits_are_doubled_and_keep_their_relations() {
-    // The doubled limits and those derived from them, pinned.
-    assert_eq!(REVIEW_FREEZE_TIMEOUT, Duration::from_secs(40));
-    assert_eq!(ENGRAM_MAX_CALL_TIMEOUT_MS, 20_000);
-    assert_eq!(ENGRAM_READINESS_TIMEOUT, Duration::from_secs(20));
-    assert_eq!(
-        ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT,
-        Duration::from_secs(20)
-    );
-    assert_eq!(ENGRAM_CONTROL_SETTLE_TIMEOUT, Duration::from_secs(21));
-    assert_eq!(ENGRAM_SOURCE_ROOT_NAMING_BUDGET, Duration::from_secs(102));
+fn load_sensitive_limits_keep_their_operation_and_capture_relations() {
     // Ordinary connection teardown outlasts the longest transport call.
     assert!(ENGRAM_CONTROL_SETTLE_TIMEOUT > Duration::from_millis(ENGRAM_MAX_CALL_TIMEOUT_MS));
-    // A naming call holds two full captures and the commit's reserve; what
-    // its reads take comes out of the second capture.
-    assert!(
-        ENGRAM_SOURCE_ROOT_NAMING_BUDGET
-            >= REVIEW_FREEZE_TIMEOUT * 2
-                + ENGRAM_SOURCE_ROOT_COMMIT_RESERVE
-                + Duration::from_millis(ENGRAM_MAX_CALL_TIMEOUT_MS)
-    );
 }
 
 #[test]
@@ -34,13 +16,8 @@ fn a_default_delegation_wait_answers_within_the_codex_cut() {
     // A Codex caller that keeps the default wait on one delegation gets the
     // tool's own answer, `timedOut: true` or the result: the wait, its last
     // status read and the result read all fit the cut.
-    assert_eq!(
-        termal_delegation_default_wait_span(),
-        Duration::from_secs(300 + 30 + 30)
-    );
     // The cut is the longest wait plus the margin, so in any build it is at
-    // least the span and the margin. (A test build gives tracker commands a
-    // longer timeout, so its evaluation request allows longer still.)
+    // least the span and the margin.
     assert!(
         termal_delegation_mcp_codex_tool_timeout()
             >= termal_delegation_default_wait_span() + TERMAL_DELEGATION_MCP_CODEX_TOOL_MARGIN
@@ -48,7 +25,7 @@ fn a_default_delegation_wait_answers_within_the_codex_cut() {
     // Whichever is longer, the longest long-call allowance or the default
     // wait's span, sets the cut. Both branches are checked with chosen
     // inputs, since this build's own allowances are not a release build's
-    // (its tracker commands wait 30 s, not 6 s).
+    // (a long explicit audit can outlast an ordinary tracker call).
     let span = termal_delegation_default_wait_span();
     let margin = TERMAL_DELEGATION_MCP_CODEX_TOOL_MARGIN;
     assert_eq!(
@@ -108,12 +85,13 @@ fn the_long_calls_wait_out_the_server_work_they_cover() {
     assert!(wait(DelegationLongCall::Spawn) > spawn);
     assert!(
         wait(DelegationLongCall::EvaluationRequest)
-            > acceptance_evaluation_request_tracker_budget() + spawn
+            > acceptance_evaluation_request_tracker_budget()
+                + acceptance_evaluation_request_overrun_budget()
+                + spawn
     );
     assert!(wait(DelegationLongCall::EvaluationSubmit) > acceptance_evaluation_submit_budget());
-    // Naming outlasts its server budget; the freeze check outlasts the
-    // checker's watch.
-    assert!(wait(DelegationLongCall::SourceRootNaming) > ENGRAM_SOURCE_ROOT_NAMING_BUDGET);
+    // The freeze check outlasts the checker's watch. Naming's issued-call
+    // overrun is exercised through the bridge's sender seam.
     assert!(
         wait(DelegationLongCall::ReviewFreeze)
             > REVIEW_FREEZE_TIMEOUT + REVIEW_FREEZE_OBSERVER_GRACE

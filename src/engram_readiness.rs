@@ -3,10 +3,9 @@
 // settings persistence, runtime revocation, or Engram store repair.
 
 /// The readiness process budget (Verify, enable on Save), and the one
-/// wall-clock budget all absence probes of a Save share. Doubled from ten
-/// seconds on Greg's decision (2026-09-28): under CPU load a healthy Engram
-/// process misses a ten-second deadline.
-const ENGRAM_READINESS_TIMEOUT: Duration = Duration::from_secs(20);
+/// wall-clock budget all absence probes of a Save share. A slow healthy
+/// process is diagnosed after ten seconds and retains its minute to finish.
+const ENGRAM_READINESS_TIMEOUT: Duration = ENGRAM_MIN_CALL_TIMEOUT;
 const ENGRAM_DIAGNOSTIC_DECLARATION_LIMIT: usize = 4096;
 const ENGRAM_DIAGNOSTIC_TEXT_LIMIT: usize = 4096;
 const ENGRAM_DIAGNOSTIC_REPORT_LIMIT: usize = 16 * 1024;

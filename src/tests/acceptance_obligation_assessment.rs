@@ -1062,11 +1062,11 @@ fn two_summaries_fit_in_index_order_whole_then_named() {
 // section header.
 
 /// Requests an independent evaluation whose criterion 1 cites `RECORD` on a
-/// host clock the tracker reads advance: the exact selected read leaves the
-/// clock `selected_at` seconds after the start, and the first `--after` read
-/// leaves it `first_after_at` seconds after the start. Returns the request
+/// host clock the tracker reads advance: the selected read sets the initial
+/// elapsed time and every optional continuation spends its scripted duration.
+/// Returns the request
 /// result and how many `--after` reads were made.
-fn evaluate_on_clock(selected_at: u64, first_after_at: Option<u64>) -> (Value, usize) {
+fn evaluate_on_clock(selected_at: u64, after_cost: Option<u64>) -> (Value, usize) {
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     let pages = captured_assessment_pages();
     let elapsed = Arc::new(AtomicU64::new(0));
@@ -1090,11 +1090,8 @@ fn evaluate_on_clock(selected_at: u64, first_after_at: Option<u64>) -> (Value, u
             move |_, args, _| {
                 if let Some(reply) = assessment_reply(&pages, None, args) {
                     if args.iter().any(|arg| arg == "--after") {
-                        if counted.fetch_add(1, Ordering::SeqCst) == 0 {
-                            if let Some(at) = first_after_at {
-                                clock.store(at, Ordering::SeqCst);
-                            }
-                        }
+                        counted.fetch_add(1, Ordering::SeqCst);
+                        clock.fetch_add(after_cost.unwrap_or(0), Ordering::SeqCst);
                     } else {
                         clock.store(selected_at, Ordering::SeqCst);
                     }
@@ -1111,7 +1108,7 @@ fn evaluate_on_clock(selected_at: u64, first_after_at: Option<u64>) -> (Value, u
                     Ok(show.clone())
                 }
             },
-            start + Duration::from_secs(600),
+            start + acceptance_evaluation_request_tracker_budget(),
             move || start + Duration::from_secs(elapsed.load(Ordering::SeqCst)),
         )
         .expect("the evaluation request is admitted, its closing reads funded");
@@ -1119,11 +1116,10 @@ fn evaluate_on_clock(selected_at: u64, first_after_at: Option<u64>) -> (Value, u
     (serde_json::to_value(response).unwrap(), reads)
 }
 
-/// The discovery deadline already holds back the closing reserve. Earlier
-/// reads that spend 25 of its 40 seconds must still leave the assessment the
-/// rest; the reserve is not taken twice.
+/// Production defaults admit optional pages after mandatory selected reads.
+/// Fast continuations can complete within the separate optional I/O phase.
 #[test]
-fn assessment_reads_use_the_rest_of_the_discovery_window() {
+fn assessment_reads_use_the_production_optional_phase() {
     let (wire, after_reads) = evaluate_on_clock(25, None);
 
     let summary = &wire["obligationAssessments"][0];
@@ -1132,21 +1128,20 @@ fn assessment_reads_use_the_rest_of_the_discovery_window() {
     assert_eq!(after_reads, 6);
 }
 
-/// Assessment reads stop at the discovery deadline, so the closing basis and
-/// identity reads keep the whole closing reserve: a read that leaves the clock
-/// past that deadline is the last one, and the request still completes.
+/// Whole-window optional reads consume their own phase. The request still
+/// completes its mandatory closing checks and discloses the unread remainder.
 #[test]
-fn assessment_reads_stop_at_the_discovery_deadline_and_leave_the_closing_reserve() {
-    let (wire, after_reads) = evaluate_on_clock(25, Some(41));
+fn assessment_reads_exhaust_their_phase_without_spending_the_closing_tail() {
+    let (wire, after_reads) = evaluate_on_clock(25, Some(ENGRAM_MIN_CALL_TIMEOUT.as_secs()));
 
     let summary = &wire["obligationAssessments"][0];
     assert_eq!(
-        after_reads, 1,
-        "no assessment read after the discovery deadline: {wire}"
+        after_reads, 2,
+        "no third full-window assessment read is admitted: {wire}"
     );
     assert_eq!(summary["complete"], json!(false), "{wire}");
     assert_eq!(summary["incompleteReason"], json!("time_budget"), "{wire}");
-    assert_eq!(summary["rowsRead"], json!(16), "{wire}");
+    assert_eq!(summary["rowsRead"], json!(24), "{wire}");
 }
 
 /// A selected record whose assessment is present but not an object was not

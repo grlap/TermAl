@@ -347,7 +347,11 @@ fn naming_owner_capture_keeps_the_existing_capacity_and_deadline_bounds() {
         "both probes share the aggregate deadline"
     );
     assert!(bounds[0].0 >= before);
-    assert!(bounds[0].0 <= std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET);
+    assert!(
+        bounds[0].0 >= before + ENGRAM_SOURCE_COMMAND_BUDGET * 2,
+        "a longer admitted caller window is not shortened"
+    );
+    assert!(bounds[0].0 <= std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET * 2);
     assert_eq!(bounds[0].1, 4096);
     assert_eq!(bounds[1].1, ENGRAM_SOURCE_JSON_LIMIT + 1);
 }

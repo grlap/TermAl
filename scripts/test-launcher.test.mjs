@@ -92,7 +92,7 @@ const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 // closure, including the native helpers selected only when a stage executes.
 const copiedLauncherFiles = Object.freeze([
   "test-launcher.mjs", "test-launcher-source.mjs", "test-launcher-input.mjs", "test-run-registration.mjs", "test-ui-bootstrap.mjs",
-  "source-id-budget.mjs", "source-id-budget-ms.json",
+  "source-id-budget.mjs", "source-id-budget-ms.json", "engram-call-budget-ms.json",
   "review-freeze-fingerprint.mjs",
   "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs",
   "test-categories-plan.mjs", "test-counts.mjs", "test-process-owner.mjs",
@@ -2139,15 +2139,16 @@ async function terminalDiagnosticFixture(t, { writeError } = {}) {
       source: `git-commit:${sourceId.commit}`, tree: sourceId.tree,
       entries: changes.map(({ path, status }) => ({ path, status })),
       refusal: null, source_id: sourceId };
-    const originalSpawn = childProcess.spawnSync;
+    const originalExecFile = childProcess.execFile;
     const originalWrite = fs.writeFileSync;
     let sourceCalls = 0;
     const diagnostics = [];
-    const spawnMock = t.mock.method(childProcess, "spawnSync", (command, args, options) => {
+    const sourceMock = t.mock.method(childProcess, "execFile", (command, args, options, callback) => {
       if (args[0] === "source" && args[2] === request.root && ++sourceCalls === 2) {
-        return { status: 0, signal: null, stdout: Buffer.from(JSON.stringify(observation)), stderr: Buffer.alloc(0) };
+        queueMicrotask(() => callback(null, Buffer.from(JSON.stringify(observation)), Buffer.alloc(0)));
+        return { stdin: { end() {} } };
       }
-      return originalSpawn(command, args, options);
+      return originalExecFile(command, args, options, callback);
     });
     const writeMock = t.mock.method(fs, "writeFileSync", (path, data, options) => {
       if (typeof path === "string" && dirname(path) === runDir && basename(path).startsWith("launcher.diagnostic-")) {
@@ -2161,7 +2162,7 @@ async function terminalDiagnosticFixture(t, { writeError } = {}) {
     try {
       result = await executeRun(runDir, env);
     } finally {
-      spawnMock.mock.restore();
+      sourceMock.mock.restore();
       writeMock.mock.restore();
       syncBuiltinESMExports();
     }

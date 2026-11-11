@@ -248,15 +248,29 @@ The shared source contract is quoted below. See also the
 The quoted 8 s bound is historical. On 2026-11-07 Greg changed the source
 capture bound to 30 s (Asistant #734): „8 sekund jest za mało. Podnieśc do
 30 sec. Takie sztywne limity bardzo duzo nas kosztuja poprawek i marnowanego
-czasu.” The 1 MiB output bound is unchanged. TermAl's source-owner operations
-share the 30 s budget, including byte-pin checks, execution and parsing, while
-preserving any shorter caller deadline. S0 opening also reserves the existing
-5 s for surrounding stages. The host and launcher derive source deadlines from
-`scripts/source-id-budget-ms.json`. Process delivery adds 2 s and metadata
-HTTP adds 5 s; pinned registration reserves the source budget before its
-existing ACK/claim/durability allowances. Those allowances and reclamation
-budgets remain unchanged. The paired Engram build must accept `--timeout-ms 30000`
-before this host change is activated.
+czasu.” On 2026-11-11 he raised the operation minimum to one minute:
+„Min 1 minuta.” Calls still running after ten seconds log a warning and continue.
+The 1 MiB output bound is unchanged. TermAl's source-owner operations
+retain one admitted phase plan through queueing, authority locks and nested helpers.
+Version/preparation and the subsequent source process each receive at least
+62 s (60 s plus 2 s process delivery); existing longer version windows remain
+longer. The aggregate metadata reserve is 124 s, with 5 s HTTP delivery (129 s).
+TermAl omits `--timeout-ms` from source-owner arguments.
+Before the Engram sync, the source owner's own default is 30 s; TermAl no longer
+imposes a source limit and waits at least 60 s plus overhead. This does not claim
+an end-to-end 60 s owner limit before that sync.
+S0 opening also keeps a 60 s authority reserve for surrounding stages.
+The source minimum derives from `scripts/source-id-budget-ms.json`; the shared
+operation minimum and process delivery derive from `scripts/engram-call-budget-ms.json`.
+Pinned registration reserves the metadata plan before its
+60 s claim/durability allowance. The client also funds one full admitted
+held-read overrun and 3 s of response delivery: 123 s ordinary, 247 s pinned.
+The host's minimum operation window and the client's two claim windows use
+`scripts/engram-call-budget-ms.json`, independently of the source budget.
+Short reclamation
+budgets are raised too; they cannot cut an admitted Engram call short.
+Omitting the override works with both the old 30 s and new 60 s owner default;
+activation still requires the coordinators' compatibility and execution checks.
 
 Native `registered_at` and check start name the persisted first
 host-observed start, not the OS spawn time; any provider timestamp is kept

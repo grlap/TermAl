@@ -34,10 +34,11 @@ fn real_process_named_root_reclamation_startup_budget_keeps_unsent_process() {
     };
     let transport = real_process_fixture_transport(temp_root.path());
     let expired = EngramControlRequest::WorkSessionRead {};
-    // Zero remaining time deterministically selects the post-startup,
-    // pre-dispatch deadline branch, independently of process startup speed.
+    // A positive admission can expire during startup. A nanosecond is shorter
+    // than process creation, so this preserves the post-startup unsent branch
+    // without a real timeout wait. Zero is refused before startup separately.
     let error = transport
-        .request(&connection, &expired, Duration::ZERO)
+        .request(&connection, &expired, Duration::from_nanos(1))
         .unwrap_err();
     assert_eq!(error.kind, EngramTransportErrorKind::Deadline);
     assert!(
@@ -104,6 +105,142 @@ fn unsent_boundary_request(work_id: String, run_id: &str) -> EngramControlReques
         run_id: run_id.to_owned(),
         after: None,
     }
+}
+
+#[test]
+fn zero_control_admission_preserves_cold_and_live_process_ownership_and_sends_no_frame() {
+    for live in [false, true] {
+        let temp_root = TestTempRoot::create("engram-control-zero-admission");
+        fs::write(temp_root.path().join(".engram-project"), "fixture-ok\n").unwrap();
+        let frames = temp_root.path().join("control-frames.jsonl");
+        fs::write(&frames, "").unwrap();
+        let connection = unsent_boundary_connection(
+            &temp_root,
+            real_engram_control_fixture_path(),
+            "engram-fixture-zero-admission",
+        );
+        let transport = real_process_fixture_transport(temp_root.path());
+        let read = EngramControlRequest::WorkSessionRead {};
+        if live {
+            assert_eq!(
+                transport
+                    .request(&connection, &read, DEADLOCK_GUARD)
+                    .unwrap(),
+                json!({"binding": null})
+            );
+        }
+        let generations = transport.generations.lock().unwrap().clone();
+        let prepared = transport
+            .processes
+            .lock()
+            .unwrap()
+            .get(&connection.session_id)
+            .cloned()
+            .flatten();
+        let frames_before = fs::read(&frames).unwrap();
+        for changed_config in [false, true] {
+            let mut refused_connection = connection.clone();
+            if changed_config {
+                refused_connection.binary_path =
+                    temp_root.path().join("must-not-start-a-successor");
+            }
+            // Encoding an oversized frame must also come after admission.
+            for request in [
+                &read,
+                &unsent_boundary_request(
+                    "x".repeat(ENGRAM_CONTROL_MAX_FRAME_BYTES + 1),
+                    "zero-oversize",
+                ),
+            ] {
+                let error = transport
+                    .request(&refused_connection, request, Duration::ZERO)
+                    .unwrap_err();
+                assert_eq!(error.kind, EngramTransportErrorKind::Deadline);
+                assert!(
+                    error.process_never_started && error.request_never_sent,
+                    "{error:?}"
+                );
+                assert!(error.control_process.is_none());
+                assert_eq!(
+                    EngramCausalFailure::request(&error, request).remote_application,
+                    EngramRemoteApplication::NotStarted
+                );
+            }
+        }
+        assert_eq!(*transport.generations.lock().unwrap(), generations);
+        let after = transport
+            .processes
+            .lock()
+            .unwrap()
+            .get(&connection.session_id)
+            .cloned()
+            .flatten();
+        match (&prepared, &after) {
+            (None, None) => assert!(transport.processes.lock().unwrap().is_empty()),
+            (Some(before), Some(after)) => {
+                assert!(Arc::ptr_eq(before, after));
+                assert!(!after.retiring.load(Ordering::Acquire));
+                assert!(!after.worker_finished.load(Ordering::Acquire));
+            }
+            _ => panic!("zero admission changed process ownership"),
+        }
+        assert_eq!(fs::read(&frames).unwrap(), frames_before);
+        // This successful round-trip follows any queued frames on the same
+        // worker, so the final log check also detects a delayed stray send.
+        assert_eq!(
+            transport
+                .request(&connection, &read, DEADLOCK_GUARD)
+                .unwrap(),
+            json!({"binding": null})
+        );
+        let count = fs::read_to_string(&frames).unwrap().lines().count();
+        transport.shutdown_session(&connection.session_id);
+        assert_eq!(count, if live { 2 } else { 1 });
+    }
+}
+
+#[test]
+fn zero_adapter_admission_does_not_consult_transport_or_capability_generation() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    struct UnusedTransport;
+    impl EngramControlTransport for UnusedTransport {
+        fn request(
+            &self,
+            _: &EngramConnectionConfig,
+            _: &EngramControlRequest,
+            _: Duration,
+        ) -> std::result::Result<Value, EngramTransportError> {
+            panic!("zero admission must not reach the transport")
+        }
+        fn connection_generation(&self, _: &str) -> Option<u64> {
+            panic!("zero admission must not consult the generation")
+        }
+        fn shutdown_session(&self, _: &str) {}
+    }
+    let temp_root = TestTempRoot::create("engram-adapter-zero-admission");
+    let connection = unsent_boundary_connection(
+        &temp_root,
+        temp_root.path().join("must-not-launch"),
+        "zero-adapter",
+    );
+    let adapter = EngramHostAdapter {
+        host_workdir: temp_root.path().to_path_buf(),
+        transport: Arc::new(UnusedTransport),
+        capabilities: Arc::default(),
+    };
+    let error = adapter
+        .request(
+            &connection,
+            &EngramControlRequest::WorkSessionRead {},
+            Duration::ZERO,
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, EngramTransportErrorKind::Deadline);
+    assert!(error.process_never_started && error.request_never_sent);
+    assert_eq!(
+        error.causal_failure.unwrap().remote_application,
+        EngramRemoteApplication::NotStarted
+    );
 }
 
 /// An oversize request is refused before any process is consulted, so no
@@ -754,7 +891,7 @@ fn real_process_reset_cleanup_deadline_retains_the_exact_child_and_refuses_a_suc
         &retained
     ));
     let refused = transport
-        .request(&connection, &request, Duration::ZERO)
+        .request(&connection, &request, Duration::from_nanos(1))
         .unwrap_err();
     assert_eq!(refused.kind, EngramTransportErrorKind::LocalState);
     assert_eq!(refused.code.as_deref(), Some("control_cleanup_pending"));
@@ -817,9 +954,9 @@ fn real_process_work_session_waits_for_same_session_predecessor_cleanup() {
         .request(
             &connection,
             &EngramControlRequest::WorkSessionRead {},
-            Duration::ZERO,
+            Duration::from_nanos(1),
         )
-        .expect_err("an ordinary read must not start a successor while cleanup is unconfirmed");
+        .expect_err("an admitted read must not start a successor while cleanup is unconfirmed");
     assert_eq!(refused.code.as_deref(), Some("control_cleanup_pending"));
     assert!(refused.request_never_sent);
     assert!(!refused.process_never_started);

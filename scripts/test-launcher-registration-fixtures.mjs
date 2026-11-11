@@ -10,9 +10,9 @@ import { basename, join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createRun, executeRun, startDetachedRun } from "./test-launcher.mjs";
-import { registerTestRun, validateRunRegistration, boundedStateLockEvidence } from "./test-run-registration.mjs";
+import { registerTestRun, validateRunRegistration, boundedStateLockEvidence, registrationBudgetMs, sourceRegistrationBudgetMs } from "./test-run-registration.mjs";
 import { sourceBinaryPath } from "./test-launcher-input.mjs";
-import { sourceIdBudgetMs } from "./source-id-budget.mjs";
+import { sourceMetadataBudgetMs } from "./source-id-budget.mjs";
 
 // Fixture host metadata uses the test process's explicitly selected owner, not
 // per-case Cargo homes containing fake compilers. Production never resolves a
@@ -431,7 +431,7 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
         let runDir;
         const epoch = Date.now();
         let elapsed = 0;
-        const budget = sourceIdBudgetMs + 8000;
+        const budget = sourceRegistrationBudgetMs;
         t.mock.method(Date, "now", () => epoch + elapsed);
         await registrationHost(async (host) => {
           service = host;
@@ -515,6 +515,51 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
   }
 
   for (const pinned of [false, true]) {
+    test(`registration preserves a late held-claim refusal for ${pinned ? "pinned" : "plain"} input`, async (t) => {
+      await pendingRepository(t, async (root, env) => {
+        const runDir = join(root, ".git", "review-runs", "test-late-held-refusal");
+        mkdirSync(runDir, { recursive: true });
+        const request = { runId: "test-late-held-refusal", root, owner: env.TERMAL_SESSION_ID,
+          creatorPid: process.pid, detached: false, started: "2026-11-08T00:46:00.000Z",
+          stages: [{ name: "focused" }], ...(pinned ? { sourceOwner: sourceOwnerFixture() } : {}) };
+        const original = JSON.stringify(request);
+        writeFileSync(join(runDir, "request.json"), original);
+        const epoch = Date.now();
+        let elapsed = 0;
+        t.mock.method(Date, "now", () => epoch + elapsed);
+        t.mock.timers.enable({ apis: ["setTimeout"] });
+        const advance = (milliseconds) => {
+          elapsed += milliseconds;
+          t.mock.timers.tick(milliseconds);
+        };
+        const reason = "registration shared deadline exceeded after held-claim read";
+        await registrationHost(async (host) => {
+          let failure;
+          try { await registerTestRun(request, runDir, { ...env, TERMAL_BASE_URL: host.url }); }
+          catch (error) { failure = error; }
+          assert.ok(failure, "the host's shared deadline still refuses publication");
+          assert.match(failure.message, /HTTP 409/u, "receive the definitive refusal, not a client abort");
+          assert.ok(failure.message.includes(reason), failure.message);
+          assert.doesNotMatch(failure.message, /category=aborted|outcome is unknown/u);
+          assert.equal(failure.durabilityPending, undefined);
+          assert.equal(host.requests.length, 1, "a definitive refusal is never retried");
+          assert.equal(host.queries.length, 0, "no receipt confirmation after refusal");
+          assert.equal(host.registrations.size, 0, "no late publication");
+          assert.equal(readFileSync(join(runDir, "request.json"), "utf8"), original);
+          assert.equal(existsSync(join(runDir, "input.json")), false, "no execution admission");
+        }, { autoAcknowledge: true, acceptRegistration: false, errorReason: reason,
+          status: () => {
+            // The source phase precedes the claim budget for pinned input.
+            if (pinned) advance(sourceMetadataBudgetMs);
+            advance(10_000); // StateInner/authority snapshot wait.
+            advance(55_000); // Admitted held read keeps its minimum window.
+            return 409;
+          } });
+      });
+    });
+  }
+
+  for (const pinned of [false, true]) {
     test(`durability pending registration rejects a ${pinned ? "pinned" : "plain"} recovery ACK after the original deadline`, async (t) => {
       await pendingRepository(t, async (root, env) => {
         const runDir = join(root, ".git", "review-runs", "test-late-recovery-ack");
@@ -524,7 +569,7 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
           stages: [{ name: "focused" }], ...(pinned ? { sourceOwner: sourceOwnerFixture() } : {}) };
         writeFileSync(join(runDir, "request.json"), JSON.stringify(request));
         const epoch = Date.now();
-        const budget = 8000 + (pinned ? sourceIdBudgetMs : 0);
+        const budget = pinned ? sourceRegistrationBudgetMs : registrationBudgetMs;
         let elapsed = 0;
         let service;
         t.mock.method(Date, "now", () => epoch + elapsed);
@@ -557,7 +602,7 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
         const original = JSON.stringify(request);
         writeFileSync(join(runDir, "request.json"), original);
         const epoch = Date.now();
-        const budget = 8000 + (pinned ? sourceIdBudgetMs : 0);
+        const budget = pinned ? sourceRegistrationBudgetMs : registrationBudgetMs;
         let elapsed = 0;
         t.mock.method(Date, "now", () => epoch + elapsed);
         await registrationHost(async (host) => {
@@ -852,7 +897,7 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
             if (boundary === "preflight_confirmation") runDir = await createRun(plan, env);
             const originalFetch = globalThis.fetch;
             const originalNow = Date.now;
-            const budgetMs = 8_000 + (boundary === "registration" ? sourceIdBudgetMs : 0);
+            const budgetMs = boundary === "registration" ? sourceRegistrationBudgetMs : registrationBudgetMs;
             let expired = false;
             let queries = 0;
             if (fault === "expired budget") t.mock.method(Date, "now", () => originalNow() + (expired ? budgetMs + 1 : 0));

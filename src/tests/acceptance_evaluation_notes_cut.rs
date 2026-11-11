@@ -338,7 +338,14 @@ fn long_history_on_a_slow_store(
     criteria: usize,
     visible: VisibleCriteria,
 ) -> SlowStoreOutcome {
-    long_history_with_private_producer(latency, selected, criteria, visible, None)
+    long_history_with_private_producer(
+        latency,
+        selected,
+        criteria,
+        visible,
+        None,
+        ENGRAM_MIN_CALL_TIMEOUT / 3,
+    )
 }
 
 fn long_history_with_private_producer(
@@ -347,6 +354,7 @@ fn long_history_with_private_producer(
     criteria: usize,
     visible: VisibleCriteria,
     private_page_count: Option<usize>,
+    notes_latency: Duration,
 ) -> SlowStoreOutcome {
     const TOTAL: u64 = LONG_HISTORY_TOTAL;
     const PER_PAGE: u64 = LONG_HISTORY_PER_PAGE;
@@ -379,6 +387,10 @@ fn long_history_with_private_producer(
     // Routing for canonical discovery, then the slow transport in its place.
     install_binding_evidence_transport(&state, &parent, vec![binding.clone()]);
     let clock = SlowStoreClock::new(latency);
+    let notes_clock = SlowStoreClock {
+        latency: notes_latency,
+        ..clock.clone()
+    };
     let bindings = Arc::new(SlowBindingTransport {
         clock: clock.clone(),
         pages: Mutex::new(binding_pages(criteria, private_page_count.is_some()).into()),
@@ -418,7 +430,12 @@ fn long_history_with_private_producer(
         &parent,
         request,
         |_, args, timeout| {
-            if let Err(error) = clock.read(timeout) {
+            let read_clock = if page_number(args).is_some() {
+                &notes_clock
+            } else {
+                &clock
+            };
+            if let Err(error) = read_clock.read(timeout) {
                 // The binding's closure record is also read whole, by the
                 // optional obligation-assessment reader; it decides nothing.
                 let optional = args
@@ -475,7 +492,7 @@ fn long_history_with_private_producer(
     }
 }
 
-fn assert_paging_stopped_on_time_and_evaluated(outcome: SlowStoreOutcome) -> Value {
+fn assert_paging_stopped_and_evaluated(outcome: SlowStoreOutcome, reason: &str) -> Value {
     let response = outcome
         .result
         .expect("a long history on a slow store must still evaluate, not fail with 502 or 409");
@@ -492,26 +509,29 @@ fn assert_paging_stopped_on_time_and_evaluated(outcome: SlowStoreOutcome) -> Val
     );
     let wire = serde_json::to_value(response).unwrap();
     let unread = &wire["evidenceOmissions"]["unread"];
-    assert_eq!(unread["reason"], "time_budget", "{unread}");
+    assert_eq!(unread["reason"], reason, "{unread}");
     assert_eq!(
         unread["count"].as_u64(),
         Some(LONG_HISTORY_TOTAL - LONG_HISTORY_PER_PAGE * (outcome.pages as u64 + 1)),
         "{unread}"
     );
     let brief = wire["brief"].as_str().unwrap();
-    assert!(brief.contains("paging stopped: time_budget"), "{brief}");
+    assert!(
+        brief.contains(&format!("paging stopped: {reason}")),
+        "{brief}"
+    );
     wire
 }
 
-/// At four seconds a read, paging the history to its page limit would leave a
-/// page with less time than it takes. Paging stops first, and says so.
+/// Slow optional pages exhaust their own quota while mandatory reads keep
+/// their independent funding. All elapsed time is scripted.
 #[test]
 fn a_long_note_history_on_a_slow_store_stops_paging_and_still_evaluates() {
     for latency in [Duration::from_millis(900), Duration::from_secs(4)] {
         let outcome = long_history_on_a_slow_store(latency, &[], 2, VisibleCriteria::All);
         let (pages, selected_reads, binding_pages) =
             (outcome.pages, outcome.selected_reads, outcome.binding_pages);
-        assert_paging_stopped_on_time_and_evaluated(outcome);
+        assert_paging_stopped_and_evaluated(outcome, "time_budget");
         if latency < Duration::from_secs(1) {
             assert!(pages >= 1, "available optional history is still read");
         }
@@ -533,7 +553,7 @@ fn a_long_note_history_keeps_every_binding_page_funded() {
     ] {
         let outcome = long_history_on_a_slow_store(latency, &[], 10, VisibleCriteria::All);
         let (pages, binding_pages) = (outcome.pages, outcome.binding_pages);
-        assert_paging_stopped_on_time_and_evaluated(outcome);
+        assert_paging_stopped_and_evaluated(outcome, "time_budget");
         if latency < Duration::from_secs(1) {
             assert!(pages >= 1, "the share that can fund pages is used");
         }
@@ -552,7 +572,7 @@ fn a_clipped_criteria_list_still_funds_every_binding_page() {
     ] {
         let outcome = long_history_on_a_slow_store(latency, &[], 10, VisibleCriteria::First(3));
         let (pages, binding_pages) = (outcome.pages, outcome.binding_pages);
-        assert_paging_stopped_on_time_and_evaluated(outcome);
+        assert_paging_stopped_and_evaluated(outcome, "time_budget");
         if latency < Duration::from_secs(1) {
             assert!(pages >= 1, "the share that can fund pages is used");
         }
@@ -567,7 +587,7 @@ fn an_absent_criteria_list_keeps_the_binding_index_funded() {
     let outcome =
         long_history_on_a_slow_store(Duration::from_secs(4), &[], 10, VisibleCriteria::Absent);
     let binding_pages = outcome.binding_pages;
-    assert_paging_stopped_on_time_and_evaluated(outcome);
+    assert_paging_stopped_and_evaluated(outcome, "time_budget");
     assert_eq!(binding_pages, 2);
 }
 
@@ -583,7 +603,7 @@ fn a_long_note_history_keeps_the_selected_evidence_reads_funded() {
     for latency in [Duration::from_millis(800), Duration::from_secs(3)] {
         let outcome = long_history_on_a_slow_store(latency, &selected, 2, VisibleCriteria::All);
         let (pages, selected_reads) = (outcome.pages, outcome.selected_reads);
-        let wire = assert_paging_stopped_on_time_and_evaluated(outcome);
+        let wire = assert_paging_stopped_and_evaluated(outcome, "time_budget");
         if latency < Duration::from_secs(1) {
             assert!(pages >= 1, "available optional history is still read");
         }
@@ -609,9 +629,10 @@ fn optional_history_cannot_starve_supported_private_scans_across_criteria_and_pa
                 4,
                 visible,
                 Some(pages_per_criterion),
+                ENGRAM_MIN_CALL_TIMEOUT / 3,
             );
             assert_eq!(outcome.binding_pages, 1);
-            let wire = assert_paging_stopped_on_time_and_evaluated(outcome);
+            let wire = assert_paging_stopped_and_evaluated(outcome, "time_budget");
             let brief = wire["brief"].as_str().unwrap();
             assert!(
                 brief.contains("verification test passed"),
@@ -619,4 +640,19 @@ fn optional_history_cannot_starve_supported_private_scans_across_criteria_and_pa
             );
         }
     }
+}
+
+#[test]
+fn fast_optional_history_stops_at_the_page_limit_and_keeps_mandatory_reads_funded() {
+    let outcome = long_history_with_private_producer(
+        Duration::from_millis(1),
+        &[],
+        10,
+        VisibleCriteria::All,
+        None,
+        Duration::from_millis(1),
+    );
+    assert_eq!(outcome.pages + 1, MAX_ACCEPTANCE_EVIDENCE_PAGES);
+    assert_eq!(outcome.binding_pages, 2);
+    assert_paging_stopped_and_evaluated(outcome, "page_limit");
 }

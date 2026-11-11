@@ -1062,9 +1062,8 @@ fn unadmitted_review_capture_absence_retains_exact_job_without_reporting() {
         .unwrap()
         .test_engram_source_capture = Some(Arc::new(|_, budget| {
         assert_eq!(
-            budget,
-            Duration::from_millis(250),
-            "fixture must not inflate the capture deadline"
+            budget, ENGRAM_MIN_CALL_TIMEOUT,
+            "the absent capture receives the admitted operation window"
         );
         Ok(None)
     }));
@@ -1909,7 +1908,7 @@ fn restored_closing_capture_uses_its_pinned_work_without_a_control_rebind() {
 }
 
 #[test]
-fn restored_closing_capture_survives_a_source_measurement_longer_than_the_rpc_cap() {
+fn restored_closing_capture_keeps_a_late_source_observation_its_full_window() {
     let mut fixture = ReportingTurn::new(
         "unadmitted-slow-closing-measurement",
         true,
@@ -1932,10 +1931,15 @@ fn restored_closing_capture_survives_a_source_measurement_longer_than_the_rpc_ca
             .unwrap()
             .call_timeout()
     };
-    assert!(cap < Duration::from_secs(1));
-    let hold = cap * 2;
-    // This retained delay models slow source I/O, not an ordering barrier.
-    // The actual root-read barrier above orders installation of this hook.
+    let started = std::time::Instant::now();
+    let source_admitted = started + cap + Duration::from_secs(1);
+    let source_completed = started + cap * 2;
+    let measured = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let observed = measured.clone();
+    // The version callback advances source-admission time on this capture
+    // worker. Its following source reply completes past the original RPC
+    // interval, inside the actual deadline production issued to that process.
+    // The root-read barrier orders hook installation; there is no real delay.
     let source_owner = restarted
         .inner
         .lock()
@@ -1949,13 +1953,22 @@ fn restored_closing_capture_survives_a_source_measurement_longer_than_the_rpc_ca
         .unwrap()
         .test_observation_source_owner =
         Some(Arc::new(move |binary, cwd, args, deadline, limit| {
-            if args[0] != "--version" {
-                std::thread::sleep(hold);
+            if args[0] == "--version" {
+                TEST_ENGRAM_SOURCE_OWNER_NOW.with(|clock| clock.set(Some(source_admitted)));
+            } else {
+                assert!(source_completed > started + cap);
+                assert!(deadline >= source_admitted + ENGRAM_SOURCE_PROCESS_BUDGET);
+                assert!(
+                    source_completed < deadline,
+                    "the late source reply remains funded"
+                );
+                observed.store(true, std::sync::atomic::Ordering::SeqCst);
             }
             source_owner(binary, cwd, args, deadline, limit)
         }));
     read.release();
     let sent = fixture.observation();
+    assert!(measured.load(std::sync::atomic::Ordering::SeqCst));
     assert!(sent.durable_before_send);
     assert_eq!(
         occurrence(&sent)["host_turn_ref"],

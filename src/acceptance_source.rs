@@ -722,8 +722,8 @@ impl AppState {
         owner: &str,
         place: &EngramBasisPlace,
     ) -> Option<EngramSourceId> {
-        let budget = REVIEW_FREEZE_TIMEOUT.min(ENGRAM_SOURCE_COMMAND_BUDGET);
-        let deadline = std::time::Instant::now() + budget;
+        let budget = REVIEW_FREEZE_TIMEOUT.max(ENGRAM_SOURCE_COMMAND_BUDGET);
+        let deadline = EngramSourcePhasePlan::from(std::time::Instant::now() + budget);
         let (target, live) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             (
@@ -739,7 +739,7 @@ impl AppState {
             &live,
             &self.capture_lifetime,
             ACCEPTANCE_SOURCE_CAPTURE_LIMIT,
-            budget,
+            deadline.remaining(),
             move || {
                 let (root, common_dir_key) = match place {
                     EngramBasisPlace::Named {

@@ -358,7 +358,7 @@ fn a_naming_capture_leaves_the_commit_its_reserve() {
             ENGRAM_SOURCE_ROOT_NAMING_BUDGET,
             Duration::from_millis(ENGRAM_MAX_CALL_TIMEOUT_MS)
         ),
-        REVIEW_FREEZE_TIMEOUT.min(
+        ENGRAM_SOURCE_COMMAND_BUDGET.min(
             ENGRAM_SOURCE_ROOT_NAMING_BUDGET
                 - ENGRAM_SOURCE_ROOT_COMMIT_RESERVE
                 - Duration::from_millis(ENGRAM_MAX_CALL_TIMEOUT_MS)
@@ -371,7 +371,8 @@ fn a_naming_capture_leaves_the_commit_its_reserve() {
                 + Duration::from_secs(3),
             Duration::from_millis(ENGRAM_MAX_CALL_TIMEOUT_MS),
         ),
-        Duration::from_secs(3).min(REVIEW_FREEZE_TIMEOUT)
+        Duration::ZERO,
+        "do not admit a source phase that would spend the mandatory reserve"
     );
     assert_eq!(
         engram_source_root_capture_budget(ENGRAM_SOURCE_ROOT_COMMIT_RESERVE, Duration::ZERO),

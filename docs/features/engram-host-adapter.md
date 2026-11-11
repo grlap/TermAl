@@ -149,10 +149,15 @@ Readiness must return an exit-0 v1 receipt with `scope: readiness`, `ready: true
 project id with `.engram-project` and the canonical database with the expected
 SHA-256 project path under the selected home. Matched stored/resolved host-path
 policy is required; unresolved or unbound reads do not authorize enablement.
-Verify/Save have a twenty-second process budget; unsupported older binaries,
+Verify/Save have a sixty-second process budget; unsupported older binaries,
 malformed receipts, nonzero exits and timeouts fail closed, never falling back
 to doctor or silently initializing/repairing a store. Engram may probe the
 checkout with a temporary file to resolve filesystem identity.
+
+Engram calls use a minimum sixty-second operation window and warn after ten
+seconds without interrupting the call. Older persisted `deadlineMs` values below
+that minimum cannot shorten it. The current settings range ends at the minimum,
+so changing that setting does not change the effective operation window.
 
 Enablement asks the store for no assurance level. There is no authority-grant setting, grant file,
 grant environment variable, or grant-installing verification step; obsolete
@@ -321,8 +326,8 @@ and its actor/context flags are byte-identical to that environment. Its trimmed
 text is capped at 32 KiB, escapes the host fence terminator,
 is wrapped in an `<engram-work-context>` block, and is prepended only to the
 runtime prompt; the user's durable message remains unchanged. The cold-start
-command uses the bounded Engram CLI/store-open budget (six seconds in
-production), rather than the shorter control-frame deadline. A failure is
+command uses the ordinary sixty-second Engram operation budget, with a warning
+after ten seconds that neither aborts nor resends it. A failure is
 logged, does not block the user's turn, and leaves the nudge pending for a later
 prompt. Concurrent sends and queue drains use available local context without
 waiting for the owning refresh. The context is consumed only after the runtime command channel accepts the prompt, so spawn
@@ -368,7 +373,8 @@ note that the host already handled hook control events was wrong for callbacks.
   the fenced context as `hookSpecificOutput.additionalContext`, or an empty
   answer when there is none (not applicable, a failed read, a settings change
   meanwhile, or no context ready within the answer budget). The budget is the
-  context command's timeout plus four seconds. The hook is registered with a
+  context command's timeout plus four seconds (64 seconds with the current
+  minimum). The hook is registered with a
   timeout 20 seconds longer, so the host's empty answer comes before Claude Code
   would cancel. A page fetched before the compaction and not yet sent is dropped,
   and the answer is read afresh under the compaction's new generation.
@@ -1467,7 +1473,8 @@ happens elsewhere. The agent therefore names the item's worktree once with
   mid-turn, with `termal_release_named_root`
   ([`POST /api/sessions/{id}/engram-named-root-release`](../architecture.md)).
   Every release takes the reclamation pass's single flight first, waiting up
-  to ten seconds for a running pass, and answers a failure before its own
+  to 140 seconds for a running pass, then uses its own 70-second authority
+  window, and answers a failure before its own
   removal as a conflict stating that nothing was applied.
 - **Sighting provenance.** Source bases carry `source_root_generation` and
   `source_root_state` together (`named` or `ended`), including sightings in the
@@ -1498,16 +1505,26 @@ happens elsewhere. The agent therefore names the item's worktree once with
   requires settled authority and the same acknowledged named root and
   generation. A lower revision or a changed identity cannot use it, and the
   mismatched closing turn keeps its original refusal.
-- **How long naming takes.** One budget of 102 seconds on the server covers
-  two source captures, the commit reserve, and one shared 20-second control
-  allowance across held-claim read, retired-claim maintenance, initial status, binding event and any
+- **How long naming takes.** One budget of 310 seconds on the server covers
+  two source captures, the commit reserve, and one shared 60-second control
+  allowance across held-claim read, initial status, binding event and any
   replay readback. Each control phase consumes the allowance left by the
   previous phase; filesystem capture time does not refresh or consume that
-  allowance. Path validation consumes the overall budget. Captures leave the
+  allowance. It decides whether the next call starts; a completed admitted
+  reply keeps its original success or failure even if that call overruns the
+  remaining share. Retired-claim maintenance starts only when another full
+  operation window fits beside the mandatory reserve. The production allowance
+  leaves no optional share, so naming currently skips that maintenance and
+  cannot promise automatic cleanup of removed-session journals. Requested-claim
+  maintenance remains available during evaluation admission. Background maintenance
+  retains its two-second window for admitting new work, even when its caller
+  has a larger budget. Already-admitted authority/read/publication work keeps
+  its full operation window; elapsed admission time never aborts its Engram call. Path validation consumes the overall budget. Captures leave the
   remaining control allowance and commit reserve available. Each owner capture
   also has the configured source-command cap; its probes share one
   deadline and are counted in the host's existing capture-worker limit. The MCP bridge
-  waits for the naming budget plus its normal request allowance; Codex's tool
+  waits for the naming budget, one full operation window of admitted overrun,
+  and its normal request allowance; Codex's tool
   timeout is longer still. A pre-transport timeout names nothing. After
   transport starts, a failure can leave an unknown outcome and retains the
   exact durable intent for retry. A runtime that ends the caller's wait earlier
@@ -2275,7 +2292,7 @@ and the [API table](../architecture.md).
    first, over a minute on a large one, so it is never the per-request read.
    An empty list is refused: that store does not evaluate acceptance. A
    missing key, or a read that fails (an older binary has no `show`) or
-   exceeds its 20-second bound, leaves the set unknown and refuses nothing:
+   exceeds its 60-second bound, leaves the set unknown and refuses nothing:
    the tracker enforces its policy when the evaluation is recorded;
 4. selects the mode: the task's pin, else the project's default when explicitly admitted,
    else `independent_session` when admitted
@@ -2513,26 +2530,36 @@ one full contract, selected bodies and optional closure rows, then closing
 show basis and core identity. Exposed legacy identity assertions remain checked
 against the canonical identity, including active-run movement.
 
-**Read budget.** Every tracker call runs through the one-retry lock policy, so
-it can cost two command timeouts plus the retry delay. One function computes
-the worst case of a request (the two task reads, up to seven continuation
-pages, the policy read, a shared 60-second criterion-evidence discovery budget,
-and the source capture, bounded by the freeze budget)
-and both sides use it: the MCP bridge adds it to its HTTP allowance, and the
-request path takes it as its own deadline. Core identity reads add no allowance:
-canonical identity is mandatory even when optional closure discovery is unavailable;
-its one absolute 60-second budget starts
-before the opening inspect and covers the intervening task reads, selected
-records, closure pages and final validation. Twenty seconds of that same budget
-is reserved for the closing notes/core bracket; each call funds any lock retry
-from its remaining share. Before each continuation page the
-host checks that the deadline still funds that page, the two reads that decide
-the request and the capture; when it does not, paging stops and the brief
-lists the evidence read so far. The bridge therefore never gives up on a
-request the backend is still serving. Selected detail reads and canonical
-closure pages share the discovery deadline. Optional paging also checks the
-discovery reserve and gives way to the mandatory final validation. CLI timeouts fund the possible
-lock retry within the remaining allowance. Once canonical identity is captured,
+**Read budget.** A tracker call's one possible lock retry and its delay spend
+one absolute operation window. Each admitted call has at least 60 seconds.
+Optional notes and assessment continuations share 120 seconds of actual I/O
+time. Before issuing another optional read, the host requires a full operation
+window in that phase and separately funded mandatory work after it. Fast pages
+can share the phase; an issued call is never shortened to make room for another.
+An unfunded continuation becomes a visible omission or incomplete assessment.
+
+The request's admission budget is 1024 seconds: 120 for preliminary recovery
+including its last admitted call; 120 for opening core/show; 120 for optional
+I/O; 120 for held/full; 120 for the mandatory evidence phase including its last
+admitted call; and 424 for closing show/core, requested-claim maintenance,
+policy and source capture. Committed-input preflight still receives the remaining
+request deadline: a slow metadata probe can consume the mandatory tail's reserve.
+It has no separately funded window yet. Selected bodies and closure-index reads retain a
+bounded mandatory admission phase. The closing basis and identity calls have
+their own funding, independent of optional reads. The MCP bridge adds evaluator
+delivery and its HTTP allowance to the same request budget; Codex's tool
+allowance derives from the longest bridge call and adds its own margin.
+The request client also funds two 62 s issued preflight source windows and a
+124 s final capture after an admitted preflight
+overrun, without changing that preflight's admission deadline. With current
+production defaults, the request HTTP allowance is 1342 seconds (1024 admission,
+248 admitted-source overrun, 40 evaluator delivery and 30 HTTP margin). The
+automatic-refresh submission branch includes the same request overrun; the
+derived Codex tool allowance is 1578 seconds, from the longer automatic-refresh
+submission branch (1543 s server work, 30 s HTTP and 5 s tool margin).
+These client waits do not shorten
+any issued source stage or turn an exhausted preflight into an admitted request.
+Once canonical identity is captured,
 any failed issued notes-page call refuses the request, including CLI cursor
 refusals classified as transport failures, malformed JSON and timeouts, even if
 the overall allowance still has time. Skipping a page before issuing it because
@@ -2918,9 +2945,10 @@ its obligation, because it is what a reader must see. A row
 field the host cannot show whole marks the summary incomplete rather than
 showing the row cut.
 
-*Incomplete reads.* The host reads within the same discovery deadline as the
-record reads before it. That deadline already holds back the closing bracket's
-reserve, so the closing basis and identity reads keep their whole share. An
+*Incomplete reads.* Assessment continuations share the optional notes I/O
+phase, independently of mandatory record reads. Each continuation requires a
+full operation window and a separately funded closing tail. Unfunded admission
+leaves an incomplete summary and does not spend the closing identity reserve. An
 assessment that is present but not an object is a malformed page, never taken
 for no assessment. So is a page whose `total`, `earlier`, `record_position` or
 `cut_position` is not a present non-negative integer, or whose `rows` is not an
@@ -3161,8 +3189,9 @@ a panic message, exit `1` with free text (failing to print the receipt happens
 stderr. The exit is kept as data (a code, or "did not end on its own"), never
 read back from a formatted status string. A locked-store diagnostic is believed
 only with Engram's ordinary failure exit code 1, never a panic or another exit
-code. This write-outcome classification does not change the separate JSON-read
-lock retry policy.
+code. JSON reads use the same confirmed locked-store predicate for their one
+lock retry: exit 1 with a locked-store diagnostic. Abnormal exits, panics and
+unknown outcomes are not retried merely because their text mentions a lock.
 
 *Uncertainty is erased only by a receipt.*
 
@@ -3332,8 +3361,9 @@ and key for the identical retry.
 A successful command returns `writeApplied: true`, even when a following read
 fails or the project settings change; an unavailable snapshot explains that the
 change applied to the selected store and disables further editing until refresh.
-Read and write process calls have a twenty-second
-bound (policy reads retain the existing lock retry). Each router has two
+Read and write process calls have a sixty-second
+bound and log a warning after ten seconds without aborting. Policy reads retain
+one lock retry inside the same absolute deadline. Each router has two
 nonwaiting display-read slots and one separate policy-write slot. Aborted display
 reads may finish their bounded CLI work, but cannot consume the write slot.
 Each pool returns 429 when its own capacity is occupied.

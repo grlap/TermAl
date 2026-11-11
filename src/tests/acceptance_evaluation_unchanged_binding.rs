@@ -683,13 +683,7 @@ fn assert_attempt_open(paused: &Paused) {
 }
 
 #[test]
-fn the_in_flight_retry_hint_is_derived_from_the_passs_read_budget() {
-    assert_eq!(ENGRAM_ROOT_RECLAMATION_BUDGET, Duration::from_secs(2));
-    assert_eq!(
-        ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRY_AFTER,
-        Duration::from_secs(3)
-    );
-    assert_eq!(ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRIES, 3);
+fn an_in_flight_request_returns_a_retryable_refusal_with_a_delay() {
     // The request side answers a transition in flight the same way.
     let error =
         acceptance_evaluation_naming_refusal("lead", EngramWorkNamingChange::InFlight, None);
@@ -703,7 +697,8 @@ fn the_in_flight_retry_hint_is_derived_from_the_passs_read_budget() {
         error
             .message
             .starts_with(ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT)
-            && error.message.contains("again in 3 seconds"),
+            && error.message.contains("again in ")
+            && error.message.ends_with(" seconds"),
         "{}",
         error.message
     );

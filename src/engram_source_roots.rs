@@ -68,7 +68,7 @@ impl EngramWorkSourceRoot {
 /// caller's wait sooner; the next identical call reveals a retained result
 /// or settles the durable pending intent.
 const ENGRAM_SOURCE_ROOT_NAMING_BUDGET: Duration = Duration::from_secs(
-    2 * REVIEW_FREEZE_TIMEOUT.as_secs()
+    2 * ENGRAM_SOURCE_METADATA_BUDGET.as_secs()
         + ENGRAM_SOURCE_ROOT_COMMIT_RESERVE.as_secs()
         + ENGRAM_MAX_CALL_TIMEOUT_MS / 1_000,
 );
@@ -79,10 +79,12 @@ const ENGRAM_SOURCE_ROOT_NAMING_BUDGET: Duration = Duration::from_secs(
 const ENGRAM_SOURCE_ROOT_COMMIT_RESERVE: Duration = Duration::from_secs(2);
 
 /// How long one capture of a naming call may take, with `left` of its budget
-/// remaining: the freeze budget, stopping `ENGRAM_SOURCE_ROOT_COMMIT_RESERVE`
+/// remaining: the source budget, stopping `ENGRAM_SOURCE_ROOT_COMMIT_RESERVE`
 /// short of the end.
 fn engram_source_root_capture_budget(left: Duration, control_left: Duration) -> Duration {
-    REVIEW_FREEZE_TIMEOUT.min(left.saturating_sub(ENGRAM_SOURCE_ROOT_COMMIT_RESERVE + control_left))
+    let available = left.saturating_sub(ENGRAM_SOURCE_ROOT_COMMIT_RESERVE + control_left);
+    if available < ENGRAM_SOURCE_METADATA_BUDGET { Duration::ZERO }
+    else { ENGRAM_SOURCE_COMMAND_BUDGET }
 }
 
 /// Charge only time spent in control I/O, so filesystem captures between
@@ -103,21 +105,27 @@ fn engram_source_root_control_within<T>(
     let result = call(budget);
     let elapsed = clock.elapsed_since(started);
     *remaining = remaining.saturating_sub(elapsed);
-    // A fence may expire exactly at this control allowance. Preserve its
-    // proven post-enqueue classification for the explicit caller boundary;
-    // replacing it with a generic budget error loses the pending identity.
-    if result
-        .as_ref()
-        .is_err_and(|error| error.is_enqueued_durability_deadline())
-    {
-        return result;
-    }
-    if elapsed >= budget {
-        return Err(ApiError::bad_gateway(
-            "named-root control reply arrived after its budget; retry the same request to settle any pending intent",
-        ));
-    }
+    // The shared allowance decides admission, not the outcome of an issued
+    // call. Its own operation deadline may outlast the remaining share.
+    // Preserve both completed replies and typed failures; exhaustion refuses
+    // the next unissued phase instead of discarding an applied write.
     result
+}
+
+// Maintenance is optional here: reserve a full mandatory control window
+// before admitting another full operation. Otherwise maintenance is skipped
+// so it cannot consume this naming request's mandatory allowance.
+fn engram_source_root_optional_control_within(
+    clock: &EngramBudgetClock,
+    remaining: &mut Duration,
+    wall_left: Duration,
+    call: impl FnOnce(Duration) -> Result<(), ApiError>,
+) -> Result<(), ApiError> {
+    let share = (*remaining).min(wall_left).saturating_sub(ENGRAM_MIN_CALL_TIMEOUT);
+    if share < ENGRAM_MIN_CALL_TIMEOUT {
+        return Ok(());
+    }
+    engram_source_root_control_within(clock, remaining, share, call)
 }
 
 #[cfg(test)]
@@ -841,12 +849,12 @@ fn acceptance_evaluation_naming_refusal(
 /// the sum of its stages' own deadlines, so a wait would widen it. The
 /// caller, which holds the attempt, retries instead.
 const ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT: &str = "authority transition in flight";
-/// How long a caller waits before trying again: a pass's whole budget and a
-/// second. A suggested delay, not a promise: a pass shares that budget among
+/// How long a caller waits before trying again: the scheduler interval and a
+/// second. A suggested delay, not a promise: a pass shares its budget among
 /// its planned roots, and a root it keeps waits out its cooldown, which the
 /// request's refusal then names (`AcceptanceEvaluationInFlightContext`).
 const ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRY_AFTER: Duration =
-    ENGRAM_ROOT_RECLAMATION_BUDGET.saturating_add(Duration::from_secs(1));
+    ENGRAM_ROOT_RECLAMATION_INTERVAL.saturating_add(Duration::from_secs(1));
 /// How many times an evaluator submits the same verdicts again after an
 /// in-flight refusal before it reports that refusal.
 const ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRIES: usize = 3;
@@ -2174,7 +2182,7 @@ impl AppState {
         // Do not let preparatory maintenance consume its entry first. Current
         // binding/missing-directory reconciliation retains its existing path.
         if !unfocused_clear && !full_new_name && !completed_clear {
-            engram_source_root_control_within(&clock, &mut control_left, left(), |budget| {
+            engram_source_root_optional_control_within(&clock, &mut control_left, left(), |budget| {
                 self.resolve_removed_engram_roots(session_id, None, budget);
                 Ok(())
             })?;

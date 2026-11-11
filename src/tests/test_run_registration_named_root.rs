@@ -905,18 +905,17 @@ fn an_expired_held_read_cannot_publish_a_late_registration() {
                 "held RPC must run outside StateInner"
             );
             assert_eq!(
-                timeout,
-                Duration::from_secs(5),
+                timeout, TEST_RUN_REGISTRATION_DURABILITY_BUDGET,
                 "the CLI shares the registration budget"
             );
             if expiry == "capture" {
-                clock.advance(Duration::from_secs(4));
+                clock.advance(TEST_RUN_REGISTRATION_DURABILITY_BUDGET - Duration::from_secs(1));
                 TEST_TEST_RUN_REGISTRATION_NEXT_LOCK.with(|slot| {
                     *slot.borrow_mut() =
                         Some(Box::new(move || clock.advance(Duration::from_secs(1))));
                 });
             } else {
-                clock.advance(Duration::from_secs(5));
+                clock.advance(TEST_RUN_REGISTRATION_DURABILITY_BUDGET);
             }
         });
         fixture
@@ -1120,8 +1119,9 @@ fn staged_and_unbound_runs_keep_their_existing_capture_deadline_behavior() {
                 // The first diagnostic lock resolves the project. The next
                 // is capture; no new production clock lock intervenes.
                 TEST_TEST_RUN_REGISTRATION_NEXT_LOCK.with(|next| {
-                    *next.borrow_mut() =
-                        Some(Box::new(move || clock.advance(Duration::from_secs(5))));
+                    *next.borrow_mut() = Some(Box::new(move || {
+                        clock.advance(TEST_RUN_REGISTRATION_DURABILITY_BUDGET)
+                    }));
                 });
             }));
         });
