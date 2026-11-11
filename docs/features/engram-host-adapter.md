@@ -1386,6 +1386,17 @@ happens elsewhere. The agent therefore names the item's worktree once with
   distinct from current-claim SelectionLoss instructions, whose existing
   suppression and acknowledgement rules remain unchanged.
 
+  Journal capacity is separate from the visible named-root table.
+  `GET /api/diagnostics/named-root-journal` returns only bounded host-memory
+  counts: the journal limit and entry count, selected roots, retained and
+  reclaimable entries, and exclusive primary retention reasons. The first
+  matching protection owns each count; known claim and captured-generation
+  references across all sessions outrank uncertain captures. Overlapping
+  references are not added again. Reads neither compact nor settle anything and expose no identities,
+  paths, commands or source payloads. Pending or unavailable capture results
+  currently retain otherwise unrelated journal history; a census is a current
+  observation, not proof of what caused an earlier capacity refusal.
+
   An operator can see and release retained entries through the host API
   ([`GET /api/engram/named-roots` and
   `POST /api/engram/named-roots/release`](../architecture.md)). The status rows,
@@ -2405,6 +2416,13 @@ the ordinary recovery, which reads it again after its owner, so a pass makes at
 most two reads of a root and a live root costs one, once per cooldown. An unanswered
 read is reported as that attempt's outcome, with the root's authority untouched. A
 release or an own clear acts without that read.
+At startup, the host inventories work with retained recovery obligations and
+continues its bounded sweep on later test-run index ticks. A candidate or time
+limit leaves unattempted work for the next tick; it does not mark the whole
+store finished. Each work gets one bounded startup attempt. Failures retain
+their existing custody and are retried by later work openings, rather than
+spinning on every tick. This progress is memory-only and starts afresh after a
+host restart; it supplies no canonical proof itself.
 Legacy numeric history and evaluator tokens require canonical recovery and
 cannot be silently promoted into the new history epoch. Clear, release,
 removal and compaction never reset history. A

@@ -379,6 +379,7 @@ Local operator routes are under `/api`; pair-authenticated domain routes use a d
 | GET | `/api/diagnostics/persistence` | Read bounded, passive [persistence writer diagnostics](features/persistence-diagnostics.md) |
 | GET | `/api/diagnostics/host-lifecycle` | Read how the previous instance ended, from the [host lifecycle journal](features/host-lifecycle-journal.md) |
 | GET | `/api/diagnostics/runtime-observations` | Read [runtime observation custody counts](features/runtime-observation-counts.md), without payloads or store access |
+| GET | `/api/diagnostics/named-root-journal` | Bounded, read-only host-memory census `{serverInstanceId, revision, journal: {limit, entries, selectedRoots, retained, reclaimable, primaryReasons}}`. Primary reasons are exclusive first-applicable protections from the compactor; their counts sum to retained. No journal rows, identities, paths, commands, source payloads or store reads. Does not compact, persist or settle transitions. Capture results can advance while counted. See [source root](features/engram-host-adapter.md#source-root). |
 | GET | `/api/diagnostics/mailbox-relay-wakes` | Read undelivered relay home wakes, recorded refusals, bounded home RPC 5xx and federation durability histories ([native mailbox relay](features/native-mailbox-relay.md)) |
 | GET | `/api/file?path=...` | Read file content |
 | PUT | `/api/file` | Write file content |

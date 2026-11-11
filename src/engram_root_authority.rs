@@ -1480,6 +1480,19 @@ impl AppState {
         preferred: Option<&str>,
         budget: Duration,
     ) {
+        let _ = self.recover_engram_authority_work_batch(session_id, preferred, budget, None);
+    }
+
+    /// A startup sweep supplies its remaining work so a bounded pass cannot
+    /// repeatedly spend its budget on an already-attempted failure. Return
+    /// only work actually reached before the deadline, not just selected work.
+    fn recover_engram_authority_work_batch(
+        &self,
+        session_id: &str,
+        preferred: Option<&str>,
+        budget: Duration,
+        remaining_work: Option<&BTreeSet<String>>,
+    ) -> BTreeSet<String> {
         let clock = self.engram_budget_clock();
         let deadline = clock.now() + budget.min(Duration::from_secs(2));
         let (store, runs, root_runs) = {
@@ -1490,7 +1503,7 @@ impl AppState {
                     .flatten()
                     .and_then(|target| target.settings.authority_store_key)
             else {
-                return;
+                return BTreeSet::new();
             };
             // A retired run's journal that some path reopened is settled here:
             // that run is never read again, so no read could settle it.
@@ -1613,14 +1626,19 @@ impl AppState {
                 // Stable: the rest keep their fair rotation behind it.
                 runs.sort_by_key(|binding| binding.work_id != preferred);
             }
+            if let Some(remaining) = remaining_work {
+                runs.retain(|binding| remaining.contains(&binding.work_id));
+            }
             runs.truncate(8);
             (store, runs, root_runs)
         };
+        let mut attempted = BTreeSet::new();
         for binding in runs {
             let left = deadline.saturating_duration_since(clock.now());
             if left.is_zero() {
                 break;
             }
+            attempted.insert(binding.work_id.clone());
             self.inner
                 .lock()
                 .expect("state mutex poisoned")
@@ -1665,6 +1683,7 @@ impl AppState {
                 let _ = self.publish_engram_authority_until(&store, &owner, deadline);
             }
         }
+        attempted
     }
 
     /// Reads a settled root's run before anything touches its work's authority:

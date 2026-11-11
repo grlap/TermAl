@@ -366,6 +366,10 @@ fn app_router_with_acceptance_policy_limiter(
             get(get_runtime_observation_counts),
         )
         .route(
+            "/api/diagnostics/named-root-journal",
+            get(get_engram_root_journal_diagnostics),
+        )
+        .route(
             "/api/diagnostics/mailbox-relay-wakes",
             get(get_mailbox_relay_wake_diagnostics),
         )
@@ -1182,6 +1186,7 @@ include!("engram_observation_source.rs");
 include!("engram_source_roots.rs");
 include!("engram_naming_source.rs");
 include!("engram_named_root_binding.rs");
+include!("engram_named_root_journal.rs");
 include!("engram_root_capture_reason.rs");
 include!("engram_root_authority.rs");
 include!("engram_retained_run_settlement.rs");

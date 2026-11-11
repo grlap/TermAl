@@ -313,6 +313,210 @@ fn host_startup_waits_for_a_reader_of_the_store() {
     assert!(startup_read(&fixture, &fixture.store));
 }
 
+fn inactive_startup_work(fixture: &Retained) -> Vec<EngramControlWorkBinding> {
+    let inactive = {
+        let mut inner = fixture
+            .claimed
+            .state
+            .inner
+            .lock()
+            .expect("state mutex poisoned");
+        let history = history_mut(&mut inner, &fixture.store, &fixture.current.work_id).clone();
+        let journal = engram_root_journal(
+            &inner.engram_named_root_journal,
+            &fixture.store,
+            &fixture.current.claim_id,
+        )
+        .expect("the current name has its journal")
+        .clone();
+        (0..9)
+            .map(|index| {
+                let mut binding = fixture.earlier.clone();
+                binding.work_id = format!("inactive-work-{index}");
+                binding.run_id = format!("inactive-run-{index}");
+                binding.claim_id = format!("inactive-claim-{index}");
+                binding.root_execution_id = format!("inactive-execution-{index}");
+                let mut history = history.clone();
+                history.work_id = binding.work_id.clone();
+                history.transition = None;
+                history.frontier = None;
+                history.proofs.clear();
+                history.retired_runs.clear();
+                history.retirements.clear();
+                history.unresolved_runs = vec![binding.clone()];
+                inner.engram_work_naming_history.push(history);
+                let mut journal = journal.clone();
+                journal.claim_id = binding.claim_id.clone();
+                journal.read_binding = Some(binding.clone());
+                journal.pending = None;
+                journal.reconciliation = None;
+                let event = &mut journal.confirmed.as_mut().expect("a confirmed name").0;
+                event.root.work_id = binding.work_id.clone();
+                event.root.claim_id = binding.claim_id.clone();
+                event.root.named_by_session = "removed-naming-session".to_owned();
+                journal.retire(EngramRootRetirement::NamingSessionRemoved);
+                inner.engram_named_root_journal.push(journal);
+                binding
+            })
+            .collect::<Vec<_>>()
+    };
+    for binding in &inactive {
+        engram_answers(
+            fixture,
+            &binding.claim_id,
+            refusal("run_unknown", "the inactive run is unknown in this store"),
+        );
+    }
+    inactive
+}
+
+#[test]
+fn startup_ticks_reach_inactive_work_beyond_the_first_recovery_batch() {
+    enable_background_reads();
+    let fixture = retained("startup-inactive-batches");
+    engram_answers(
+        &fixture,
+        &fixture.earlier.claim_id,
+        refusal("run_unknown", "the run is unknown in this store"),
+    );
+    let inactive = inactive_startup_work(&fixture);
+    // No turn is opened for any inactive work. The host's ordinary ticks
+    // must finish the bounded startup sweep instead of abandoning its tail.
+    for _ in 0..3 {
+        fixture
+            .claimed
+            .state
+            .schedule_engram_retained_run_reads(None);
+        join_background_reads();
+    }
+    let mut inner = fixture
+        .claimed
+        .state
+        .inner
+        .lock()
+        .expect("state mutex poisoned");
+    for binding in &inactive {
+        let history = history_mut(&mut inner, &fixture.store, &binding.work_id);
+        assert!(
+            history.run_is_retired(binding),
+            "{} never reached its authoritative read",
+            binding.work_id
+        );
+        assert!(history.unresolved_runs.is_empty());
+    }
+    engram_compact_root_journal(&mut inner);
+    assert!(
+        inner
+            .engram_named_root_journal
+            .iter()
+            .all(|journal| inactive
+                .iter()
+                .all(|binding| journal.claim_id != binding.claim_id)),
+        "settled inactive journals must release their slots"
+    );
+    assert!(
+        inner
+            .engram_work_source_roots
+            .iter()
+            .any(|root| root.claim_id == fixture.current.claim_id),
+        "the live root remains selected"
+    );
+}
+
+#[test]
+fn startup_sweep_reaches_its_tail_without_retrying_or_discarding_failed_work() {
+    enable_background_reads();
+    let fixture = retained("startup-failed-work-tail");
+    let inactive = inactive_startup_work(&fixture);
+    {
+        let mut owner = fixture
+            .claimed
+            .transport
+            .named_roots
+            .lock()
+            .expect("owner mutex poisoned");
+        let owner = owner.as_mut().expect("named-root owner enabled");
+        owner
+            .root_read_failures
+            .insert(fixture.earlier.claim_id.clone());
+        for binding in inactive.iter().take(7) {
+            owner.root_read_errors.remove(&binding.claim_id);
+            owner.root_read_failures.insert(binding.claim_id.clone());
+        }
+    }
+    let before = {
+        let inner = fixture
+            .claimed
+            .state
+            .inner
+            .lock()
+            .expect("state mutex poisoned");
+        inner
+            .engram_named_root_journal
+            .iter()
+            .filter(|journal| {
+                inactive
+                    .iter()
+                    .take(7)
+                    .any(|binding| journal.claim_id == binding.claim_id)
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    for _ in 0..3 {
+        fixture
+            .claimed
+            .state
+            .schedule_engram_retained_run_reads(None);
+        join_background_reads();
+    }
+    assert!(
+        startup_read(&fixture, &fixture.store),
+        "each startup work was attempted"
+    );
+    {
+        let inner = fixture
+            .claimed
+            .state
+            .inner
+            .lock()
+            .expect("state mutex poisoned");
+        for binding in inactive.iter().skip(7) {
+            let history = inner
+                .engram_work_naming_history
+                .iter()
+                .find(|history| history.work_id == binding.work_id)
+                .expect("inactive history");
+            assert!(
+                history.run_is_retired(binding),
+                "failed work cannot starve the tail"
+            );
+        }
+        for journal in &before {
+            assert_eq!(
+                engram_root_journal(
+                    &inner.engram_named_root_journal,
+                    &fixture.store,
+                    &journal.claim_id
+                ),
+                Some(journal),
+                "transport failure must keep the exact journal custody"
+            );
+        }
+    }
+    let requests = fixture.claimed.transport.requests().len();
+    fixture
+        .claimed
+        .state
+        .schedule_engram_retained_run_reads(None);
+    assert_eq!(
+        started_reads(),
+        0,
+        "startup never spins on already-attempted failures"
+    );
+    assert_eq!(fixture.claimed.transport.requests().len(), requests);
+}
+
 #[test]
 fn another_project_refusal_logs_a_host_binding_bug_and_store_damage_logs_one_alarm() {
     TEST_ENGRAM_RETAINED_RUN_LOG.with(|log| log.borrow_mut().clear());

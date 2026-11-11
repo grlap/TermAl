@@ -342,9 +342,12 @@ fn engram_recovery_run_held_locked(inner: &StateInner, binding: &EngramControlWo
 /// host reads again.
 #[derive(Clone, Debug, Default)]
 struct EngramRetainedRunReads {
-    /// Stores that had their startup read. A store without a reader yet is
-    /// tried again on a later tick; one that had it is not read again.
+    /// Stores whose startup work has each had a bounded recovery attempt.
     startup_read: BTreeSet<EngramAuthorityStoreKey>,
+    /// The initial work inventory still owed an attempt. A pass's time or
+    /// candidate limit leaves its tail here for later ticks. Failed attempts
+    /// are not retried by startup; a later work opening owns those retries.
+    startup_pending_work: BTreeMap<EngramAuthorityStoreKey, BTreeSet<String>>,
     /// Stores with a read running; at most one per store.
     in_flight: BTreeSet<EngramAuthorityStoreKey>,
 }
@@ -381,8 +384,8 @@ impl Drop for EngramRetainedRunReadFlight {
 impl AppState {
     /// Starts bounded reads of retained runs off every lock. With a session,
     /// at the opening of its turn: its work's retained runs are read first.
-    /// Without one, at host startup: each store with retained runs is read
-    /// once a session can read it. No read starts while a reclamation pass
+    /// Without one, at host startup: sweep each store's retained work across
+    /// bounded ticks once a reader exists. No read starts while a reclamation pass
     /// is running. A reclamation or release that starts during a read is not
     /// held back: owner fencing makes one of them a superseded owner, which
     /// fails closed.
@@ -429,17 +432,36 @@ impl AppState {
                     if owed.is_empty() {
                         return;
                     }
-                    let stores = inner
-                        .engram_work_naming_history
-                        .iter()
-                        .filter(|history| owed.contains(&history.store))
-                        .filter(|history| engram_history_needs_recovery_locked(&inner, history))
-                        .map(|history| history.store.clone())
-                        .collect::<BTreeSet<_>>();
+                    let mut recoverable: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
+                    for history in &inner.engram_work_naming_history {
+                        if owed.contains(&history.store)
+                            && engram_history_needs_recovery_locked(&inner, history)
+                        {
+                            recoverable
+                                .entry(history.store.clone())
+                                .or_default()
+                                .insert(history.work_id.clone());
+                        }
+                    }
+                    let mut stores = BTreeSet::new();
+                    for store in &owed {
+                        let current = recoverable.get(store).cloned().unwrap_or_default();
+                        let pending = inner
+                            .engram_retained_run_reads
+                            .startup_pending_work
+                            .entry(store.clone())
+                            .or_insert_with(|| current.clone());
+                        // Other maintenance may already have settled an owed work.
+                        pending.retain(|work| current.contains(work));
+                        if !pending.is_empty() {
+                            stores.insert(store.clone());
+                        }
+                    }
                     // A store with nothing to recover at startup is done; a
                     // run retained later is read when its turn opens.
                     for store in owed.difference(&stores) {
                         inner.engram_retained_run_reads.startup_read.insert(store.clone());
+                        inner.engram_retained_run_reads.startup_pending_work.remove(store);
                     }
                     if stores.is_empty() {
                         return;
@@ -471,27 +493,41 @@ impl AppState {
             let mut reads = Vec::new();
             for (store, reader, work) in chosen {
                 if inner.engram_retained_run_reads.in_flight.insert(store.clone()) {
-                    if work.is_none() {
-                        inner.engram_retained_run_reads.startup_read.insert(store.clone());
-                    }
-                    reads.push((store, reader, work));
+                    let remaining = work.is_none().then(|| {
+                        inner.engram_retained_run_reads.startup_pending_work
+                            .get(&store).cloned().unwrap_or_default()
+                    });
+                    reads.push((store, reader, work, remaining));
                 }
             }
             reads
         };
-        for (store, reader, work) in reads {
+        for (store, reader, work, remaining) in reads {
             let state = self.clone();
-            let flight = EngramRetainedRunReadFlight { state: self.clone(), store };
+            let flight = EngramRetainedRunReadFlight { state: self.clone(), store: store.clone() };
             let spawned = std::thread::Builder::new()
                 .name("engram-retained-run-read".to_owned())
                 .spawn(move || {
                     let _flight = flight;
                     // The recovery publishes and persists what it settles.
-                    state.recover_engram_authority_runs_preferring(
+                    let attempted = state.recover_engram_authority_work_batch(
                         &reader,
                         work.as_deref(),
                         Duration::from_secs(2),
+                        remaining.as_ref(),
                     );
+                    if remaining.is_some() {
+                        let mut inner = state.inner.lock().expect("state mutex poisoned");
+                        if let Some(pending) = inner.engram_retained_run_reads
+                            .startup_pending_work.get_mut(&store)
+                        {
+                            pending.retain(|work| !attempted.contains(work));
+                            if pending.is_empty() {
+                                inner.engram_retained_run_reads.startup_pending_work.remove(&store);
+                                inner.engram_retained_run_reads.startup_read.insert(store);
+                            }
+                        }
+                    }
                 });
             match spawned {
                 #[cfg(test)]
