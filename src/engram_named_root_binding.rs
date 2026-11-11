@@ -1555,7 +1555,7 @@ impl AppState {
                 ));
             }
         }
-        engram_compact_root_journal(inner);
+        let census = engram_compact_root_journal_with_census(inner);
         let existing = inner.engram_named_root_journal.iter().position(|journal| {
             journal.store == event.root.store && journal.claim_id == event.root.claim_id
         });
@@ -1563,9 +1563,10 @@ impl AppState {
             Some(index) => index,
             None => {
                 if inner.engram_named_root_journal.len() >= engram_named_root_journal_limit(inner) {
-                    return Err(ApiError::conflict(
-                        engram_root_journal_census(inner).capacity_message(),
-                    ));
+                    let census = census.ok_or_else(|| {
+                        ApiError::internal("full journal has no compaction census")
+                    })?;
+                    return Err(ApiError::conflict(census.capacity_message()));
                 }
                 inner
                     .engram_named_root_journal

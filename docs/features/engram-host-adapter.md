@@ -1402,6 +1402,12 @@ happens elsewhere. The agent therefore names the item's worktree once with
   with a terminal failure keeps its persisted diagnostic but no longer holds
   journal custody; pending and retryable jobs keep their protection. Other
   references can still protect the same journal after a job becomes terminal.
+  Each compaction or census pass indexes custody inventories once, then uses
+  the same retention predicate and first-protection order for every entry.
+  Capture results are sampled lazily with nonblocking locks, at most once per
+  capture inventory entry in that pass; pending or unavailable results keep
+  their conservative protection through the pass. A full admission refusal
+  reuses its compaction pass's census rather than rescanning the inventories.
 
   An operator can see and release retained entries through the host API
   ([`GET /api/engram/named-roots` and

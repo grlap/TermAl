@@ -69,7 +69,7 @@ const ENGRAM_CONTROL_MAX_FRAME_BYTES: usize = 256 * 1_024;
 const ENGRAM_DOCTOR_MAX_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
 const ENGRAM_GLOBAL_DISABLE_ENV: &str = "TERMAL_ENGRAM_DISABLED";
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EngramAuthorityStoreKey {
     database_path: PathBuf,

@@ -50,6 +50,8 @@ mod source_id;
 #[path = "engram_named_root_failure_diagnostics.rs"]
 mod failure_diagnostics;
 
+#[path = "engram_journal_custody_index.rs"]
+mod journal_custody_index;
 #[path = "engram_named_root_journal.rs"]
 mod journal_diagnostics;
 
