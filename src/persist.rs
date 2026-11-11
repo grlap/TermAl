@@ -25,6 +25,8 @@ in separate files. The crate still compiles as one `include!()`-assembled
 module, so no visibility changes are required.
 */
 
+include!("persist_boot_timings.rs");
+
 /// Resolves persistence path.
 fn resolve_persistence_path(default_workdir: &str) -> PathBuf {
     resolve_termal_data_dir(default_workdir).join("termal.sqlite")
@@ -1089,18 +1091,41 @@ fn load_state_from_sqlite_with_connection(
     path: &FsPath,
     defer_delegations: bool,
 ) -> Result<(Option<StateInner>, rusqlite::Connection)> {
-    let connection = open_sqlite_state_connection_unconfigured(path)?;
-    let persisted = ensure_sqlite_state_schema_for_load_path(&connection, path)?;
+    let mut timings = BootStateLoadTimings::new(defer_delegations);
+    let result = load_state_from_sqlite_with_timings(path, defer_delegations, &mut timings);
+    timings.log();
+    result
+}
+
+fn load_state_from_sqlite_with_timings(
+    path: &FsPath,
+    defer_delegations: bool,
+    timings: &mut BootStateLoadTimings,
+) -> Result<(Option<StateInner>, rusqlite::Connection)> {
+    let started = timings.start();
+    let opened = open_sqlite_state_connection_unconfigured(path);
+    timings.finish(BootStateLoadPhase::Open, started);
+    let connection = opened?;
+    let started = timings.start();
+    let persisted = ensure_sqlite_state_schema_for_load_path(&connection, path);
+    timings.finish(BootStateLoadPhase::SchemaMetadata, started);
+    let persisted = persisted?;
+    let started = timings.start();
+    let loaded_sessions =
+        load_session_records_from_sqlite_with_skipped_and_timings(&connection, path, timings);
+    timings.finish(BootStateLoadPhase::Sessions, started);
     let (mut session_records, mut quarantined_session_ids, mut skipped_session_records) =
-        load_session_records_from_sqlite_with_skipped(&connection, path)?;
+        loaded_sessions?;
     let (delegation_records, quarantined_delegation_ids) = if defer_delegations {
         (Vec::new(), BTreeSet::new())
     } else {
+        let _timing = timings.scoped(BootStateLoadPhase::Delegations);
         load_delegation_records_from_sqlite(&connection, path)?
     };
     let Some(mut persisted) = persisted else {
         return Ok((None, connection));
     };
+    let adoption_timing = timings.scoped(BootStateLoadPhase::SessionAdoption);
     let project_ids = persisted
         .projects
         .iter()
@@ -1141,10 +1166,14 @@ fn load_state_from_sqlite_with_connection(
             worker_started: false,
         };
     }
+    drop(adoption_timing);
     let mut inner = persisted
-        .into_inner()
+        .into_inner_with_boot_timings(timings)
         .with_context(|| format!("failed to validate state from `{}`", path.display()))?;
-    bind_loaded_federation(&mut inner, &connection, path)?;
+    let started = timings.start();
+    let bound = bind_loaded_federation(&mut inner, &connection, path);
+    timings.finish(BootStateLoadPhase::FederationBind, started);
+    bound?;
     Ok((Some(inner), connection))
 }
 
