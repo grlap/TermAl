@@ -412,7 +412,14 @@ impl PersistedState {
     }
 
     /// Converts the value into inner.
+    #[cfg(test)]
     fn into_inner(self) -> Result<StateInner> {
+        self.into_inner_with_boot_timings(&mut BootStateLoadTimings::new(false))
+    }
+
+    fn into_inner_with_boot_timings(self, timings: &mut BootStateLoadTimings) -> Result<StateInner> {
+        // Includes obligation and checkpoint-mirror validation before conversion.
+        let session_timing = timings.scoped(BootStateLoadPhase::SessionRebuild);
         self.engram_session_obligations.validate()?;
         // Historical mirrors are validated before any row is converted. They
         // remain passive JSON and cannot reconstruct dispatch ownership.
@@ -436,6 +443,8 @@ impl PersistedState {
             }
             Ok(record)
         }).collect::<Result<Vec<_>>>()?;
+        drop(session_timing);
+        let _derived_timing = timings.scoped(BootStateLoadPhase::DerivedRebuild);
         let terminal_unbound_registrations: HashSet<_> = self
             .test_run_registrations
             .values()

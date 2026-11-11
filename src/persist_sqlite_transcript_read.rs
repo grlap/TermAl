@@ -11,9 +11,22 @@ fn load_session_records_from_sqlite(
     load_session_records_from_sqlite_with_skipped(connection, path).map(|(records, _, _)| records)
 }
 
+#[cfg(test)]
 fn load_session_records_from_sqlite_with_skipped(
     connection: &rusqlite::Connection,
     path: &FsPath,
+) -> Result<(Vec<PersistedSessionRecord>, BTreeSet<String>, usize)> {
+    load_session_records_from_sqlite_with_skipped_and_timings(
+        connection,
+        path,
+        &mut BootStateLoadTimings::new(false),
+    )
+}
+
+fn load_session_records_from_sqlite_with_skipped_and_timings(
+    connection: &rusqlite::Connection,
+    path: &FsPath,
+    timings: &mut BootStateLoadTimings,
 ) -> Result<(Vec<PersistedSessionRecord>, BTreeSet<String>, usize)> {
     let mut statement = connection
         .prepare("SELECT id, value_json FROM sessions ORDER BY rowid")
@@ -46,29 +59,39 @@ fn load_session_records_from_sqlite_with_skipped(
             }
         };
         let loaded_record = (|| -> Result<(PersistedSessionRecord, bool)> {
-            let mut record: PersistedSessionRecord = serde_json::from_str(&encoded)
-                .with_context(|| format!("failed to parse persisted session `{session_id}`"))?;
-            if record.session.id != session_id {
-                bail!(
-                    "row id `{session_id}` does not match embedded id `{}`",
-                    record.session.id
-                );
-            }
-            normalize_persisted_session_prompt_history(&mut record.session);
-            validate_persisted_session_fields(
-                &record.session,
-                record.external_session_id.as_deref(),
-            )
-            .with_context(|| format!("persisted session `{session_id}` failed validation"))?;
-            validate_remote_proxy_identity(
-                record.remote_id.as_deref(),
-                record.remote_session_id.as_deref(),
-            )
-            .with_context(|| {
-                format!("persisted session `{session_id}` has invalid remote proxy identity")
-            })?;
-            load_persisted_session_tail(connection, path, &mut record)?;
-            let missing_history = load_persisted_prompt_history(connection, path, &mut record)?;
+            let mut record = {
+                let _decode_timing = timings.scoped(BootStateLoadPhase::SessionDecode);
+                let mut record: PersistedSessionRecord = serde_json::from_str(&encoded)
+                    .with_context(|| format!("failed to parse persisted session `{session_id}`"))?;
+                if record.session.id != session_id {
+                    bail!(
+                        "row id `{session_id}` does not match embedded id `{}`",
+                        record.session.id
+                    );
+                }
+                normalize_persisted_session_prompt_history(&mut record.session);
+                validate_persisted_session_fields(
+                    &record.session,
+                    record.external_session_id.as_deref(),
+                )
+                .with_context(|| format!("persisted session `{session_id}` failed validation"))?;
+                validate_remote_proxy_identity(
+                    record.remote_id.as_deref(),
+                    record.remote_session_id.as_deref(),
+                )
+                .with_context(|| {
+                    format!("persisted session `{session_id}` has invalid remote proxy identity")
+                })?;
+                record
+            };
+            let started = timings.start();
+            let tail = load_persisted_session_tail(connection, path, &mut record);
+            timings.finish(BootStateLoadPhase::TranscriptTails, started);
+            tail?;
+            let started = timings.start();
+            let history = load_persisted_prompt_history(connection, path, &mut record);
+            timings.finish(BootStateLoadPhase::PromptHistories, started);
+            let missing_history = history?;
             Ok((record, missing_history))
         })();
         match loaded_record {

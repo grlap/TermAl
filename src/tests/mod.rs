@@ -220,6 +220,7 @@ mod handoffs;
 mod host_lifecycle;
 mod peer_messages;
 mod persist;
+mod persist_boot_timings;
 mod persist_delta;
 mod persist_fence;
 mod persist_message_delta;
