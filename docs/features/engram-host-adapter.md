@@ -1485,18 +1485,29 @@ happens elsewhere. The agent therefore names the item's worktree once with
   is not reported as a check of the root. Engram independently requires the verification and its
   producer to match the active root's workspace and generation.
 - **Ordinary turns after a focus change.** Prompt handoff does not wait for
-  an Engram authority read. If the closing worker finds another focused held
-  item than the opening's cached association, that turn remains uncaptured.
-  Its bounded notice identifies the turn and the changed work association.
-  The worker can use one canonical root read, within its closing budget, to
+  an Engram authority read. A switch to another held item does not move the
+  earlier turn's observations: its exact claim must still be held, and its
+  named root must have been confirmed at the opening and remain unchanged at
+  the closing read. The report uses that original binding and historical
+  root cut. A released, expired, unavailable or changed claim, an ended root
+  binding, or an opening without confirmed attribution keeps the scope-change
+  refusal and bounded uncaptured-turn notice. Focus alone cannot repair one.
+  After retaining the immutable report in the session row, the worker can read
+  the prospective root, within its closing budget, to
   refresh the session for a later opening. An already named root must match
   its acknowledged local path and generation; an unnamed root needs canonical
   confirmation too. Publication uses the existing authority and durability
   fences, and occurs only while the same session is still between turns and
   no naming owns its binding. A settled work is read first; a refused read
   does not withdraw its acknowledged authority or create recovery debt.
-  If proof is unavailable or a session/root change races the read, nothing is
-  installed and the notice says to name the root for a later turn. No naming
+  If prospective proof is unavailable or a session/root change races the read,
+  no future association is installed; an already prepared report retains its
+  original attribution. If the session still has the old association, a notice
+  says to name or confirm the focused item's root for a later turn; it does
+  not describe the retained old report as uncaptured. Remote refresh calls
+  run outside the shutdown installation barrier, and cancellation prevents
+  a late cache or notice publication. For a refused earlier turn, the notice
+  says to name the root for a later turn. No naming
   event, grant or verification credit is created. A later quiet turn can then
   supply a sighting without a command or another name; the refused earlier
   turn is never rewritten or credited.

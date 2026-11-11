@@ -526,6 +526,15 @@ enum EngramRuntimeClosingOutcome {
     Policy(EngramObservationPolicyBasis),
     FocusChanged { binding: EngramControlWorkBinding, refreshed: bool },
     Report(EngramRuntimeObservationReport, Option<SourceBasisRefusal>),
+    // Process-local prospective work, never part of the persisted report.
+    // Install the old report before publishing the successor association.
+    ReportWithFocus {
+        report: EngramRuntimeObservationReport,
+        source_refusal: Option<SourceBasisRefusal>,
+        target: Box<EngramBindingTarget>,
+        binding: EngramControlWorkBinding,
+        deadline: std::time::Instant,
+    },
 }
 
 // An unmeasured closing cut still bounds the observed outcome/check facts.

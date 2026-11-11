@@ -1,7 +1,7 @@
 // Closing capture for observation reporting. Call on the observation
 // worker after retaining the trace and previous checkpoint endpoint under the
-// turn-result lock. A focus mismatch refuses this report and may refresh only
-// a future opening through the existing canonical authority owner.
+// turn-result lock. A focus switch preserves an exact still-held opening;
+// its prospective successor refresh follows installation of the old report.
 
 include!("engram_unadmitted_focus.rs");
 
@@ -115,12 +115,40 @@ impl AppState {
             },
             timeout()?,
         )?;
-        let Some(binding) = binding else {
+        let Some(mut binding) = binding else {
             return Err(runtime_observation_scope_changed(
                 &job.scope,
                 "connection or binding absent",
             ));
         };
+        let mut prospective_focus = None;
+        if job.scope.binding.as_ref() != Some(&binding) && current.work_id != binding.work_id {
+            let held = target
+                .adapter
+                .read_held_claims(&target.connection, timeout()?)?;
+            if select_engram_held_binding(
+                held.items.clone(),
+                held.omitted,
+                EngramBindingPreference {
+                    current: Some(current),
+                },
+            )
+            .as_ref()
+                != Some(&binding)
+            {
+                return Err(runtime_observation_scope_changed(
+                    &job.scope,
+                    &format!(
+                        "canonical claim {} / {}; held claims changed during the closing focus read",
+                        binding.work_id, binding.claim_id
+                    ),
+                ));
+            }
+            if runtime_observation_keeps_opening_scope(job, &held) {
+                prospective_focus = Some(binding);
+                binding = current.clone();
+            }
+        }
         if job.scope.binding.as_ref() != Some(&binding) {
             if job
                 .scope
@@ -363,7 +391,19 @@ impl AppState {
             observer,
             target.settings.call_timeout(),
         )
-        .map(|report| EngramRuntimeClosingOutcome::Report(report, source_refusal))
+        .map(|report| {
+            if let Some(binding) = prospective_focus {
+                EngramRuntimeClosingOutcome::ReportWithFocus {
+                    report,
+                    source_refusal,
+                    target: Box::new(target),
+                    binding,
+                    deadline,
+                }
+            } else {
+                EngramRuntimeClosingOutcome::Report(report, source_refusal)
+            }
+        })
     }
 }
 

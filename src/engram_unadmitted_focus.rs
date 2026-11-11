@@ -3,6 +3,34 @@
 // report. Validate one prospective root off-thread; publish its cache only
 // while the same session is still between turns.
 
+// Focus chooses a future opening, not the owner of an already observed turn.
+// Continue only an exact, still-held claim and the named root confirmed at
+// that turn's start. An omitted, unavailable or changed claim proves nothing.
+fn runtime_observation_keeps_opening_scope(
+    job: &EngramRuntimeClosingJob,
+    held: &EngramHeldClaims,
+) -> bool {
+    let Some(binding) = job.scope.binding.as_ref() else {
+        return false;
+    };
+    let Some(opening) = job.trace.opening_root.as_ref() else {
+        return false;
+    };
+    !job.trace.source_attribution_uncertain
+        && opening.store == job.scope.store
+        && &opening.binding == binding
+        && matches!((&opening.provenance, &job.scope.root), (
+            EngramRootCapture::Recorded { generation, state: EngramSourceRootState::Named, workspace_id },
+            EngramNamedRootState::Bound { generation: current, workspace_id: root, .. }
+        ) if generation == current && workspace_id == root)
+        && held.items.iter().any(|claim| {
+            claim.work_id == binding.work_id
+                && claim.claim_id == binding.claim_id
+                && claim.claim_fence == binding.claim_fence
+                && claim.control_binding.as_ref() == Some(binding)
+        })
+}
+
 fn runtime_observation_forward_revision(
     previous: &EngramControlWorkBinding,
     current: &EngramControlWorkBinding,
@@ -60,7 +88,11 @@ impl AppState {
                 return false;
             };
             let record = &inner.sessions[index];
-            record.active_turn_generation == generation
+            !self
+                .runtime_observation_lifetime
+                .stopping
+                .load(std::sync::atomic::Ordering::Acquire)
+                && record.active_turn_generation == generation
                 && target.budget_clock.now() < deadline
                 && matches!(
                     record.session.status,
@@ -215,6 +247,13 @@ impl AppState {
             // keep the existing owner guarded.
             self.publish_engram_authority_image_until(store, &owner, deadline)?;
         }
+        // Remote proof/recovery work must not hold the retirement barrier.
+        // Only the final cache mutation and its persistence need to drain
+        // before restore; a stopped worker cannot enter this publication.
+        let _install = self
+            .runtime_observation_lifetime
+            .enter("focus")
+            .ok_or_else(|| ApiError::conflict("focus refresh stopped before publication"))?;
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if !current(&inner)
             || engram_authority_work_unresolved(&inner, store, &binding.work_id)
@@ -252,6 +291,57 @@ impl AppState {
             )));
         }
         Ok(())
+    }
+
+    fn notice_runtime_observation_focus_refusal(
+        &self,
+        session: &str,
+        job: &EngramRuntimeClosingJob,
+        generation: u64,
+    ) -> Result<()> {
+        let Some(_install) = self.runtime_observation_lifetime.enter("focus_notice") else {
+            return Ok(());
+        };
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session) else {
+            return Ok(());
+        };
+        let record = &inner.sessions[index];
+        // A refusal of this old refresh must not overwrite a newer opening,
+        // binding, reset or deletion's notice. It never changes the old report.
+        if self
+            .runtime_observation_lifetime
+            .stopping
+            .load(std::sync::atomic::Ordering::Acquire)
+            || record.active_turn_generation != generation
+            || !matches!(
+                record.session.status,
+                SessionStatus::Idle | SessionStatus::Error
+            )
+            || record.engram.unadmitted_active_turn.is_some()
+            || record.runtime_stop_in_progress
+            || record.engram.observation_delete_requested
+            || session_resource_reset_in_progress(&inner, record)
+            || job.scope.require_current(&inner, session).is_err()
+        {
+            return Ok(());
+        }
+        let notice = "[TermAl] The previous turn's report is retained under its original item. No future source root was installed after the focus change. Name or confirm the focused item's root for a later turn; until then the session's source association still refers to the previous item.".to_owned();
+        inner.sessions[index]
+            .engram
+            .set_pending_source_root_line(notice.clone());
+        let message = Message::Text {
+            attachments: Vec::new(),
+            id: inner.next_message_id(),
+            timestamp: stamp_now(),
+            author: Author::System,
+            text: notice,
+            expanded_text: None,
+            source: None,
+        };
+        push_message_on_record(&mut inner.sessions[index], message);
+        inner.stamp_session_at_index(index);
+        self.commit_session_locked(&mut inner, session).map(|_| ())
     }
 }
 

@@ -381,6 +381,15 @@ impl AppState {
         let Some(_install) = self.runtime_observation_lifetime.enter("capture") else {
             return Ok(());
         };
+        let (result, prospective_focus) = match result {
+            Ok(EngramRuntimeClosingOutcome::ReportWithFocus {
+                report, source_refusal, target, binding, deadline,
+            }) => (
+                Ok(EngramRuntimeClosingOutcome::Report(report, source_refusal)),
+                Some((target, binding, deadline)),
+            ),
+            result => (result, None),
+        };
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {
             return Ok(());
@@ -493,6 +502,7 @@ impl AppState {
                 }
                 state.unadmitted_closing_jobs.remove(position);
             }
+            Ok(EngramRuntimeClosingOutcome::ReportWithFocus { .. }) => unreachable!(),
             Err(error) => {
                 let failed = expected.failed(session_id, &error);
                 if matches!(error.code.as_deref(), Some(
@@ -536,7 +546,20 @@ impl AppState {
         } else {
             self.persist_session_internal_locked(&inner, session_id)?;
         }
+        let focus_generation = inner.sessions[index].active_turn_generation;
         drop(inner);
+        drop(_install);
+        // Both fields live in the same session row: a prospective cache
+        // publication must retain the old immutable report in that row too.
+        // A crash must never leave only a moved cache and an unprepared job.
+        if let Some((target, binding, deadline)) = prospective_focus
+            && let Err(error) = self.refresh_runtime_observation_focus(
+                session_id, expected, &target, &binding, deadline,
+            )
+        {
+            eprintln!("engram> prospective observation focus refresh refused: {}", error.message);
+            self.notice_runtime_observation_focus_refusal(session_id, expected, focus_generation)?;
+        }
         #[cfg(test)]
         self.runtime_observation_lifetime.observe("closing_installed");
         Ok(())

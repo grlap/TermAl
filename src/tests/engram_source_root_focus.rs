@@ -388,7 +388,146 @@ fn a_revision_advance_keeps_changed_claims_and_roots_unconfirmed() {
 }
 
 #[test]
-fn a_focus_change_refuses_one_close_then_captures_the_next_quiet_turn() {
+fn switching_between_held_named_items_keeps_the_previous_turns_scope() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let label = "held-named-focus-switch";
+    let (turn, first_path) = confirmation_root(label);
+    let transport = FocusSelectingTransport::new(turn.transport.clone());
+    turn.state.install_control_test_transport(transport.clone());
+    let mut held = naming_claim(label);
+    let first_binding = held.items[0].control_binding.clone().unwrap();
+    let second_binding = test_control_work_binding("held-named-second", 1);
+    held.items.push(second_claim(&second_binding));
+    let first = request_naming(&turn, label, Some(&first_path), vec![held.clone()]).unwrap();
+    let second_path = turn.root.join(".worktrees").join("held-second");
+    run_git_test_command(
+        &turn.root,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "held-second",
+            second_path.to_str().unwrap(),
+        ],
+    );
+    turn.transport.register_named_root_run(&second_binding);
+    focus(&turn, &held, &second_binding);
+    let second = turn
+        .state
+        .name_engram_source_root(
+            &turn.session_id,
+            EngramSourceRootRequest {
+                work: "w-second".to_owned(),
+                path: Some(Some(second_path.to_string_lossy().into_owned())),
+            },
+        )
+        .unwrap();
+    // Naming B registers its root but this producer fixture still accepts
+    // only A's observations until its explicit session association moves.
+    // Model B here, then move back to A only after B's report settles below.
+    turn.transport
+        .enable_named_roots(&turn.session_id, &second_binding);
+    let names_before = turn
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .engram_work_source_roots
+        .clone();
+    turn.begin("Finish the turn under the second named item before moving on.");
+    let previous_ref = observed_turn_ref(&turn);
+    assert_eq!(
+        turn.record(|record| record.engram.observed_opening().unwrap().binding.clone()),
+        second_binding,
+        "the opening is already attributed before the focus switch"
+    );
+    let saw_retained_report = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let saw_report = saw_retained_report.clone();
+    let state = turn.state.clone();
+    let session = turn.session_id.clone();
+    let closed = previous_ref.clone();
+    let weak_transport = Arc::downgrade(&transport);
+    // The first read validates the original root. The second reads the next
+    // root, and must already see the old report retained in the session row.
+    *transport.root_read_hook.lock().unwrap() = Some(Box::new(move || {
+        let transport = weak_transport.upgrade().unwrap();
+        *transport.root_read_hook.lock().unwrap() = Some(Box::new(move || {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            assert!(
+                record
+                    .engram
+                    .unadmitted_reports
+                    .iter()
+                    .any(|report| report.host_turn_ref == closed)
+            );
+            assert!(
+                !record
+                    .engram
+                    .unadmitted_closing_jobs
+                    .iter()
+                    .any(|job| job.trace.host_turn_ref == closed)
+            );
+            saw_report.store(true, std::sync::atomic::Ordering::SeqCst);
+        }));
+    }));
+    focus(&turn, &held, &first_binding);
+    turn.end();
+    settle_close(&turn);
+
+    assert_named_sighting(
+        &turn,
+        &previous_ref,
+        &second_binding,
+        second.root.as_ref().unwrap(),
+        second.generation,
+    );
+    assert!(
+        saw_retained_report.load(std::sync::atomic::Ordering::SeqCst),
+        "the successor proof read follows installation of the original report"
+    );
+    turn.record(|record| {
+        assert!(
+            !record
+                .engram
+                .unadmitted_closing_jobs
+                .iter()
+                .any(
+                    |job| job.trace.host_turn_ref == previous_ref && job.terminal_failure.is_some()
+                ),
+            "an ordinary held-item switch must not terminalize the earlier turn"
+        )
+    });
+
+    // This fixture models one producer association at a time; move it only
+    // after the earlier report has been acknowledged, without changing names.
+    turn.transport
+        .enable_named_roots(&turn.session_id, &first_binding);
+    let prompt = turn
+        .begin_prompt("Continue under the first already named item.")
+        .prompt;
+    assert!(!prompt.contains("runtime_observation_scope_changed"));
+    assert!(!prompt.contains("not captured because focus moved"));
+    let next_ref = observed_turn_ref(&turn);
+    turn.end();
+    settle_close(&turn);
+    assert_named_sighting(
+        &turn,
+        &next_ref,
+        &first_binding,
+        first.root.as_ref().unwrap(),
+        first.generation,
+    );
+    assert_eq!(
+        turn.state.inner.lock().unwrap().engram_work_source_roots,
+        names_before,
+        "switching focus must neither rename nor rewrite either source root"
+    );
+}
+
+#[test]
+fn a_released_claim_refuses_one_close_then_captures_the_next_quiet_turn() {
     let _placement = TestTempRootDirectoryScope::repository_local();
     let label = "focus-before-ordinary-opening";
     let (turn, first_path) = confirmation_root(label);
@@ -430,6 +569,10 @@ fn a_focus_change_refuses_one_close_then_captures_the_next_quiet_turn() {
         .unwrap()
         .engram_work_source_roots
         .clone();
+    // The previous claim is no longer held. Unlike a focus-only switch,
+    // this must retain the old turn's scope-change refusal.
+    held.items
+        .retain(|claim| claim.claim_id != second_binding.claim_id);
     focus(&turn, &held, &first_binding);
     turn.begin("Observe the focused root without running a command or re-naming it.");
     let turn_ref = observed_turn_ref(&turn);
@@ -484,7 +627,7 @@ fn a_focus_change_refuses_one_close_then_captures_the_next_quiet_turn() {
 }
 
 #[test]
-fn a_claim_taken_mid_turn_changes_only_the_next_opening() {
+fn a_claim_taken_mid_turn_keeps_the_original_report_and_changes_the_next_opening() {
     let _placement = TestTempRootDirectoryScope::repository_local();
     let label = "focus-taken-mid-turn";
     let (turn, first_path) = confirmation_root(label);
@@ -492,18 +635,13 @@ fn a_claim_taken_mid_turn_changes_only_the_next_opening() {
         .install_control_test_transport(FocusSelectingTransport::new(turn.transport.clone()));
     let mut held = naming_claim(label);
     let first_binding = held.items[0].control_binding.clone().unwrap();
-    request_naming(&turn, label, Some(&first_path), vec![held.clone()]).unwrap();
+    let first = request_naming(&turn, label, Some(&first_path), vec![held.clone()]).unwrap();
     turn.begin("Keep this opening when a new claim is taken later.");
     let opening = turn.record(|record| record.engram.observed_opening().cloned().unwrap());
     let turn_ref = observed_turn_ref(&turn);
     let second_binding = test_control_work_binding("new-mid-turn-claim", 1);
     held.items.push(second_claim(&second_binding));
-    // The producer fixture admits observations for one session association.
-    // Model the newly held claim there too; registering its run alone would
-    // leave the producer rejecting B's observations under the old A scope.
-    // This changes no host cache and emits no root naming event.
-    turn.transport
-        .enable_named_roots(&turn.session_id, &second_binding);
+    turn.transport.register_named_root_run(&second_binding);
     focus(&turn, &held, &second_binding);
     assert_eq!(
         turn.record(|record| record.engram.observed_opening().cloned()),
@@ -511,31 +649,23 @@ fn a_claim_taken_mid_turn_changes_only_the_next_opening() {
     );
     turn.end();
     settle_close(&turn);
-    assert!(
-        !turn
-            .transport
-            .requests()
-            .iter()
-            .any(|sent| sent.request["idempotency_key"]
-                == format!("termal-source-sighting:{turn_ref}")),
-        "a changed close cannot relabel the earlier root as the new claim"
+    assert_named_sighting(
+        &turn,
+        &turn_ref,
+        &first_binding,
+        first.root.as_ref().unwrap(),
+        first.generation,
     );
-    turn.record(|record| {
-        assert!(
-            record
-                .engram
-                .unadmitted_closing_jobs
-                .iter()
-                .any(|job| job.trace.host_turn_ref == turn_ref && job.terminal_failure.is_some()),
-            "the immutable old closing scope stays refused"
-        )
-    });
+
+    // Move the fixture's one producer association after A's report settles.
+    turn.transport
+        .enable_named_roots(&turn.session_id, &second_binding);
 
     let prompt = turn
         .begin_prompt("The next ordinary turn belongs to the newly held claim.")
         .prompt;
-    assert!(prompt.contains("not captured because focus moved"));
-    assert!(prompt.contains("refreshed for a later opening"));
+    assert!(!prompt.contains("runtime_observation_scope_changed"));
+    assert!(!prompt.contains("not captured because focus moved"));
     assert_private_focus_notice(&prompt, &[&first_binding, &second_binding]);
     let next_ref = observed_turn_ref(&turn);
     turn.end();
