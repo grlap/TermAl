@@ -202,8 +202,8 @@ impl RecoveryHoldFixture {
 fn root_recovery_empty_batch_does_not_hold_state_for_retained_inventory() {
     let fixture = RecoveryHoldFixture::new(4096, ENGRAM_NAMED_ROOT_JOURNAL_LIMIT);
     let measure = fixture.measure(false);
-    eprintln!("root_recovery_hold empty=true sessions=4096 journals=256 samples=100 median_us={} second_worst_us={} max_us={}",
-        measure.median.0.as_micros(), measure.second_worst.as_micros(), measure.maximum.as_micros());
+    eprintln!("root_recovery_hold empty=true sessions=4096 journals={} samples=100 median_us={} second_worst_us={} max_us={}",
+        ENGRAM_NAMED_ROOT_JOURNAL_LIMIT, measure.median.0.as_micros(), measure.second_worst.as_micros(), measure.maximum.as_micros());
     assert!(measure.median.0 < RECOVERY_HOLD_BOUND,
         "empty recovery batch exceeds {RECOVERY_HOLD_BOUND:?}: {measure:?}");
 }
@@ -211,7 +211,7 @@ fn root_recovery_empty_batch_does_not_hold_state_for_retained_inventory() {
 #[test]
 fn root_recovery_active_batch_holds_stay_bounded_as_sessions_and_journals_grow() {
     let mut measurements = Vec::new();
-    for (sessions, journals) in [(64, 1), (1024, 1), (4096, 1), (4096, 256)] {
+    for (sessions, journals) in [(64, 1), (1024, 1), (4096, 1), (4096, ENGRAM_NAMED_ROOT_JOURNAL_LIMIT)] {
         let fixture = RecoveryHoldFixture::new(sessions, journals);
         let measure = fixture.measure(true);
         eprintln!("root_recovery_hold empty=false sessions={sessions} journals={journals} samples=100 median_us={} second_worst_us={} max_us={}",

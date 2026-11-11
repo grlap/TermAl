@@ -1386,7 +1386,8 @@ happens elsewhere. The agent therefore names the item's worktree once with
   distinct from current-claim SelectionLoss instructions, whose existing
   suppression and acknowledgement rules remain unchanged.
 
-  Journal capacity is separate from the visible named-root table.
+  The journal holds at most 1024 entries, separately from the visible named-root
+  table. Increasing capacity does not release pending or protected entries.
   `GET /api/diagnostics/named-root-journal` returns only bounded host-memory
   counts: the journal limit and entry count, selected roots, retained and
   reclaimable entries, and exclusive primary retention reasons. The first

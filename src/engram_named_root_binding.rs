@@ -485,7 +485,7 @@ struct EngramRootReconciliation {
     settled: bool,
 }
 
-const ENGRAM_NAMED_ROOT_JOURNAL_LIMIT: usize = 256;
+const ENGRAM_NAMED_ROOT_JOURNAL_LIMIT: usize = 1024;
 
 /// History belongs to a work, rather than the disposable receipts of its
 /// successive claims. The revision orders publication, not allocation.

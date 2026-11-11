@@ -3,6 +3,58 @@
 // ordinary-check setup come from engram_source_root_naming.rs (parent module).
 use super::*;
 
+#[test]
+fn a_new_naming_past_256_preserves_pending_journal_entries() {
+    let label = "journal-past-old-capacity";
+    let turn = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&turn.root);
+    request_naming(&turn, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    let before = {
+        let mut inner = turn.state.inner.lock().unwrap();
+        let template = inner.engram_named_root_journal[0]
+            .confirmed
+            .as_ref()
+            .unwrap()
+            .0
+            .clone();
+        inner.engram_work_source_roots.clear();
+        inner.engram_named_root_journal = (0..256)
+            .map(|i| {
+                let mut event = template.clone();
+                event.root.claim_id = format!("protected-claim-{i}");
+                EngramNamedRootJournal {
+                    store: event.root.store.clone(),
+                    claim_id: event.root.claim_id.clone(),
+                    read_binding: None,
+                    confirmed: None,
+                    pending: Some(event),
+                    obsolete: false,
+                    retirement: None,
+                    reconciliation: None,
+                }
+            })
+            .collect();
+        inner.engram_named_root_journal.clone()
+    };
+    let named = request_naming(&turn, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    let inner = turn.state.inner.lock().unwrap();
+    assert_eq!(inner.engram_named_root_journal.len(), 257);
+    assert_eq!(
+        &inner.engram_named_root_journal[..256],
+        before.as_slice(),
+        "admission must not discard pending intents to make room"
+    );
+    let added = &inner.engram_named_root_journal[256];
+    assert_eq!(
+        added.confirmed.as_ref().unwrap().0.root.generation,
+        named.generation
+    );
+    assert!(
+        added.pending.is_none(),
+        "the new naming completed through the host"
+    );
+}
+
 /// An ended-history image with one real live binding and an otherwise full
 /// journal. This is deliberately not a claim about today's running host.
 fn fill_settled_journal(turn: &EOCheckedTurn) -> (EngramNamedRootEvent, EngramControlWorkBinding) {
@@ -83,11 +135,11 @@ fn journal_census_explains_capacity_held_by_one_pending_capture() {
         let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
         let before = inner.engram_named_root_journal.clone();
         let census = engram_root_journal_census(&inner);
-        assert_eq!(census.entries, 256);
+        assert_eq!(census.entries, ENGRAM_NAMED_ROOT_JOURNAL_LIMIT);
         assert_eq!(census.selected_roots, 1);
         assert_eq!(
             census.primary_reasons[&EngramRootJournalRetention::CapturePending],
-            255
+            ENGRAM_NAMED_ROOT_JOURNAL_LIMIT - 1
         );
         assert_eq!(
             census.primary_reasons[&EngramRootJournalRetention::ConfirmedBinding],
@@ -99,7 +151,10 @@ fn journal_census_explains_capacity_held_by_one_pending_capture() {
             .expect_err("the pending capture currently pins all ended history");
         assert_eq!(refusal.status, StatusCode::CONFLICT);
         assert!(
-            refusal.message.contains("capturePending=255"),
+            refusal.message.contains(&format!(
+                "capturePending={}",
+                ENGRAM_NAMED_ROOT_JOURNAL_LIMIT - 1
+            )),
             "{}",
             refusal.message
         );
@@ -119,7 +174,7 @@ fn journal_census_explains_capacity_held_by_one_pending_capture() {
     );
     let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
     let census = engram_root_journal_census(&inner);
-    assert_eq!(census.reclaimable, 255);
+    assert_eq!(census.reclaimable, ENGRAM_NAMED_ROOT_JOURNAL_LIMIT - 1);
     turn.state
         .stage_engram_root_event_locked(&mut inner, &fresh, Some(&binding))
         .unwrap();
@@ -159,12 +214,12 @@ fn journal_census_distinguishes_a_busy_capture_from_a_completed_capture() {
         let census = engram_root_journal_census(&inner);
         assert_eq!(
             census.primary_reasons[&EngramRootJournalRetention::CaptureLockUnavailable],
-            255
+            ENGRAM_NAMED_ROOT_JOURNAL_LIMIT - 1
         );
         engram_compact_root_journal(&mut inner);
         assert_eq!(
             inner.engram_named_root_journal.len(),
-            256,
+            ENGRAM_NAMED_ROOT_JOURNAL_LIMIT,
             "no result-lock wait or custody loss"
         );
         drop(publication);
@@ -222,7 +277,7 @@ fn journal_census_claim_custody_outranks_another_sessions_pending_capture() {
     );
     assert_eq!(
         census.primary_reasons[&EngramRootJournalRetention::CapturePending],
-        254
+        ENGRAM_NAMED_ROOT_JOURNAL_LIMIT - 2
     );
     let first_index = inner.find_session_index(&turn.session_id).unwrap();
     let second_index = inner.find_session_index(&second_id).unwrap();
@@ -238,7 +293,7 @@ fn journal_census_claim_custody_outranks_another_sessions_pending_capture() {
         census.retained, 2,
         "finishing a capture cannot release another session's binding"
     );
-    assert_eq!(census.reclaimable, 254);
+    assert_eq!(census.reclaimable, ENGRAM_NAMED_ROOT_JOURNAL_LIMIT - 2);
     engram_compact_root_journal(&mut inner);
     assert_eq!(inner.engram_named_root_journal.len(), 2);
     inner.session_mut(&second_id).unwrap().engram.work_binding = None;
@@ -276,9 +331,13 @@ async fn journal_census_route_is_bounded_private_and_read_only() {
         .unwrap();
     let view: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(view["revision"], revision);
-    assert_eq!(view["journal"]["entries"], 256);
+    assert_eq!(view["journal"]["limit"], 1024);
+    assert_eq!(view["journal"]["entries"], ENGRAM_NAMED_ROOT_JOURNAL_LIMIT);
     assert_eq!(view["journal"]["retained"], 1);
-    assert_eq!(view["journal"]["reclaimable"], 255);
+    assert_eq!(
+        view["journal"]["reclaimable"],
+        ENGRAM_NAMED_ROOT_JOURNAL_LIMIT - 1
+    );
     assert_eq!(view["journal"]["primaryReasons"]["confirmedBinding"], 1);
     assert_eq!(view["serverInstanceId"], turn.state.server_instance_id);
     let wire = String::from_utf8(bytes.to_vec()).unwrap();
