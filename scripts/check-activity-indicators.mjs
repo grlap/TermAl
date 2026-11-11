@@ -66,29 +66,56 @@ await build({
           for (const placement of ['visible', 'offscreen', 'hidden']) {
             host.style.transform = placement === 'offscreen' ? 'translateY(2000px)' : '';
             host.style.display = placement === 'hidden' ? 'none' : '';
-            await window.waitForActivity(() => [...host.querySelectorAll('.status-agent-badge, .activity-spinner, .composer-slash-status-spinner, .composer-slash-option-spinner')]
+            await window.waitForActivity(() => [...host.querySelectorAll('.status-agent-badge, .activity-spinner, .composer-slash-status-spinner, .composer-slash-option-spinner, .message-activity-squares')]
               .every(e => e.dataset.activityVisible === String(placement === 'visible')));
             const slots = [...host.querySelectorAll('.transcript-activity-slot')];
             const sizes = slots.map(slot => slot.getBoundingClientRect().height);
             const strips = [...host.querySelectorAll('.session-activity-strip')];
             const stripHeights = strips.map(strip => strip.getBoundingClientRect().height);
-            // Focus/hover may have bounded transitions; status must not schedule
-            // its own animation timeline throughout an otherwise idle turn.
+            // Read actual browser timelines, including pseudo-elements and dots.
             const animations = document.getAnimations().filter(a => a instanceof CSSAnimation && a.playState !== 'finished');
+            const timings = animations.map(a => {
+              const timing = a.effect.getTiming();
+              // CSS animation-timing-function belongs to each keyframe segment;
+              // getTiming().easing is the enclosing effect's (linear) easing.
+              const frames = a.effect.getKeyframes();
+              const segments = frames.slice(0, -1).map((frame, index) => {
+                const duration = Number(timing.duration) * (frames[index + 1].computedOffset - frame.computedOffset);
+                const steps = Number(frame.easing.match(/^steps\\((\\d+)(?:, end)?\\)$/)?.[1]);
+                return {easing:frame.easing, duration, steps, framesPerSecond:steps * 1000 / duration};
+              });
+              return {name:a.animationName, duration:timing.duration, easing:timing.easing, segments};
+            });
             const observation = {theme, count, status, placement, sizes, stripHeights,
-              animations: animations.length, reduced: matchMedia('(prefers-reduced-motion: reduce)').matches};
+              animations: animations.length, timings, reduced: matchMedia('(prefers-reduced-motion: reduce)').matches};
             observations.push(observation);
             if (strips.length !== count || stripHeights.some(height => Math.abs(height - (placement === 'hidden' ? 0 : 3)) > .5)) {
               failures.push({...observation, reason: 'Status changes the reserved three-pixel strip'});
             }
             const reduced = observation.reduced;
-            const expectedAnimations = reduced || placement === 'hidden' ? 0 : count * (status === 'idle' ? 3 : 4);
+            const hasDots = status === 'active' || status === 'stopping';
+            const expectedAnimations = reduced || placement === 'hidden' ? 0 : count * (status === 'idle' ? 3 : hasDots ? 7 : 4);
             if (animations.length !== expectedAnimations ||
                 animations.some(a => a.playState !== (placement === 'visible' ? 'running' : 'paused'))) {
               failures.push({...observation, reason: 'Activity motion does not follow visibility/motion preference'});
             }
             if (!reduced && placement === 'visible' && animations.some(a => a.startTime !== 0)) {
               failures.push({...observation, reason: 'Independent activity phases multiply page draws'});
+            }
+            if (timings.some(timing => timing.easing !== 'linear' || !timing.segments.length ||
+                timing.segments.some(segment => segment.framesPerSecond !== 30))) {
+              failures.push({...observation, reason: 'Activity motion is not 30 frames per second'});
+            }
+            if (!reduced && placement === 'visible' && hasDots) {
+              const dots = animations.filter(a => a.animationName === 'transcript-activity-lift');
+              for (const animation of dots) {
+                animation.currentTime = 0;
+                const before = getComputedStyle(animation.effect.target).transform;
+                animation.currentTime = Number(animation.effect.getTiming().delay) + 400;
+                const after = getComputedStyle(animation.effect.target).transform;
+                animation.startTime = 0;
+                if (before === after) failures.push({...observation, reason:'Working dots do not move'});
+              }
             }
             if (placement !== 'hidden' && sizes.some(h => h <= 0 || Math.abs(h - sizes[0]) > .5)) {
               failures.push({...observation, reason: 'Activity slot loses its reserved line'});
@@ -130,6 +157,13 @@ await build({
       }
       host.style.transform = ''; host.style.display = ''; render(6, 'active');
       await window.waitForActivity(() => [...host.querySelectorAll('[data-activity-visible]')].every(e => e.dataset.activityVisible === 'true'));
+      // A keyed row move may recreate its CSSAnimation without an intersection.
+      host.prepend(host.lastElementChild);
+      await Promise.resolve();
+      const moved = document.getAnimations().filter(a => a instanceof CSSAnimation);
+      if (!matchMedia('(prefers-reduced-motion: reduce)').matches && moved.some(a => a.startTime !== 0)) {
+        failures.push({reason:'Moving a working row loses its synchronized phase'});
+      }
       return {observations, failures};
       };
     `,
@@ -213,7 +247,7 @@ for (const reduced of [false, true]) {
     await cdp.send('Target.activateTarget', {targetId});
     const foregroundStates = await evaluate('window.waitForActivity(() => document.documentElement.dataset.activityDocumentVisible === "true").then(() => document.getAnimations().filter(a => a instanceof CSSAnimation).map(a => ({state:a.playState,start:a.startTime})))');
     result.foregroundStates = foregroundStates;
-    if (!reduced && (foregroundStates.length !== 24 || foregroundStates.some(a => a.state !== 'running' || a.start !== 0))) {
+    if (!reduced && (foregroundStates.length !== 42 || foregroundStates.some(a => a.state !== 'running' || a.start !== 0))) {
       result.failures.push({reason:'Visible activity fails to resume in phase'});
     }
     const screenshot = await cdp.send('Page.captureScreenshot', {format:'png'}, sessionId);

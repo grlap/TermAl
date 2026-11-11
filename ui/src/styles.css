@@ -2975,7 +2975,7 @@ textarea {
   border-color: var(--status-green-ring);
   border-top-color: var(--status-green-ring-bright);
   border-right-color: var(--status-green-ring-mid);
-  animation: activity-step-spin 1600ms steps(8) infinite paused;
+  animation: activity-step-spin 1600ms steps(48) infinite paused;
 }
 
 .status-agent-badge[data-status="active"]::after {
@@ -2988,7 +2988,7 @@ textarea {
   border-width: 1.9px;
   border-color: color-mix(in srgb, var(--signal-gold) 52%, transparent);
   border-top-color: var(--signal-gold);
-  animation: activity-step-spin 1600ms steps(8) infinite paused;
+  animation: activity-step-spin 1600ms steps(48) infinite paused;
 }
 
 .status-agent-badge[data-status="stopping"]::after {
@@ -3007,7 +3007,7 @@ textarea {
   border-width: 1.9px;
   border-color: color-mix(in srgb, var(--signal-blue) 36%, transparent);
   border-top-color: var(--signal-blue);
-  animation: activity-step-spin 1600ms steps(8) infinite paused;
+  animation: activity-step-spin 1600ms steps(48) infinite paused;
 }
 
 .status-agent-badge[data-status="approval"]::before {
@@ -5631,7 +5631,7 @@ textarea {
 
 .activity-spinner {
   border-radius: 999px;
-  animation: activity-step-spin 1600ms steps(8) infinite paused;
+  animation: activity-step-spin 1600ms steps(48) infinite paused;
   border: 3px solid var(--spinner-track);
   border-top-color: var(--signal-blue);
 }
@@ -9825,7 +9825,7 @@ textarea {
   border: 2px solid var(--spinner-track);
   border-top-color: var(--signal-blue);
   border-radius: 999px;
-  animation: activity-step-spin 1600ms steps(8) infinite paused;
+  animation: activity-step-spin 1600ms steps(48) infinite paused;
 }
 
 .composer-slash-error {
@@ -9915,7 +9915,7 @@ textarea {
   border: 2px solid var(--spinner-track);
   border-top-color: currentColor;
   border-radius: 999px;
-  animation: activity-step-spin 1600ms steps(8) infinite paused;
+  animation: activity-step-spin 1600ms steps(48) infinite paused;
 }
 
 .composer-mcp-servers {

@@ -1,6 +1,6 @@
 // Owns viewport/document visibility for decorative activity motion. One observer
 // follows mounted indicators; it never polls or schedules animation frames.
-const indicatorSelector = ".status-agent-badge, .activity-spinner, .composer-slash-status-spinner, .composer-slash-option-spinner";
+const indicatorSelector = ".status-agent-badge, .activity-spinner, .composer-slash-status-spinner, .composer-slash-option-spinner, .message-activity-squares";
 
 export function startActivityAnimationVisibility(root: HTMLElement): () => void {
   const doc = root.ownerDocument;
@@ -11,10 +11,11 @@ export function startActivityAnimationVisibility(root: HTMLElement): () => void 
   const indicators = new Set<Element>();
   const synchronize = (element: Element) => {
     if (doc.visibilityState !== "visible" || element.getAttribute("data-activity-visible") !== "true") return;
-    // Sessions mount at different times. Align their step boundaries so six
-    // indicators do not turn five updates/second each into thirty page draws.
+    // Sessions mount at different times. Keep their 30 Hz step boundaries
+    // aligned instead of scheduling separate draws for each indicator.
     for (const animation of element.getAnimations({subtree: true})) {
-      if (view.CSSAnimation && animation instanceof view.CSSAnimation && animation.animationName === "activity-step-spin") {
+      if (view.CSSAnimation && animation instanceof view.CSSAnimation &&
+          (animation.animationName === "activity-step-spin" || animation.animationName === "transcript-activity-lift")) {
         animation.startTime = 0;
       }
     }
@@ -59,7 +60,11 @@ export function startActivityAnimationVisibility(root: HTMLElement): () => void 
         continue;
       }
       record.removedNodes.forEach(node => visit(node, forget));
-      record.addedNodes.forEach(node => visit(node, observe));
+      record.addedNodes.forEach(node => visit(node, element => {
+        observe(element);
+        // Reinsertion can recreate CSS animations even for a tracked node.
+        synchronize(element);
+      }));
     }
   });
   mutations.observe(root, {childList: true, subtree: true, attributes: true, attributeFilter: ["class", "data-status", "data-work"]});

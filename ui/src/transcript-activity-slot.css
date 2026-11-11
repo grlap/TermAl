@@ -1,5 +1,5 @@
-/* One text line is reserved in every state. Static activity avoids a permanent
-   compositor loop without changing dimensions or transcript scroll position. */
+/* One text line is reserved in every state. Decorative motion does not change
+   dimensions or transcript scroll position. */
 .transcript-activity-slot {
   box-sizing: border-box;
   flex: 0 0 auto;
@@ -37,4 +37,31 @@
   border-radius: 1px;
   background: var(--signal-blue);
   opacity: 0.7;
+  /* 24 steps in each 800 ms leg keeps the lift at 30 updates per second. */
+  animation: transcript-activity-lift 800ms steps(24) infinite alternate paused;
+}
+
+.transcript-activity-slot .message-activity-squares > span:nth-child(2) {
+  animation-delay: 200ms;
+}
+
+.transcript-activity-slot .message-activity-squares > span:nth-child(3) {
+  animation-delay: 400ms;
+}
+
+@keyframes transcript-activity-lift {
+  from { transform: translateY(0); opacity: 0.3; }
+  to { transform: translateY(-0.18em); opacity: 1; }
+}
+
+[data-activity-document-visible="true"] .message-activity-squares[data-activity-visible="true"] > span {
+  animation-play-state: running;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transcript-activity-slot .message-activity-squares > span {
+    animation: none;
+    transform: none;
+    opacity: 0.7;
+  }
 }
