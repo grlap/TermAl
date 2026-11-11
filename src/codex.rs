@@ -52,7 +52,9 @@ fn spawn_codex_runtime(
 }
 
 /// Spawns shared Codex runtime.
-const SHARED_CODEX_STDIN_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
+const SHARED_CODEX_STDIN_WRITE_TIMEOUT: Duration = Duration::from_secs(60);
+const SHARED_CODEX_STDIN_WARNING_AFTER: Duration = Duration::from_secs(10);
+const SHARED_CODEX_STDIN_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const SHARED_CODEX_STDIN_WATCHDOG_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 const SHARED_CODEX_THREAD_SETUP_TIMEOUT: Duration = Duration::from_secs(180);
@@ -106,11 +108,30 @@ impl SharedCodexTurnStartedWatchdogConfig {
     }
 }
 
+// The interrupt backstop runs after an explicit Stop and retains its own budget.
+// Every ordinary write/flush keeps the instant captured by its activity guard.
+#[derive(Clone, Copy, Debug)]
+enum SharedCodexStdinBudget {
+    Ordinary,
+    StopEscalation,
+}
+
+impl SharedCodexStdinBudget {
+    fn limit(self, ordinary_timeout: Duration) -> Duration {
+        match self {
+            Self::Ordinary => ordinary_timeout,
+            Self::StopEscalation => ordinary_timeout.min(SHARED_CODEX_STDIN_STOP_TIMEOUT),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct SharedCodexStdinActivity {
     operation: &'static str,
     context: String,
     started_at: std::time::Instant,
+    budget: SharedCodexStdinBudget,
+    warned: bool,
     timed_out: bool,
 }
 
@@ -126,6 +147,7 @@ impl<'a> SharedCodexStdinActivityGuard<'a> {
         activity: &'a SharedCodexStdinActivityState,
         operation: &'static str,
         context: String,
+        budget: SharedCodexStdinBudget,
     ) -> SharedCodexStdinActivityGuard<'a> {
         *activity
             .lock()
@@ -134,6 +156,8 @@ impl<'a> SharedCodexStdinActivityGuard<'a> {
                 operation,
                 context,
                 started_at: std::time::Instant::now(),
+                budget,
+                warned: false,
                 timed_out: false,
             });
         SharedCodexStdinActivityGuard { activity }
@@ -153,6 +177,7 @@ struct SharedCodexWatchedWriter<W> {
     inner: W,
     activity: SharedCodexStdinActivityState,
     context: SharedCodexStdinContextState,
+    budget: SharedCodexStdinBudget,
 }
 
 impl<W> SharedCodexWatchedWriter<W> {
@@ -161,7 +186,15 @@ impl<W> SharedCodexWatchedWriter<W> {
             inner,
             activity,
             context: Arc::new(Mutex::new("idle".to_owned())),
+            budget: SharedCodexStdinBudget::Ordinary,
         }
+    }
+
+    fn set_command_budget(&mut self, command: &CodexRuntimeCommand) {
+        self.budget = match command {
+            CodexRuntimeCommand::InterruptTurn { .. } => SharedCodexStdinBudget::StopEscalation,
+            _ => SharedCodexStdinBudget::Ordinary,
+        };
     }
 
     fn set_activity_context(&mut self, context: impl Into<String>) {
@@ -183,7 +216,7 @@ impl<W: Write> Write for SharedCodexWatchedWriter<W> {
             .lock()
             .expect("shared Codex stdin context mutex poisoned")
             .clone();
-        let _guard = SharedCodexStdinActivityGuard::new(&self.activity, "write", context);
+        let _guard = SharedCodexStdinActivityGuard::new(&self.activity, "write", context, self.budget);
         self.inner.write(buf)
     }
 
@@ -193,7 +226,7 @@ impl<W: Write> Write for SharedCodexWatchedWriter<W> {
             .lock()
             .expect("shared Codex stdin context mutex poisoned")
             .clone();
-        let _guard = SharedCodexStdinActivityGuard::new(&self.activity, "flush", context);
+        let _guard = SharedCodexStdinActivityGuard::new(&self.activity, "flush", context, self.budget);
         self.inner.flush()
     }
 }
@@ -229,6 +262,62 @@ fn shared_codex_stdin_timeout_detail(
     "Agent communication timed out.".to_owned()
 }
 
+// One tick of the existing watchdog. Sampling and the once-only warning bit share
+// the write/flush activity owner; diagnostics and runtime teardown run off-lock.
+// The explicit instant also lets tests advance time without a real timeout wait.
+fn poll_shared_codex_stdin_watchdog(
+    state: &AppState,
+    runtime_id: &str,
+    process: &Arc<SharedChild>,
+    activity: &SharedCodexStdinActivityState,
+    ordinary_timeout: Duration,
+    now: std::time::Instant,
+    mut warn: impl FnMut(&SharedCodexStdinActivity),
+) -> bool {
+    let (warning, timed_out_activity) = {
+        let mut locked = activity
+            .lock()
+            .expect("shared Codex stdin activity mutex poisoned");
+        match locked.as_mut() {
+            Some(entry) if !entry.timed_out => {
+                let elapsed = now.saturating_duration_since(entry.started_at);
+                let warning = if matches!(entry.budget, SharedCodexStdinBudget::Ordinary)
+                    && !entry.warned
+                    && elapsed >= SHARED_CODEX_STDIN_WARNING_AFTER
+                {
+                    entry.warned = true;
+                    Some(entry.clone())
+                } else {
+                    None
+                };
+                let timed_out = elapsed >= entry.budget.limit(ordinary_timeout);
+                entry.timed_out = timed_out;
+                (warning, timed_out.then(|| entry.clone()))
+            }
+            _ => (None, None),
+        }
+    };
+    if let Some(activity) = warning {
+        warn(&activity);
+    }
+    let Some(activity) = timed_out_activity else {
+        return false;
+    };
+    let detail = shared_codex_stdin_timeout_detail(
+        &activity,
+        activity.budget.limit(ordinary_timeout),
+    );
+    if let Err(err) = state.handle_shared_codex_runtime_exit(runtime_id, Some(&detail)) {
+        eprintln!(
+            "[termal] shared Codex watchdog cleanup failed; killing app-server: {err:#}"
+        );
+        if let Err(kill_err) = kill_child_process(process, "shared Codex runtime") {
+            eprintln!("[termal] shared Codex watchdog fallback kill failed: {kill_err:#}");
+        }
+    }
+    true
+}
+
 fn spawn_shared_codex_stdin_watchdog(
     state: &AppState,
     runtime_id: &str,
@@ -250,37 +339,18 @@ fn spawn_shared_codex_stdin_watchdog(
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
 
-            let timed_out_activity = {
-                let mut locked = watchdog_activity
-                    .lock()
-                    .expect("shared Codex stdin activity mutex poisoned");
-                match locked.as_mut() {
-                    Some(entry)
-                        if !entry.timed_out && entry.started_at.elapsed() >= timeout =>
-                    {
-                        entry.timed_out = true;
-                        Some(entry.clone())
-                    }
-                    _ => None,
-                }
-            };
-
-            if let Some(activity) = timed_out_activity {
-                let detail = shared_codex_stdin_timeout_detail(&activity, timeout);
-                if let Err(err) = watchdog_state
-                    .handle_shared_codex_runtime_exit(&watchdog_runtime_id, Some(&detail))
-                {
-                    eprintln!(
-                        "[termal] shared Codex watchdog cleanup failed; killing app-server: {err:#}"
-                    );
-                    if let Err(kill_err) =
-                        kill_child_process(&watchdog_process, "shared Codex runtime")
-                    {
-                        eprintln!(
-                            "[termal] shared Codex watchdog fallback kill failed: {kill_err:#}"
-                        );
-                    }
-                }
+            if poll_shared_codex_stdin_watchdog(
+                &watchdog_state,
+                &watchdog_runtime_id,
+                &watchdog_process,
+                &watchdog_activity,
+                timeout,
+                std::time::Instant::now(),
+                |activity| eprintln!(
+                    "[termal] shared Codex stdin {} has been waiting at least 10s",
+                    activity.operation,
+                ),
+            ) {
                 break;
             }
         })
@@ -452,6 +522,7 @@ fn spawn_shared_codex_runtime(
             }
 
             while let Ok(command) = input_rx.recv() {
+                stdin.set_command_budget(&command);
                 let command_result = match command {
                     CodexRuntimeCommand::Prompt {
                         session_id,

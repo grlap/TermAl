@@ -100,6 +100,278 @@ fn session_mutation_stamp(state: &AppState, session_id: &str) -> u64 {
         .expect("session should exist")
 }
 
+struct StdinWatchdogFixture {
+    state: AppState,
+    session_id: String,
+    runtime: SharedCodexRuntime,
+    process_owner: phase_sync::ParkedProcess,
+    _input_rx: mpsc::Receiver<CodexRuntimeCommand>,
+}
+
+impl StdinWatchdogFixture {
+    fn new() -> Self {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Codex);
+        let process_owner = phase_sync::ParkedProcess::spawn();
+        let process = process_owner.process.clone();
+        let (input_tx, _input_rx) = mpsc::channel();
+        let runtime = SharedCodexRuntime {
+            runtime_id: "shared-codex-stdin-watchdog".to_owned(),
+            input_tx,
+            process: process.clone(),
+            sessions: SharedCodexSessions::new(),
+            thread_sessions: Arc::new(Mutex::new(HashMap::new())),
+            stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
+        };
+        let handle = CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process: process.clone(),
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        };
+
+        {
+            let mut shared_runtime = state
+                .shared_codex_runtime
+                .lock()
+                .expect("shared Codex runtime mutex poisoned");
+            *shared_runtime = Some(runtime.clone());
+        }
+
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&session_id)
+                .expect("Codex session should exist");
+            inner.sessions[index].runtime = SessionRuntime::Codex(handle);
+            inner.sessions[index].session.status = SessionStatus::Active;
+            inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+        }
+
+        Self {
+            state,
+            session_id,
+            runtime,
+            process_owner,
+            _input_rx,
+        }
+    }
+
+    fn tick(
+        &self,
+        activity: &SharedCodexStdinActivityState,
+        now: std::time::Instant,
+        warnings: &mut Vec<&'static str>,
+    ) -> bool {
+        poll_shared_codex_stdin_watchdog(
+            &self.state,
+            &self.runtime.runtime_id,
+            &self.process_owner.process,
+            activity,
+            SHARED_CODEX_STDIN_WRITE_TIMEOUT,
+            now,
+            |entry| {
+                assert!(
+                    activity.try_lock().is_ok(),
+                    "diagnostic must run off the activity lock"
+                );
+                warnings.push(entry.operation);
+            },
+        )
+    }
+
+    fn assert_active(&self) {
+        assert!(self.state.shared_codex_runtime.lock().unwrap().is_some());
+        let snapshot = self.state.snapshot();
+        let session = snapshot
+            .sessions
+            .iter()
+            .find(|s| s.id == self.session_id)
+            .unwrap();
+        assert_eq!(session.status, SessionStatus::Active);
+    }
+
+    fn assert_timed_out(&self) {
+        assert!(self.state.shared_codex_runtime.lock().unwrap().is_none());
+        let snapshot = self.state.snapshot();
+        let session = snapshot
+            .sessions
+            .iter()
+            .find(|s| s.id == self.session_id)
+            .unwrap();
+        assert_eq!(session.status, SessionStatus::Error);
+        assert!(session.preview.contains("Agent communication timed out"));
+    }
+}
+
+struct StalledStdinSink {
+    operation: &'static str,
+    entered: mpsc::Sender<()>,
+    release: mpsc::Receiver<()>,
+}
+
+impl StalledStdinSink {
+    fn wait(&self) {
+        self.entered.send(()).unwrap();
+        self.release
+            .recv_timeout(phase_sync::DEADLOCK_GUARD)
+            .expect("test must release the stalled stdin operation");
+    }
+}
+
+impl Write for StalledStdinSink {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if self.operation == "write" {
+            self.wait();
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if self.operation == "flush" {
+            self.wait();
+        }
+        Ok(())
+    }
+}
+
+struct ReleaseStdinOperation(mpsc::Sender<()>);
+
+impl Drop for ReleaseStdinOperation {
+    fn drop(&mut self) {
+        let _ = self.0.send(());
+    }
+}
+
+// The channel controls the actual watched write/flush lifetime. Only the instant
+// passed to the production watchdog tick advances; these are not real 60s waits.
+fn with_stalled_stdin(
+    operation: &'static str,
+    interrupt: bool,
+    inspect: impl FnOnce(&SharedCodexStdinActivityState, std::time::Instant),
+) {
+    let activity: SharedCodexStdinActivityState = Arc::new(Mutex::new(None));
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    std::thread::scope(|scope| {
+        let watched = activity.clone();
+        let worker = scope.spawn(move || {
+            let mut writer = SharedCodexWatchedWriter::new(
+                StalledStdinSink {
+                    operation,
+                    entered: entered_tx,
+                    release: release_rx,
+                },
+                watched,
+            );
+            let (response_tx, _response_rx) = mpsc::channel();
+            let command = if interrupt {
+                CodexRuntimeCommand::InterruptTurn {
+                    response_tx,
+                    thread_id: "thread".to_owned(),
+                    turn_id: "turn".to_owned(),
+                }
+            } else {
+                CodexRuntimeCommand::JsonRpcNotification {
+                    method: "initialized".to_owned(),
+                }
+            };
+            writer.set_command_budget(&command);
+            // The typed command alone selects the budget, never this diagnostic.
+            writer.set_activity_context(if interrupt {
+                "ordinary write"
+            } else {
+                "turn/interrupt"
+            });
+            if operation == "write" {
+                writer.write_all(b"payload")
+            } else {
+                writer.flush()
+            }
+        });
+        let release = ReleaseStdinOperation(release_tx);
+        entered_rx
+            .recv_timeout(phase_sync::DEADLOCK_GUARD)
+            .expect("writer must enter the watched I/O operation");
+        let started_at = activity.lock().unwrap().as_ref().unwrap().started_at;
+        inspect(&activity, started_at);
+        drop(release);
+        worker.join().unwrap().unwrap();
+    });
+    assert!(
+        activity.lock().unwrap().is_none(),
+        "activity guard must clear on completion"
+    );
+}
+
+#[test]
+fn shared_codex_stdin_watchdog_allows_slow_write_and_flush_with_one_warning() {
+    for operation in ["write", "flush"] {
+        let fixture = StdinWatchdogFixture::new();
+        let mut warnings = Vec::new();
+        with_stalled_stdin(operation, false, |activity, start| {
+            assert!(!fixture.tick(
+                activity,
+                start + Duration::from_millis(9_999),
+                &mut warnings
+            ));
+            assert!(warnings.is_empty());
+            for millis in [10_000, 30_000, 50_000] {
+                assert!(!fixture.tick(
+                    activity,
+                    start + Duration::from_millis(millis),
+                    &mut warnings
+                ));
+                fixture.assert_active();
+            }
+            assert_eq!(warnings, vec![operation]);
+        });
+        fixture.assert_active();
+        assert!(fixture.process_owner.process.try_wait().unwrap().is_none());
+    }
+}
+
+#[test]
+fn shared_codex_stdin_watchdog_expires_at_original_sixty_second_deadline() {
+    let fixture = StdinWatchdogFixture::new();
+    let mut warnings = Vec::new();
+    with_stalled_stdin("write", false, |activity, start| {
+        assert!(!fixture.tick(activity, start + Duration::from_secs(10), &mut warnings));
+        assert!(!fixture.tick(
+            activity,
+            start + Duration::from_millis(59_999),
+            &mut warnings
+        ));
+        fixture.assert_active();
+        assert!(fixture.tick(activity, start + Duration::from_secs(60), &mut warnings));
+        fixture.assert_timed_out();
+        assert_eq!(warnings, vec!["write"]);
+        let revision = fixture.state.snapshot().revision;
+        assert!(!fixture.tick(activity, start + Duration::from_secs(61), &mut warnings));
+        assert_eq!(fixture.state.snapshot().revision, revision);
+    });
+}
+
+#[test]
+fn shared_codex_stdin_watchdog_keeps_typed_interrupt_at_thirty_seconds() {
+    let fixture = StdinWatchdogFixture::new();
+    let mut warnings = Vec::new();
+    with_stalled_stdin("flush", true, |activity, start| {
+        assert!(!fixture.tick(
+            activity,
+            start + Duration::from_millis(29_999),
+            &mut warnings
+        ));
+        fixture.assert_active();
+        assert!(fixture.tick(activity, start + Duration::from_secs(30), &mut warnings));
+        fixture.assert_timed_out();
+        assert!(warnings.is_empty());
+    });
+}
+
 // pins the coarse scope of the stdin watchdog: a stall on the shared codex
 // writer clears the whole runtime (not just the stalled session) and marks
 // the affected session as error with the generic "agent communication timed
@@ -107,52 +379,19 @@ fn session_mutation_stamp(state: &AppState, session_id: &str) -> u64 {
 // process alive while only failing one session.
 #[tokio::test]
 async fn shared_codex_stdin_watchdog_times_out_stalled_writer_and_clears_runtime() {
-    let state = test_app_state();
-    let session_id = test_session_id(&state, Agent::Codex);
-    let process_owner = phase_sync::ParkedProcess::spawn();
-    let process = process_owner.process.clone();
-    let (input_tx, _input_rx) = mpsc::channel();
-    let runtime = SharedCodexRuntime {
-        runtime_id: "shared-codex-stdin-watchdog".to_owned(),
-        input_tx,
-        process: process.clone(),
-        sessions: SharedCodexSessions::new(),
-        thread_sessions: Arc::new(Mutex::new(HashMap::new())),
-        stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
-    };
-    let handle = CodexRuntimeHandle {
-        runtime_id: runtime.runtime_id.clone(),
-        input_tx: runtime.input_tx.clone(),
-        process: process.clone(),
-        shared_session: Some(SharedCodexSessionHandle {
-            runtime: runtime.clone(),
-            session_id: session_id.clone(),
-        }),
-    };
-
-    {
-        let mut shared_runtime = state
-            .shared_codex_runtime
-            .lock()
-            .expect("shared Codex runtime mutex poisoned");
-        *shared_runtime = Some(runtime.clone());
-    }
-
-    {
-        let mut inner = state.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(&session_id)
-            .expect("Codex session should exist");
-        inner.sessions[index].runtime = SessionRuntime::Codex(handle);
-        inner.sessions[index].session.status = SessionStatus::Active;
-        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
-    }
+    let fixture = StdinWatchdogFixture::new();
+    let state = fixture.state.clone();
+    let session_id = fixture.session_id.clone();
+    let runtime = fixture.runtime.clone();
+    let process = fixture.process_owner.process.clone();
 
     let activity: SharedCodexStdinActivityState =
         Arc::new(Mutex::new(Some(SharedCodexStdinActivity {
             operation: "flush",
             context: "test watchdog context".to_owned(),
             started_at: std::time::Instant::now() - Duration::from_millis(50),
+            budget: SharedCodexStdinBudget::Ordinary,
+            warned: false,
             timed_out: false,
         })));
     let (_stop_tx, stop_rx) = mpsc::channel();
