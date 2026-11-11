@@ -2022,6 +2022,10 @@ struct EngramSessionState {
     /// Historical checkpoint endpoint for unadmitted reporting only. Does
     /// not change the ordinary mediated comparison after a host restart.
     runtime_checkpoint: Option<EngramRuntimeCheckpointBasis>,
+    /// Measurement taken for an evaluation request, consumed at that turn's
+    /// first ordinary close. It cannot bridge a later missing baseline and
+    /// creates neither an admitted turn nor an evaluation receipt.
+    evaluation_checkpoint: Option<EngramEvaluationCheckpoint>,
     /// Observation-only history is independent of grants and admission.
     unadmitted_active_turn: Option<EngramRuntimeObservedTurn>,
     unadmitted_closing_jobs: Vec<EngramRuntimeClosingJob>,
@@ -2140,6 +2144,7 @@ impl Default for EngramSessionState {
             next_turn_check_sequence: 0,
             shell_directory: None,
             runtime_checkpoint: None,
+            evaluation_checkpoint: None,
             unadmitted_active_turn: None,
             unadmitted_closing_jobs: Vec::new(),
             unadmitted_reports: Vec::new(),

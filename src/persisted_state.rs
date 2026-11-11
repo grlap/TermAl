@@ -867,6 +867,9 @@ struct PersistedSessionRecord {
     /// Immutable observation history survives a host restart; no grant is restored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_runtime_checkpoint: Option<EngramRuntimeCheckpointBasis>,
+    /// Optional comparison data; older readers may omit it conservatively.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram_evaluation_checkpoint: Option<EngramEvaluationCheckpoint>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_unadmitted_active_turn: Option<EngramRuntimeObservedTurn>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -998,6 +1001,7 @@ impl PersistedSessionRecord {
             engram_operator_paused: self.engram_operator_paused.clone(),
             engram_observation_delete_requested: self.engram_observation_delete_requested,
             engram_runtime_checkpoint: self.engram_runtime_checkpoint.clone(),
+            engram_evaluation_checkpoint: self.engram_evaluation_checkpoint.clone(),
             engram_unadmitted_active_turn: self.engram_unadmitted_active_turn.clone(),
             engram_unadmitted_closing_jobs: self.engram_unadmitted_closing_jobs.clone(),
             engram_unadmitted_reports: self.engram_unadmitted_reports.clone(),
@@ -1049,6 +1053,7 @@ impl PersistedSessionRecord {
                 .map(EngramCarriedCheck::marker)
                 .collect(),
             engram_runtime_checkpoint: record.engram.runtime_checkpoint.clone(),
+            engram_evaluation_checkpoint: record.engram.evaluation_checkpoint.clone(),
             engram_unadmitted_active_turn: record.engram.unadmitted_active_turn.clone(),
             engram_unadmitted_closing_jobs: record.engram.unadmitted_closing_jobs.clone(),
             engram_unadmitted_reports: record.engram.unadmitted_reports.clone(),
@@ -1218,6 +1223,7 @@ impl PersistedSessionRecord {
             engram: EngramSessionState {
                 historical_control: self.historical_control,
                 runtime_checkpoint: self.engram_runtime_checkpoint,
+                evaluation_checkpoint: self.engram_evaluation_checkpoint,
                 unadmitted_active_turn: self.engram_unadmitted_active_turn,
                 unadmitted_closing_jobs: self.engram_unadmitted_closing_jobs,
                 unadmitted_reports: self.engram_unadmitted_reports,

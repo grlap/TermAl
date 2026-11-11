@@ -246,11 +246,15 @@ impl AppState {
         };
         trace.observed_outcome = Some(outcome);
         let session_id = record.session.id.clone();
-        // Each closing turn consumes the baseline. Only this turn's own
-        // recorded sighting can replace it, so a turn whose sighting is never
-        // recorded leaves its successor without one: never an older baseline.
+        // Consume both endpoints. An evaluation-request measurement can
+        // compare only its own turn's first close, never bridge later gaps.
+        // Only a later recorded closing sighting supplies a successor's
+        // ordinary checkpoint; an existing ordinary comparison keeps priority.
         let baseline = inner.sessions[index].engram.runtime_checkpoint.take();
+        let evaluation = inner.sessions[index].engram.evaluation_checkpoint.take();
         let scope = EngramRuntimeClosingScope::capture(inner, &session_id);
+        let baseline = baseline.or_else(|| scope.as_ref().ok()
+            .and_then(|scope| evaluation_closing_checkpoint(evaluation.as_ref(), &trace, scope)));
         let check_baselines = scope.as_ref().ok().map(|scope|
             registered_closing_baselines_locked(inner, index, registered, scope)).unwrap_or_default();
         let (mut notices, correlated) = registered_check_notices_locked(inner, index, registered);

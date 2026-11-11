@@ -176,6 +176,7 @@ fn reset_engram_session_associations_locked(
             workdir_worktree: old.workdir_worktree.clone(),
             shell_directory: old.shell_directory.clone(),
             runtime_checkpoint: old.runtime_checkpoint.clone(),
+            evaluation_checkpoint: old.evaluation_checkpoint.clone(),
             unadmitted_active_turn: old.unadmitted_active_turn.clone(),
             unadmitted_closing_jobs: old.unadmitted_closing_jobs.clone(),
             unadmitted_reports: old.unadmitted_reports.clone(),

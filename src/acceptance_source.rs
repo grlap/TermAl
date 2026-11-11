@@ -1,6 +1,8 @@
 // Private evaluation source admission and immutable subprocess handoff.
 // Identity remains the existing owner object; paths and summaries are not identities.
 
+include!("engram_evaluation_checkpoint.rs");
+
 const ACCEPTANCE_SOURCE_ID_MAX_BYTES: usize = 1_048_576;
 const ACCEPTANCE_PRIVATE_PAGE_MAX_BYTES: usize = 2_113_536;
 const ACCEPTANCE_PRIVATE_RESPONSE_MAX_BYTES: usize = ACCEPTANCE_PRIVATE_PAGE_MAX_BYTES + 26;
@@ -669,6 +671,10 @@ impl AppState {
         ),
         ApiError,
     > {
+        let checkpoint_scope = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            evaluation_checkpoint_scope_locked(&inner, owner, place)
+        };
         let Some(source_id) = self.acceptance_shared_source_capture(owner, place) else {
             if admission.is_some_and(|admission| admission.native_source.is_some()) {
                 return Err(ApiError::conflict(
@@ -692,6 +698,9 @@ impl AppState {
             EngramBasisPlace::Named { root, .. } => acceptance_source_workspace(root),
             EngramBasisPlace::Workdir(_) => None,
         };
+        if let Some(scope) = checkpoint_scope {
+            self.retain_evaluation_checkpoint(owner, place, &scope, &source_id);
+        }
         let label = format!(
             "source-id:{} ({} changes, {} submodules)",
             &source_id.commit[..12],
