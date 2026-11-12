@@ -695,6 +695,11 @@ describe("App control panel - helpers and compact coverage", () => {
 
       expect(document.querySelector(".tile-divider-row")).not.toBeNull();
       expect(document.querySelector(".tile-divider-row.fixed")).toBeNull();
+      const clock = screen.getByLabelText(/^UTC time .*; local time /);
+      expect(clock.tagName).toBe("TIME");
+      expect(clock).toHaveAttribute("datetime");
+      expect(clock.closest(".sidebar")).not.toBeNull();
+      expect(clock.closest(".control-panel-body")).toBeNull();
     } finally {
       scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);

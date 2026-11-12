@@ -8,6 +8,7 @@ import {
   type SetStateAction,
 } from "react";
 import { AgentIcon } from "./agent-icon";
+import { SidebarClockBar } from "./SidebarClockBar";
 import { SessionListWindow } from "./SessionListWindow";
 import { ALL_SESSION_HOSTS, filterSessionsByHost, sessionHostOptions } from "./session-host-filter";
 import { SessionRowRemoteMarker, describeSessionRemote } from "./session-row-remote-marker";
@@ -1423,7 +1424,7 @@ export function AppControlSurface({
     }
 
     return (
-      <div className="sidebar sidebar-panel">
+      <div className="sidebar sidebar-panel sidebar-with-clock">
         <ControlPanelSurface
           ref={
             fixedSection
@@ -1465,6 +1466,7 @@ export function AppControlSurface({
           windowId={windowId}
           launcherPaneId={paneId}
         />
+        <SidebarClockBar />
       </div>
     );
 }
