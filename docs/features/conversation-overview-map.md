@@ -13,6 +13,8 @@ See [virtualized transcripts](session-virtualized-transcript.md#native-scrollbar
 for the current navigation contract and [conversation markers](conversation-markers.md)
 for the durable marker model.
 
-The compact SQLite overview fields remain maintained by existing writers.
-Navigation no longer reads them. This change removes no persisted column or
-table and changes no persistence floor; storage cleanup is separate work.
+The compact SQLite overview fields and blobs are retired: navigation does not
+read them, normal saves do not populate them, and startup does not backfill
+them. Existing values and schema defaults remain for compatibility. No persisted
+column, table or persistence floor is removed; physical storage cleanup is
+separate migration work.

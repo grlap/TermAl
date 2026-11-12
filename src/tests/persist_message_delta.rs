@@ -786,10 +786,104 @@ fn removal_and_hiding_drop_baselines_before_reappearance() {
 }
 
 #[test]
+fn message_saves_leave_retired_overview_storage_inert() {
+    let mut fixture = Fixture::new(1);
+    let historical = vec![255_u8, 7, 2];
+    {
+        let connection = fixture.cache.connection.as_ref().unwrap();
+        let blobs: i64 = connection
+            .query_row("SELECT count(*) FROM session_overviews", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(blobs, 0, "a fresh transcript must not gain an overview");
+        connection
+            .execute(
+                "UPDATE messages SET overview_kind=93,is_user=7 WHERE session_id=?1",
+                [&fixture.id],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO session_overviews(session_id,value_blob) VALUES(?1,?2)",
+                rusqlite::params![fixture.id, historical],
+            )
+            .unwrap();
+        connection.execute_batch(
+            "CREATE TEMP TRIGGER no_overview_classification BEFORE UPDATE OF overview_kind,is_user ON main.messages BEGIN
+               SELECT RAISE(ABORT,'message classification is retired'); END;
+             CREATE TEMP TRIGGER only_default_overview_fields BEFORE INSERT ON main.messages
+               WHEN new.overview_kind != 0 OR new.is_user != 0 BEGIN
+               SELECT RAISE(ABORT,'new message must use compatibility defaults'); END;
+             CREATE TEMP TRIGGER no_overview_insert BEFORE INSERT ON main.session_overviews BEGIN
+               SELECT RAISE(ABORT,'overview insertion is retired'); END;
+             CREATE TEMP TRIGGER no_overview_update BEFORE UPDATE ON main.session_overviews BEGIN
+               SELECT RAISE(ABORT,'overview update is retired'); END;
+             CREATE TEMP TRIGGER no_overview_delete BEFORE DELETE ON main.session_overviews BEGIN
+               SELECT RAISE(ABORT,'historical overview must remain'); END;"
+        ).unwrap();
+    }
+    fixture.clear_audit();
+    fixture.change(|record| {
+        record.session.messages[0] = Message::Command {
+            id: "transcript-0".into(),
+            timestamp: "2026-01-01T00:00:00Z".into(),
+            author: Author::Assistant,
+            command: "failed command".into(),
+            command_language: None,
+            output: "retained failure".into(),
+            output_language: None,
+            status: CommandStatus::Error,
+        };
+        let mut prompt = Fixture::message(1);
+        if let Message::Text { author, .. } = &mut prompt {
+            *author = Author::You;
+        }
+        push_message_on_record(record, prompt);
+    });
+    let (counts, rows, _) = fixture.persist();
+    assert_eq!((counts.retained_messages, rows), (2, 2));
+    let saved = fixture.ordered_rows();
+    assert_eq!(saved.len(), 2);
+    assert!(saved[0].1.contains("retained failure"));
+    fixture.assert_reload(&saved);
+    // Switching to a proxy must not delete a pre-existing local overview either.
+    fixture.change(|record| {
+        record.remote_id = Some("remote-1".into());
+        record.remote_session_id = Some("peer-session".into());
+        record.session.preview = "proxy metadata".into();
+    });
+    fixture.persist();
+    assert_eq!(fixture.overview_bytes(), historical);
+    let metadata: Vec<(i64, i64)> = fixture
+        .cache
+        .connection
+        .as_ref()
+        .unwrap()
+        .prepare("SELECT overview_kind,is_user FROM messages WHERE session_id=?1 ORDER BY position")
+        .unwrap()
+        .query_map([&fixture.id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(metadata, vec![(93, 7), (0, 0)]);
+}
+
+#[test]
 fn sparse_partial_extent_preserves_unobserved_suffix_and_overview() {
     let mut fixture = Fixture::new(16);
     let before = fixture.ordered_rows();
-    let mut overview = fixture.overview_bytes();
+    let overview = vec![255_u8, 7, 2];
+    fixture
+        .cache
+        .connection
+        .as_ref()
+        .unwrap()
+        .execute(
+            "INSERT INTO session_overviews(session_id,value_blob) VALUES(?1,?2)",
+            rusqlite::params![fixture.id, overview],
+        )
+        .unwrap();
     fixture.change(|record| {
         record.session.messages = record.session.messages.window(4..8);
         record.message_start_index = 4;
@@ -806,7 +900,6 @@ fn sparse_partial_extent_preserves_unobserved_suffix_and_overview() {
             status: CommandStatus::Success,
         };
     });
-    overview[5] = encode_conversation_overview_message(ConversationOverviewKind::Command, false);
     let (counts, rows, _) = fixture.persist();
     assert_eq!((counts.retained_messages, rows), (1, 1));
     let after = fixture.ordered_rows();

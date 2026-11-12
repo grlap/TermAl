@@ -80,6 +80,16 @@ fn conflict_does_not_fail_sibling_own_row_fence(sparse: bool) {
         (bad, good)
     };
     fixture.write(&fixture.collect()).unwrap();
+    fixture
+        .cache
+        .connection
+        .as_ref()
+        .unwrap()
+        .execute(
+            "INSERT INTO session_overviews(session_id,value_blob) VALUES(?1,?2)",
+            rusqlite::params![bad, vec![7_u8, 2, 255]],
+        )
+        .unwrap();
     let stored = |connection: &rusqlite::Connection| -> (String, Vec<(i64, String, String)>, Vec<u8>, Option<String>) {
         let metadata = connection.query_row(
             "SELECT value_json FROM sessions WHERE id=?1", [&bad], |row| row.get(0),

@@ -511,7 +511,6 @@ fn initialize_current_sqlite_state_schema(connection: &rusqlite::Connection) -> 
     transaction.execute_batch(SQLITE_METADATA_UNITS_SCHEMA)?;
     ensure_sqlite_message_overview_columns(&transaction)?;
     ensure_sqlite_response_board_schema(&transaction)?;
-    backfill_missing_sqlite_session_overviews(&transaction)?;
     validate_sqlite_state_table_columns(&transaction, CURRENT_SQLITE_STATE_TABLE_COLUMNS, false)?;
     transaction
         .execute(
@@ -582,7 +581,6 @@ fn finish_existing_sqlite_state_schema_setup(connection: &rusqlite::Connection) 
     ensure_sqlite_message_overview_columns(connection)?;
     ensure_sqlite_message_rowid_storage(connection)?;
     ensure_sqlite_response_board_schema(connection)?;
-    backfill_missing_sqlite_session_overviews(connection)?;
     validate_sqlite_state_table_columns(connection, CURRENT_SQLITE_STATE_TABLE_COLUMNS, false)?;
     ensure_federation_host_identity(connection)?;
     Ok(())

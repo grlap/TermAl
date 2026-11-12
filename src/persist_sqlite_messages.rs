@@ -180,19 +180,17 @@ fn write_serialized_persisted_messages(
     if !session.local_identity_namespace {
         release_relocated_peer_identities(tx, session)?;
     }
-    let mut upsert = tx.prepare_cached(
-        "INSERT INTO messages(session_id, position, message_id, value_json, overview_kind, is_user)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6)
+    let mut upsert = tx
+        .prepare_cached(
+            "INSERT INTO messages(session_id, position, message_id, value_json)
+         VALUES(?1, ?2, ?3, ?4)
          ON CONFLICT(session_id, position) DO UPDATE SET
            message_id = excluded.message_id,
-           value_json = excluded.value_json,
-           overview_kind = excluded.overview_kind,
-           is_user = excluded.is_user
+           value_json = excluded.value_json
          WHERE messages.message_id IS NOT excluded.message_id
-            OR messages.value_json IS NOT excluded.value_json
-            OR messages.overview_kind IS NOT excluded.overview_kind
-            OR messages.is_user IS NOT excluded.is_user",
-    ).context("failed to prepare differential transcript write")?;
+            OR messages.value_json IS NOT excluded.value_json",
+        )
+        .context("failed to prepare differential transcript write")?;
     for message in &session.messages {
         upsert
             .execute(rusqlite::params![
@@ -201,8 +199,6 @@ fn write_serialized_persisted_messages(
                     .context("persisted transcript position exceeds SQLite integer range")?,
                 message.message_id,
                 message.value_json,
-                i64::try_from(conversation_overview_kind_index(message.overview_kind))?,
-                i64::from(message.is_user),
             ])
             .map_err(|error| {
                 // Only this exact constraint at this message upsert is a

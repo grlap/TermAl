@@ -1,5 +1,5 @@
 // Split out of persist.rs: owns normalized session/message serialization,
-// invalid-session isolation, session/history/overview writes and retained-row
+// invalid-session isolation, session/history writes and retained-row
 // deletion that preserves quarantined sessions. Does not own transaction
 // boundaries, writer admission, global metadata/delegations or the differential
 // message-row writer in persist_sqlite_messages.rs.
@@ -8,8 +8,6 @@ struct SerializedPersistedMessage {
     position: usize,
     message_id: String,
     value_json: String,
-    overview_kind: ConversationOverviewKind,
-    is_user: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -21,7 +19,10 @@ struct PersistSessionRejection {
 
 impl PersistSessionRejection {
     fn new(session_id: &str, error: &anyhow::Error) -> Self {
-        Self { session_id: session_id.to_owned(), error: format!("{error:#}") }
+        Self {
+            session_id: session_id.to_owned(),
+            error: format!("{error:#}"),
+        }
     }
 
     fn bounded_observation(&self) -> Self {
@@ -37,11 +38,9 @@ struct SerializedPersistedSession {
     // Remote-proxy transcript IDs belong to the peer, never our allocators.
     local_identity_namespace: bool,
     message_start_index: usize,
-    message_count: usize,
     // Logical coverage is independent of the sparse upsert list.
     truncate_to: Option<usize>,
     snapshot: MessageSequence,
-    write_overview: bool,
     prompt_history_value_json: Option<String>,
     value_json: String,
     messages: Vec<SerializedPersistedMessage>,
@@ -82,7 +81,10 @@ fn serialize_persisted_session_since(
     let mut identities = HashSet::new();
     for message in &record.session.messages {
         if !identities.insert(message.id()) {
-            bail!("persisted session `{}` has duplicate transcript identity", record.session.id);
+            bail!(
+                "persisted session `{}` has duplicate transcript identity",
+                record.session.id
+            );
         }
     }
     let mut metadata = record.clone_without_messages();
@@ -151,13 +153,10 @@ fn serialize_persisted_session_since(
             };
             let value_json = serde_json::to_string(message)
                 .context("failed to serialize persisted transcript message")?;
-            let (overview_kind, is_user) = conversation_overview_message_metadata(message);
             Ok(SerializedPersistedMessage {
                 position,
                 message_id: message.id().to_owned(),
                 value_json,
-                overview_kind,
-                is_user,
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -166,10 +165,8 @@ fn serialize_persisted_session_since(
         session_id: record.session.id.clone(),
         local_identity_namespace: remote_proxy_identity.is_none(),
         message_start_index: record.message_start_index,
-        message_count: total_message_count,
         truncate_to: (retained_end == total_message_count).then_some(retained_end),
         snapshot: record.session.messages.clone(),
-        write_overview: remote_proxy_identity.is_none(),
         prompt_history_value_json,
         value_json,
         messages,
@@ -233,88 +230,11 @@ fn write_serialized_persisted_session(
         })?;
     }
     write_serialized_persisted_messages(tx, session)?;
-    if !session.write_overview {
-        tx.execute(
-            "DELETE FROM session_overviews WHERE session_id = ?1",
-            rusqlite::params![session.session_id],
-        )
-        .with_context(|| {
-            format!(
-                "failed to clear local transcript overview for remote proxy `{}`",
-                session.session_id
-            )
-        })?;
-        return Ok(());
-    }
-    let existing = tx.query_row(
-        "SELECT value_blob FROM session_overviews WHERE session_id = ?1",
-        [&session.session_id],
-        |row| row.get::<_, Vec<u8>>(0),
-    );
-    let mut overview_blob = match existing {
-        Ok(blob) => blob,
-        Err(rusqlite::Error::QueryReturnedNoRows) => {
-            let mut statement = tx.prepare(
-                "SELECT overview_kind,is_user FROM messages WHERE session_id=?1 ORDER BY position",
-            )?;
-            statement
-                .query_map([&session.session_id], |row| {
-                    Ok((row.get::<_, usize>(0)?, row.get::<_, bool>(1)?))
-                })?
-                .map(|row| {
-                    let (kind, is_user) = row?;
-                    let kind = match kind {
-                        0 => ConversationOverviewKind::Text,
-                        1 => ConversationOverviewKind::Command,
-                        2 => ConversationOverviewKind::Diff,
-                        3 => ConversationOverviewKind::Error,
-                        _ => bail!("invalid persisted transcript overview kind {kind}"),
-                    };
-                    Ok(encode_conversation_overview_message(kind, is_user))
-                })
-                .collect::<Result<Vec<_>>>()?
-        }
-        Err(error) => return Err(error.into()),
-    };
-    if let Some(end) = session.truncate_to {
-        overview_blob.truncate(end);
-    }
-    for message in &session.messages {
-        let byte = encode_conversation_overview_message(message.overview_kind, message.is_user);
-        if message.position < overview_blob.len() {
-            overview_blob[message.position] = byte;
-        } else if message.position == overview_blob.len() {
-            overview_blob.push(byte);
-        } else {
-            bail!("persisted transcript overview has a gap");
-        }
-    }
-    if overview_blob.len() != session.message_count {
-        bail!(
-            "persisted transcript overview for `{}` has {} positions but metadata expects {}",
-            session.session_id,
-            overview_blob.len(),
-            session.message_count
-        );
-    }
-    tx.execute(
-        "INSERT INTO session_overviews(session_id, value_blob)
-         VALUES(?1, ?2)
-         ON CONFLICT(session_id) DO UPDATE SET value_blob = excluded.value_blob
-         WHERE session_overviews.value_blob IS NOT excluded.value_blob",
-        rusqlite::params![session.session_id, overview_blob],
-    )
-    .with_context(|| {
-        format!(
-            "failed to write persisted transcript overview for `{}`",
-            session.session_id
-        )
-    })?;
     Ok(())
 }
 
 /// Reject only a transcript identity collision, retaining the complete last
-/// good session row, history, messages and overview inside the outer transaction.
+/// good session row, history and messages inside the outer transaction.
 fn write_serialized_persisted_session_isolated(
     tx: &rusqlite::Transaction<'_>,
     session: &SerializedPersistedSession,
@@ -326,8 +246,13 @@ fn write_serialized_persisted_session_isolated(
             Ok(None)
         }
         Err(error) if error.is::<PersistTranscriptIdentityConflict>() => {
-            tx.execute_batch("ROLLBACK TO transcript_session_write; RELEASE transcript_session_write")?;
-            Ok(Some(PersistSessionRejection::new(&session.session_id, &error)))
+            tx.execute_batch(
+                "ROLLBACK TO transcript_session_write; RELEASE transcript_session_write",
+            )?;
+            Ok(Some(PersistSessionRejection::new(
+                &session.session_id,
+                &error,
+            )))
         }
         Err(error) => Err(error),
     }

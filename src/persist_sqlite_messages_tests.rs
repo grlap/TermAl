@@ -85,10 +85,8 @@ mod sqlite_message_storage_tests {
             session_id: "session-test".into(),
             local_identity_namespace: true,
             message_start_index: 0,
-            message_count: count,
             truncate_to: Some(count),
             snapshot: MessageSequence::default(),
-            write_overview: true,
             prompt_history_value_json: None,
             value_json: "{}".into(),
             messages: (0..count)
@@ -97,8 +95,6 @@ mod sqlite_message_storage_tests {
                     message_id: format!("message-{position}"),
                     value_json: json!({"text": "x".repeat(128 * 1024), "position": position})
                         .to_string(),
-                    overview_kind: ConversationOverviewKind::Text,
-                    is_user: false,
                 })
                 .collect(),
         }
@@ -277,6 +273,12 @@ mod sqlite_message_storage_tests {
         let mut connection = connection(false);
         let mut session = session(8);
         save(&mut connection, &session);
+        connection
+            .execute(
+                "UPDATE messages SET overview_kind=3,is_user=1 WHERE position=7",
+                [],
+            )
+            .unwrap();
         let before = snapshot(&connection);
         install_audit(&connection);
         session.value_json = "{\"preview\":\"changed metadata\"}".into();
@@ -287,8 +289,6 @@ mod sqlite_message_storage_tests {
             "metadata-only saves must not rewrite transcript rows"
         );
         session.messages[7].value_json = "{\"text\":\"stream advanced\"}".into();
-        session.messages[7].overview_kind = ConversationOverviewKind::Error;
-        session.messages[7].is_user = true;
         save(&mut connection, &session);
         assert_eq!(audit(&connection), [("update".into(), "message-7".into())]);
         let after = snapshot(&connection);
@@ -310,7 +310,6 @@ mod sqlite_message_storage_tests {
             message.position = offset + 1;
         }
         session.messages.pop();
-        session.message_count = 4;
         session.truncate_to = Some(4);
         save(&mut connection, &session);
         let rows = snapshot(&connection);
@@ -323,15 +322,11 @@ mod sqlite_message_storage_tests {
             position: 4,
             message_id: "appended".into(),
             value_json: "{}".into(),
-            overview_kind: ConversationOverviewKind::Text,
-            is_user: false,
         });
-        session.message_count = 5;
         session.truncate_to = Some(5);
         save(&mut connection, &session);
         assert_eq!(snapshot(&connection)[4].2, "appended");
         session.messages.clear();
-        session.message_count = 1;
         session.truncate_to = Some(1);
         save(&mut connection, &session);
         assert_eq!(snapshot(&connection), [prefix]);
@@ -342,6 +337,12 @@ mod sqlite_message_storage_tests {
         let mut connection = connection(false);
         let mut session = session(4);
         save(&mut connection, &session);
+        connection
+            .execute(
+                "INSERT INTO session_overviews(session_id,value_blob) VALUES(?1,?2)",
+                rusqlite::params![session.session_id, vec![7_u8, 2, 0, 255]],
+            )
+            .unwrap();
         let before = snapshot(&connection);
         let overview: Vec<u8> = connection
             .query_row("SELECT value_blob FROM session_overviews", [], |r| r.get(0))

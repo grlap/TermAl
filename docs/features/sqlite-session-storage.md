@@ -50,7 +50,8 @@ lifecycles, and bounded file-descriptor budget remain one domain. See
 
 The primary state database keeps application and record metadata as JSON while
 normalizing the independently loaded session, transcript, prompt-history,
-delegation, overview, and response-board projections. The production DDL is:
+delegation, and response-board projections. Retired overview storage remains in
+the schema for compatibility. The production DDL is:
 
 ```sql
 CREATE TABLE meta (
@@ -142,15 +143,25 @@ updated by current writers. Metadata units may be absent only in a freshly
 initialized, never-persisted database with no other normalized authority rows.
 `sessions.value_json` stores one serialized
 metadata record with an empty `messages` array. `messages.value_json` stores one
-message payload. `overview_kind` and `is_user` are compact semantic fields
-maintained with each message write. The composite primary key answers ordered
+message payload. The composite primary key answers ordered
 range reads without a table scan; the unique key answers stable message-id
-cursor lookups. `session_overviews.value_blob` stores those semantic fields in
-one byte per global message position. It is updated in the same transaction as
-the message rows. The overview endpoint and its reader have been removed;
-these derived columns and the blob remain maintained but unread by transcript
-navigation. Removing their writes or storage requires a separate persistence
-change; this UI change leaves the schema and floors unchanged.
+cursor lookups. The retired `overview_kind`, `is_user`, and
+`session_overviews.value_blob` values have no product reader. Normal saves no
+longer classify messages, update these columns, or maintain overview blobs;
+new message rows inherit the existing zero defaults. Initialization restores
+missing compatibility columns without classifying old bodies or backfilling
+blobs. Previously stored values remain untouched on retained rows, including
+when a local session becomes a remote proxy. Rowid conversion still copies
+them, and normal session deletion still cascades to its historical rows. No
+column, table, schema version or persistence floor changes here; physical
+storage removal requires separately allocated migration work.
+
+If a nonempty transcript has no normalized prompt-history row, startup reports
+one neutral informational summary and loads empty composer history. This uses
+an indexed transcript-existence probe, including rows older than the loaded
+tail; it does not inspect retired author flags, scan message bodies, log their
+contents or reconstruct composer history. A present empty history row and an
+empty transcript do not produce that summary.
 `delegations.value_json` stores one serialized delegation record per row.
 
 Startup validates every normalized row against its durable key: session and

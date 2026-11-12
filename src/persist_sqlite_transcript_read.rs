@@ -1,5 +1,5 @@
 // Split out of persist.rs: owns normalized session loading and quarantine,
-// prompt-history reads, retained transcript tails, cursors, pages and overviews.
+// prompt-history reads, retained transcript tails, cursors and pages.
 // Does not own connection/snapshot lifetimes, global metadata adoption,
 // delegation loading, schema maintenance or persistence transactions.
 
@@ -113,15 +113,15 @@ fn load_session_records_from_sqlite_with_skipped_and_timings(
     }
     if missing_history_count > 0 {
         // Delta persistence need not write an empty history row: empty/oversized
-        // prompts, non-Text user messages and partial-window updates can leave
-        // its independent mutation stamp unchanged. is_user metadata cannot
-        // distinguish those legitimate states from an absent row. Report one
-        // neutral summary, never claim corruption or reconstruct from text.
+        // prompts, non-Text messages and partial-window updates can leave
+        // its independent mutation stamp unchanged. Report one neutral summary
+        // for missing history on nonempty transcripts, without classifying or
+        // scanning their bodies. Never reconstruct composer history from text.
         if missing_history_count > missing_history_sample.len() {
             missing_history_sample.push("…".to_owned());
         }
         eprintln!(
-            "persist> history info: loaded empty composer history for {missing_history_count} session(s) with user messages and no normalized history row; sessions=[{}], store=`{}`; this is expected when every stored user prompt is empty or exceeds the history size limit (also possible for non-text user messages or partial-window updates); otherwise the normalized row is absent",
+            "persist> history info: loaded empty composer history for {missing_history_count} session(s) with persisted messages and no normalized history row; sessions=[{}], store=`{}`; this can be normal when no eligible composer prompts were recorded (for example empty or oversized prompts, non-text messages or partial-window updates); transcript contents are not composer-history authority",
             missing_history_sample.join(", "),
             path.display()
         );
@@ -150,7 +150,7 @@ fn load_persisted_prompt_history(
                 path.display()
             )
         })?;
-    let mut missing_history_with_user_messages = false;
+    let mut missing_history_with_messages = false;
     record.session.prompt_history = match stored_history {
         Some(encoded) => normalize_prompt_history(
             serde_json::from_str::<Vec<String>>(&encoded).with_context(|| {
@@ -161,28 +161,26 @@ fn load_persisted_prompt_history(
             })?,
         ),
         None => {
-            // Diagnose from normalized message metadata, including user messages
-            // older than the loaded tail. Never reconstruct composer history
-            // from transcript content. Only the missing-row path pays this scan:
-            // the session_id prefix seeks, then EXISTS may inspect that session's
-            // entire message range if no user message matches. Present rows skip it.
-            let has_user_messages: bool = connection
+            // A single indexed existence probe includes rows older than the
+            // loaded tail without reading bodies or retired author metadata.
+            // Present history rows skip this probe entirely.
+            let has_messages: bool = connection
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM messages WHERE session_id = ?1 AND is_user = 1)",
+                    "SELECT EXISTS(SELECT 1 FROM messages WHERE session_id = ?1)",
                     rusqlite::params![record.session.id],
                     |row| row.get(0),
                 )
                 .with_context(|| {
                     format!(
-                        "failed to inspect user-message metadata for `{}`",
+                        "failed to inspect persisted transcript presence for `{}`",
                         record.session.id
                     )
                 })?;
-            missing_history_with_user_messages = has_user_messages;
+            missing_history_with_messages = has_messages;
             Vec::new()
         }
     };
-    Ok(missing_history_with_user_messages)
+    Ok(missing_history_with_messages)
 }
 
 fn load_persisted_session_tail(

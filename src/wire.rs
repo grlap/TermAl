@@ -913,7 +913,10 @@ impl Session {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StateSessionSummary {
-    #[serde(default, skip_serializing_if = "SessionTestRunActivitySnapshot::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "SessionTestRunActivitySnapshot::is_empty"
+    )]
     test_run_activity: SessionTestRunActivitySnapshot,
     /// Display/routing hint only; every domain operation validates its binding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1991,7 +1994,10 @@ struct PersistedDelegationAcceptanceEvaluation {
     store: Option<EngramAuthorityStoreKey>,
     #[serde(default)]
     source_fingerprint: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_acceptance_optional_source_id")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_acceptance_optional_source_id"
+    )]
     source_id: Option<EngramSourceId>,
     #[serde(default)]
     source_root: Option<AcceptanceEvaluationSourceRoot>,
@@ -2019,7 +2025,9 @@ struct PersistedRawAcceptanceEvaluationOutcome {
 impl TryFrom<PersistedDelegationAcceptanceEvaluation> for DelegationAcceptanceEvaluation {
     type Error = &'static str;
 
-    fn try_from(persisted: PersistedDelegationAcceptanceEvaluation) -> std::result::Result<Self, Self::Error> {
+    fn try_from(
+        persisted: PersistedDelegationAcceptanceEvaluation,
+    ) -> std::result::Result<Self, Self::Error> {
         if persisted.source_id.is_some() && persisted.source_fingerprint.is_some() {
             return Err("evaluation target has more than one source identity");
         }
@@ -3146,17 +3154,6 @@ struct SessionHistoryResponse {
     session_mutation_stamp: u64,
     #[serde(deserialize_with = "deserialize_nonempty_server_instance_id")]
     server_instance_id: String,
-}
-
-/// Coarse message category used by the position-linear conversation overview.
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-enum ConversationOverviewKind {
-    #[default]
-    Text,
-    Command,
-    Diff,
-    Error,
 }
 
 /// Defines the workspace control panel side variants.

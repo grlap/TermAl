@@ -292,7 +292,8 @@ mod sqlite_schema_tests {
                 .expect("file-backed sqlite should open");
             ensure_sqlite_state_schema_for_path(&connection, &path)
                 .expect("fresh current schema should initialize");
-            connection.execute("DELETE FROM state_metadata_units", [])
+            connection
+                .execute("DELETE FROM state_metadata_units", [])
                 .expect("remove the explicit fresh metadata to exercise missing authority");
             connection
                 .execute(
@@ -624,7 +625,7 @@ mod sqlite_schema_tests {
     }
 
     #[test]
-    fn current_schema_backfills_compact_session_overview_metadata() {
+    fn current_schema_restores_overview_columns_without_classifying_messages() {
         let connection =
             rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
         seed_current_state_core_tables(&connection);
@@ -661,7 +662,8 @@ mod sqlite_schema_tests {
         seed_current_state_auxiliary_tables(&connection);
         seed_current_state_metadata(&connection);
 
-        ensure_sqlite_state_schema(&connection).expect("v2 overview metadata should backfill");
+        ensure_sqlite_state_schema(&connection)
+            .expect("retained schema columns should be restored");
         assert_eq!(
             sqlite_state_table_columns(&connection, "messages")
                 .expect("post-maintenance message columns should be readable"),
@@ -676,22 +678,26 @@ mod sqlite_schema_tests {
             "the two tolerated missing message columns must be restored before boot continues"
         );
 
-        let value_blob: Vec<u8> = connection
-            .query_row(
-                "SELECT value_blob
-                 FROM session_overviews
-                 WHERE session_id = 'session-1'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("backfilled overview blob should exist");
+        let metadata: Vec<(i64, i64)> = connection
+            .prepare("SELECT overview_kind,is_user FROM messages ORDER BY position")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
         assert_eq!(
-            value_blob,
-            vec![
-                encode_conversation_overview_message(ConversationOverviewKind::Error, true,),
-                encode_conversation_overview_message(ConversationOverviewKind::Text, true,),
-                encode_conversation_overview_message(ConversationOverviewKind::Text, true,),
-            ]
+            metadata,
+            vec![(0, 0); 3],
+            "compatibility defaults must not classify stored bodies"
+        );
+        let overview_count: i64 = connection
+            .query_row("SELECT count(*) FROM session_overviews", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            overview_count, 0,
+            "column repair must not create overview blobs"
         );
     }
 
@@ -761,7 +767,7 @@ mod sqlite_schema_tests {
     }
 
     #[test]
-    fn current_schema_isolates_malformed_overview_backfill_per_session() {
+    fn current_schema_does_not_backfill_overviews_for_contiguous_or_gapped_transcripts() {
         let connection =
             rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
         seed_current_state_core_tables(&connection);
@@ -797,32 +803,23 @@ mod sqlite_schema_tests {
         ensure_sqlite_state_schema(&connection)
             .expect("one malformed session must not abort global schema startup");
 
-        let healthy_blob: Vec<u8> = connection
-            .query_row(
-                "SELECT value_blob
-                 FROM session_overviews
-                 WHERE session_id = 'healthy-local'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("healthy local session should still be backfilled");
+        let overview_count: i64 = connection
+            .query_row("SELECT count(*) FROM session_overviews", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(overview_count, 0);
+        let positions: Vec<(String, i64, i64, i64)> = connection.prepare(
+            "SELECT session_id,position,overview_kind,is_user FROM messages ORDER BY session_id"
+        ).unwrap().query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+            .unwrap().collect::<rusqlite::Result<_>>().unwrap();
         assert_eq!(
-            healthy_blob,
-            vec![encode_conversation_overview_message(
-                ConversationOverviewKind::Text,
-                false,
-            )]
+            positions,
+            vec![
+                ("gapped-local".into(), 4, 0, 0),
+                ("healthy-local".into(), 0, 0, 0)
+            ]
         );
-        let malformed_overview_count: u32 = connection
-            .query_row(
-                "SELECT COUNT(*)
-                 FROM session_overviews
-                 WHERE session_id = 'gapped-local'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("malformed overview count should be queryable");
-        assert_eq!(malformed_overview_count, 0);
     }
 
     #[test]

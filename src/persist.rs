@@ -16,7 +16,7 @@ Current-schema validation, initialization and authority checks live in
 `persist_sqlite_schema_tests.rs`. Normalized session quarantine and transcript
 reads live in `persist_sqlite_transcript_read.rs`; session serialization and
 transaction-local writes live in `persist_sqlite_transcript_write.rs`.
-Overview-specific schema upgrades and backfill live in
+Compatibility repair for the retained overview columns lives in
 `persist_sqlite_overview.rs`. Physical transcript layout, rowid conversion and
 differential message writes live in `persist_sqlite_messages.rs`.
 

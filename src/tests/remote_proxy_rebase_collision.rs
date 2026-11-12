@@ -159,10 +159,8 @@ fn window(
         session_id: "session-shifted-window".into(),
         local_identity_namespace,
         message_start_index: start,
-        message_count,
         truncate_to: Some(message_count),
         snapshot: peer_messages(ids),
-        write_overview: false,
         prompt_history_value_json: None,
         value_json: "{}".into(),
         messages: ids
@@ -172,8 +170,6 @@ fn window(
                 position: start + index,
                 message_id: (*id).to_owned(),
                 value_json: text_body(id, "assistant", &format!("body of {id}")),
-                overview_kind: ConversationOverviewKind::Text,
-                is_user: false,
             })
             .collect(),
     }

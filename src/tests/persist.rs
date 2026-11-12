@@ -3757,8 +3757,9 @@ fn sqlite_missing_prompt_history_emits_a_diagnostic_without_resurrecting_prompts
     const CASES: &[(&str, usize)] = &[
         ("old-user-missing", 1),
         ("old-user-empty", 0),
-        ("assistant-only", 0),
+        ("assistant-only", 1),
         ("empty-session", 0),
+        ("malformed-cold-row", 1),
         ("two-sessions", 2),
         ("six-sessions", 6),
         ("excluded-empty-user", 1),
@@ -3855,6 +3856,19 @@ fn sqlite_missing_prompt_history_emits_a_diagnostic_without_resurrecting_prompts
                 }
             }
         }
+        if case == "malformed-cold-row" {
+            connection
+                .execute("UPDATE messages SET value_json='{' WHERE position=0", [])
+                .unwrap();
+        }
+        // Contradict the old classification in both directions. The diagnostic
+        // now reports missing rows neutrally, regardless of these retired values.
+        connection
+            .execute(
+                "UPDATE messages SET is_user=?1",
+                [i64::from(case == "assistant-only")],
+            )
+            .unwrap();
         drop(connection);
         let loaded = load_state(&path)
             .expect("diagnostic is not a load failure")
@@ -3916,6 +3930,9 @@ fn sqlite_missing_prompt_history_emits_a_diagnostic_without_resurrecting_prompts
         );
         if let Some(summary) = summaries.first() {
             assert!(summary.contains(&format!("for {expected_count} session(s)")));
+            if case == "assistant-only" {
+                assert!(summary.contains("with persisted messages and no normalized history row"));
+            }
             for session_id in session_ids.iter().take(5) {
                 assert!(summary.contains(session_id));
             }
@@ -3931,9 +3948,10 @@ fn sqlite_missing_prompt_history_emits_a_diagnostic_without_resurrecting_prompts
                 .nth(1)
                 .unwrap();
             assert!(summary.contains(path));
-            assert!(summary.contains(
-                "expected when every stored user prompt is empty or exceeds the history size limit"
-            ));
+            assert!(
+                summary
+                    .contains("this can be normal when no eligible composer prompts were recorded")
+            );
             assert!(!summary.contains("corrupt") && !summary.contains("lost"));
         }
         assert!(
@@ -4587,9 +4605,8 @@ fn sqlite_startup_tolerates_remote_metadata_message_count_without_local_rows() {
 }
 
 /// Regression: a persisted remote proxy can own a bounded, nonzero transcript
-/// suffix while deliberately omitting the local-only overview blob. Schema
-/// startup must recognize that shape before attempting local overview
-/// backfill.
+/// suffix without an overview blob. Startup must retain that bounded shape
+/// without manufacturing the retired overview projection.
 #[test]
 fn sqlite_startup_tolerates_bounded_remote_proxy_suffix_without_overview() {
     let state_root = PersistTestRoot::new("bounded-remote-proxy-boot");

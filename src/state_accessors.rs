@@ -82,74 +82,6 @@ fn bounded_live_activity_summary(
     })
 }
 
-fn conversation_overview_kind_index(kind: ConversationOverviewKind) -> usize {
-    match kind {
-        ConversationOverviewKind::Text => 0,
-        ConversationOverviewKind::Command => 1,
-        ConversationOverviewKind::Diff => 2,
-        ConversationOverviewKind::Error => 3,
-    }
-}
-
-fn conversation_overview_message_metadata(message: &Message) -> (ConversationOverviewKind, bool) {
-    let (author, kind) = match message {
-        Message::Command {
-            author,
-            status: CommandStatus::Error,
-            ..
-        } => (author, ConversationOverviewKind::Error),
-        Message::ParallelAgents { author, agents, .. }
-            if agents
-                .iter()
-                .any(|agent| agent.status == ParallelAgentStatus::Error) =>
-        {
-            (author, ConversationOverviewKind::Error)
-        }
-        Message::Approval {
-            author, decision, ..
-        } if matches!(
-            decision,
-            ApprovalDecision::Interrupted | ApprovalDecision::Canceled | ApprovalDecision::Rejected
-        ) =>
-        {
-            (author, ConversationOverviewKind::Error)
-        }
-        // Deliberate: Declined is a benign answerless resolution, whether the
-        // user skipped or TermAl self-resolved an unattended question. It
-        // does not match this error guard and falls through to Text below.
-        Message::UserInputRequest { author, state, .. }
-        | Message::McpElicitationRequest { author, state, .. }
-        | Message::CodexAppRequest { author, state, .. }
-            if matches!(
-                state,
-                InteractionRequestState::Interrupted | InteractionRequestState::Canceled
-            ) =>
-        {
-            (author, ConversationOverviewKind::Error)
-        }
-        Message::TestRun { author, run, .. } if run.state == TestRunState::Failed => {
-            (author, ConversationOverviewKind::Error)
-        }
-        Message::Command { author, .. } | Message::TestRun { author, .. } => {
-            (author, ConversationOverviewKind::Command)
-        }
-        Message::Diff { author, .. } | Message::FileChanges { author, .. } => {
-            (author, ConversationOverviewKind::Diff)
-        }
-        Message::Text { author, .. }
-        | Message::Thinking { author, .. }
-        | Message::Markdown { author, .. }
-        | Message::SubagentResult { author, .. }
-        | Message::ParallelAgents { author, .. }
-        | Message::EngramControl { author, .. }
-        | Message::Approval { author, .. }
-        | Message::UserInputRequest { author, .. }
-        | Message::McpElicitationRequest { author, .. }
-        | Message::CodexAppRequest { author, .. } => (author, ConversationOverviewKind::Text),
-    };
-    (kind, matches!(author, Author::You))
-}
-
 /// A remote tail repair may fall back to applying the narrow SSE delta when
 /// transport or freshness prevents the bounded fetch itself.
 fn is_recoverable_remote_tail_miss(err: &ApiError) -> bool {
@@ -618,7 +550,8 @@ impl AppState {
                 hook();
             }
         });
-        let identity_and_disposition = projected_pending_prompt_identities(record).collect::<Vec<_>>();
+        let identity_and_disposition =
+            projected_pending_prompt_identities(record).collect::<Vec<_>>();
         let serialized = serde_json::to_vec(&(
             record.orchestrator_auto_dispatch_blocked,
             identity_and_disposition,
@@ -630,7 +563,12 @@ impl AppState {
     fn wire_session_from_record(local_instance_id: &str, record: &SessionRecord) -> Session {
         let mut session = record.session.clone();
         if record.is_local_session() {
-            session.provider_handoffs = record.provider_handoff_observations.rows.iter().cloned().collect();
+            session.provider_handoffs = record
+                .provider_handoff_observations
+                .rows
+                .iter()
+                .cloned()
+                .collect();
             session.provider_handoff_history = Some(record.provider_handoff_observations.history());
         } else {
             session.provider_handoffs.clear();
@@ -645,7 +583,9 @@ impl AppState {
         session.queue_paused = record.orchestrator_auto_dispatch_blocked;
         session.source_tracking_recovery = if record.is_local_session() {
             record.engram.observation_delete_requested
-        } else { record.session.source_tracking_recovery };
+        } else {
+            record.session.source_tracking_recovery
+        };
         session.queue_projection_hash = if record.is_local_session() {
             Some(Self::queue_projection_hash(record))
         } else {
@@ -712,12 +652,16 @@ impl AppState {
     ) -> StateSessionSummary {
         #[cfg(test)]
         TEST_BEFORE_SESSION_SUMMARY_PROJECT.with(|hook| {
-            if let Some(hook) = hook.borrow_mut().as_mut() { hook(); }
+            if let Some(hook) = hook.borrow_mut().as_mut() {
+                hook();
+            }
         });
         let session = &record.session;
         let mut summary = StateSessionSummary {
             test_run_activity: SessionTestRunActivitySnapshot::default(),
-            mailbox_participant_id: record.mailbox_binding().map(FederationMailboxBinding::participant_key),
+            mailbox_participant_id: record
+                .mailbox_binding()
+                .map(FederationMailboxBinding::participant_key),
             id: session.id.clone(),
             name: session.name.clone(),
             emoji: session.emoji.clone(),
@@ -772,7 +716,9 @@ impl AppState {
             provider_capacity_waiting: session.provider_capacity_waiting,
             source_tracking_recovery: if record.is_local_session() {
                 record.engram.observation_delete_requested
-            } else { session.source_tracking_recovery },
+            } else {
+                session.source_tracking_recovery
+            },
             queue_projection_hash: if record.is_local_session() {
                 Some(Self::queue_projection_hash(record))
             } else {
@@ -1266,19 +1212,25 @@ impl AppState {
         }
         #[cfg(test)]
         observe_state_snapshot_projection_for_test();
-        let sessions = inner.sessions.iter().filter(|record| !record.hidden)
+        let sessions = inner
+            .sessions
+            .iter()
+            .filter(|record| !record.hidden)
             .map(|record| Self::wire_session_summary_from_record(&self.server_instance_id, record))
             .collect();
         self.snapshot_header_from_inner(inner, agent_readiness, sessions)
     }
 
     fn snapshot_header_from_inner(
-        &self, inner: &StateInner, agent_readiness: Vec<AgentReadiness>,
+        &self,
+        inner: &StateInner,
+        agent_readiness: Vec<AgentReadiness>,
         mut sessions: Vec<StateSessionSummary>,
     ) -> StateResponse {
         let projection = self.test_run_history_projection_locked(inner);
         for session in &mut sessions {
-            session.test_run_activity = SessionTestRunActivitySnapshot::captured(projection.clone(), &session.id);
+            session.test_run_activity =
+                SessionTestRunActivitySnapshot::captured(projection.clone(), &session.id);
         }
         StateResponse {
             revision: inner.revision,

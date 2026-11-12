@@ -220,9 +220,10 @@ history adoption choose a new FOLLOW/STAY state.
 
 There is no colored segment rail or overview fetch. The server's session
 `/overview` route, remote forwarding and response types are removed. The compact
-persisted kind/author metadata remains written but unread: stopping those writes
-and removing storage belong to separately allocated persistence work. This UI
-change does not alter schema floors, migration or backfill behavior.
+persisted kind/author metadata and overview blobs are no longer read, populated
+or backfilled. Historical values and compatibility defaults remain in the
+unchanged schema; physical storage removal requires separately allocated
+migration work.
 
 ## Core Model
 
