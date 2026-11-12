@@ -45,6 +45,12 @@ struct MailboxSummary {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct MailboxMessage {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "reject_inactive_test_request_custody"
+    )]
+    test_request: Option<MailboxTestPayload>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     notification_cause: Option<String>,
     id: String,
@@ -3327,6 +3333,7 @@ fn mailbox_message_for_idempotency_key(
 fn mailbox_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MailboxMessage> {
     let notification_state: String = row.get(14)?;
     Ok(MailboxMessage {
+        test_request: None,
         notification_cause: None,
         id: row.get(0)?,
         mailbox_id: row.get(1)?,

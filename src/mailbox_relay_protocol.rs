@@ -202,6 +202,12 @@ impl MailboxRelayWake {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct MailboxRelayAppend {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "reject_inactive_test_request_custody"
+    )]
+    test_request: Option<MailboxTestPayload>,
     requested_target: String,
     conversation: MailboxRelayConversation,
     sender: MailboxRelayPrincipal,
@@ -216,6 +222,9 @@ struct MailboxRelayAppend {
 
 impl MailboxRelayAppend {
     fn input(&self) -> Result<MailboxAppendInput, ApiError> {
+        if self.test_request.is_some() {
+            return Err(ApiError::conflict(TEST_REQUEST_CUSTODY_UNAVAILABLE));
+        }
         self.conversation.require_member(&self.sender)?;
         self.conversation.require_member(&self.target)?;
         if self.requested_target.trim().is_empty()

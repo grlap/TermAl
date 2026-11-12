@@ -24,6 +24,7 @@ async fn mailbox_relay_lost_home_reply_reopens_source_pin_and_replays_exactly_on
     // The home has not appended yet, so do not fabricate its association/id.
     // An unconfirmed sender pin is sufficient to recover the actual first send.
     let append = MailboxRelayAppend {
+        test_request: None,
         requested_target: target.principal.participant_key(),
         conversation: conversation.clone(),
         sender: sender.principal.clone(),

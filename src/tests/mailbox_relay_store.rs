@@ -50,6 +50,7 @@ fn envelope(store: &MailboxStore) -> (MailboxRelayAppend, FederationPeerSnapshot
     };
     (
         MailboxRelayAppend {
+            test_request: None,
             requested_target: "session-remote-proxy".into(),
             conversation,
             sender,

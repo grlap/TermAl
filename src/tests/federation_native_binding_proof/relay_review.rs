@@ -77,6 +77,7 @@ fn append_to_central_target(
         .native_mailbox_relay_descriptor(target_id)
         .unwrap();
     let append = MailboxRelayAppend {
+        test_request: None,
         requested_target: target.principal.participant_key(),
         conversation: MailboxRelayConversation::new(
             fixture.central.native_mailbox_relay_home().unwrap(),

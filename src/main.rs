@@ -974,6 +974,7 @@ include!("remote_authority.rs");
 include!("federation_identity.rs");
 include!("federation_mailbox_protocol.rs");
 include!("mailbox_relay_protocol.rs");
+include!("mailbox_test_request.rs");
 include!("mailbox_relay_errors.rs");
 include!("federation_durability_diagnostics.rs");
 include!("federation_link_diagnostics.rs");

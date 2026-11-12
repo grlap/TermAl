@@ -22,6 +22,7 @@ fn append_to_satellite(fixture: &Fixture, key: &str) -> (MailboxRelayAppend, Mai
         .native_mailbox_relay_descriptor(&fixture.native)
         .unwrap();
     let append = MailboxRelayAppend {
+        test_request: None,
         requested_target: target.principal.participant_key(),
         conversation: MailboxRelayConversation::new(
             fixture.central.native_mailbox_relay_home().unwrap(),

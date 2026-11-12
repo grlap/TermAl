@@ -456,6 +456,7 @@ impl AppState {
             ));
         }
         let append = MailboxRelayAppend {
+            test_request: None,
             requested_target: request.target_session_id.clone(),
             conversation: conversation.clone(),
             sender: sender.principal.clone(),

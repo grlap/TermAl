@@ -13,6 +13,7 @@ fn append_from_new_sender(fixture: &Fixture, key: &str) -> MailboxAppendReceipt 
         .native_mailbox_relay_descriptor(&fixture.native)
         .unwrap();
     let append = MailboxRelayAppend {
+        test_request: None,
         requested_target: target.principal.participant_key(),
         conversation: MailboxRelayConversation::new(
             fixture.central.native_mailbox_relay_home().unwrap(),

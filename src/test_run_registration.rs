@@ -24,6 +24,12 @@ fn test_run_timestamp() -> String {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TestRunNativeOrigin {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "reject_inactive_test_request_custody"
+    )]
+    causal_request: Option<TestRunCausalRequest>,
     host: FederationHostIdentity,
     native_session_id: String,
     native_creation_id: String,
@@ -787,6 +793,7 @@ impl AppState {
                     .filter(|host| host.validate().is_ok())
                     .filter(|_| mailbox_relay_uuid(&inner.sessions[index].federation_native_creation_id))
                     .map(|host| TestRunNativeOrigin {
+                        causal_request: None,
                         host: host.clone(),
                         native_session_id: session_id.to_owned(),
                         native_creation_id: inner.sessions[index].federation_native_creation_id.clone(),

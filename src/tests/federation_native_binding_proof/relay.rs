@@ -163,6 +163,7 @@ async fn mailbox_relay_rpc_home_send_read_ack_and_opposite_direction_share_one_c
     )
     .unwrap();
     let append = MailboxRelayAppend {
+        test_request: None,
         requested_target: "session-remote-proxy".into(),
         conversation: conversation.clone(),
         sender: sender.principal.clone(),
@@ -304,6 +305,7 @@ async fn mailbox_relay_rpc_rejects_forged_origin_and_wrong_home_before_any_appen
         MailboxRelayConversation::new(home, satellite.principal.clone(), central.principal.clone())
             .unwrap();
     let append = MailboxRelayAppend {
+        test_request: None,
         requested_target: "session-remote-proxy".into(),
         conversation,
         sender: satellite.principal,
