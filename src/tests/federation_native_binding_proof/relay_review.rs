@@ -17,6 +17,9 @@ mod wake_order;
 #[path = "relay_wake_progress.rs"]
 mod wake_progress;
 
+#[path = "relay_removed_target.rs"]
+mod removed_target;
+
 fn claude_input(fixture: &Fixture) -> mpsc::Receiver<ClaudeRuntimeCommand> {
     claude_input_for(&fixture.central, &fixture.native)
 }

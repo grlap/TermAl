@@ -710,6 +710,79 @@ impl MailboxRelayWakeWorker {
 }
 
 impl AppState {
+    fn retire_removed_mailbox_relay_notification(
+        &self,
+        wake: &MailboxRelayWake,
+    ) -> Result<bool, ApiError> {
+        wake.validate()?;
+        let _writer = self
+            .mailbox_store
+            .lock_writer_with_budget(
+                "retiring removed relay recipient notification",
+                Duration::from_secs(2),
+            )
+            .map_err(mailbox_api_error)?;
+        let mut connection = self.mailbox_store.connection().map_err(mailbox_api_error)?;
+        let transaction = begin_mailbox_write(
+            &mut connection,
+            "retiring removed relay recipient notification",
+        )
+        .map_err(mailbox_api_error)?;
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        inner.require_delegation_inventory()?;
+        if inner.federation.local.as_ref() != Some(&wake.target.host)
+            || mailbox_relay_store_id(&transaction).map_err(mailbox_api_error)?
+                != wake.target.store_id
+        {
+            return Err(ApiError::conflict(
+                "relay notification target host or store changed",
+            ));
+        }
+        // Hidden, quarantined and incompletely loaded roots are not removals.
+        // Hold the state guard through the metadata transaction so a restored
+        // root cannot race this absence decision.
+        if inner
+            .find_session_index(&wake.target.native_session_id)
+            .is_some()
+            || inner
+                .quarantined_persisted_session_ids
+                .contains(&wake.target.native_session_id)
+        {
+            return Ok(false);
+        }
+        let original: Option<String> = transaction.query_row(
+            "SELECT wake_json FROM mailbox_relay_notifications WHERE mailbox_id=?1 AND target_key=?2 AND through_sequence=?3",
+            rusqlite::params![wake.mailbox_id, wake.target.participant_key(), wake.sequence],
+            |row| row.get(0),
+        ).optional().map_err(|error| mailbox_api_error(error.into()))?;
+        let changed = if let Some(json) = original {
+            let retained: MailboxRelayWake = serde_json::from_str(&json)
+                .map_err(|_| ApiError::conflict("invalid native relay notification metadata"))?;
+            if retained != *wake {
+                return Err(ApiError::conflict(
+                    "relay notification changed during removal recovery",
+                ));
+            }
+            transaction.execute(
+                "DELETE FROM mailbox_relay_notifications WHERE mailbox_id=?1 AND target_key=?2 AND through_sequence=?3 AND wake_json=?4",
+                rusqlite::params![wake.mailbox_id, wake.target.participant_key(), wake.sequence, json],
+            ).map_err(|error| mailbox_api_error(error.into()))?
+        } else {
+            0
+        };
+        transaction
+            .commit()
+            .map_err(|error| mailbox_api_error(error.into()))?;
+        if changed != 0 {
+            // Retire only this wake obligation, never a message or its cursor.
+            eprintln!(
+                "native relay notification undeliverable: recipient removed session={:?} sequence={}; wake metadata retired",
+                wake.target.native_session_id, wake.sequence,
+            );
+        }
+        Ok(true)
+    }
+
     async fn reconcile_mailbox_relay_notifications_after_boot(
         &self,
         recovery: &mut MailboxRelayBootRecovery,
@@ -792,6 +865,12 @@ impl AppState {
         &self,
         wake: MailboxRelayWake,
     ) -> Result<(), ApiError> {
+        let app = self.clone();
+        let observed = wake.clone();
+        if run_blocking_api(move || app.retire_removed_mailbox_relay_notification(&observed)).await?
+        {
+            return Ok(());
+        }
         // The home cursor, not a per-process handoff flag, decides whether
         // unread mail remains. Read never advances or fabricates a cursor.
         let page: MailboxReadResponse = self
@@ -987,7 +1066,15 @@ impl AppState {
                 if worker.federation_executor_wake_signal.is_stopping() { break; }
                 next=*id;
                 if let Ok(wake)=serde_json::from_str::<MailboxRelayWake>(json) {
-                    if let Err(error)=worker.queue_native_mailbox_relay_wake(&wake,None) {
+                    let outcome = worker.retire_removed_mailbox_relay_notification(&wake)
+                        .and_then(|retired| {
+                            if retired {
+                                Ok(false)
+                            } else {
+                                worker.queue_native_mailbox_relay_wake(&wake, None)
+                            }
+                        });
+                    if let Err(error)=outcome {
                         // At most eight rows per bounded pass; never log bodies,
                         // opaque locators or credentials from a failed attempt.
                         eprintln!("native relay notification {id} deferred ({})",error.status);
