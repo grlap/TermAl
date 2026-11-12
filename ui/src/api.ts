@@ -127,30 +127,6 @@ export type SessionHistoryResponse = {
   serverInstanceId: string;
 };
 
-export type ConversationOverviewKind = "text" | "command" | "diff" | "error";
-
-export type ConversationOverviewBucket = {
-  c: number;
-  k: ConversationOverviewKind;
-  u: number;
-  m: boolean;
-};
-
-export type ConversationOverviewMarker = {
-  position: number;
-  kind: ConversationMarkerKind;
-  label?: string | null;
-};
-
-export type SessionOverviewResponse = {
-  sessionId: string;
-  messageCount: number;
-  sessionMutationStamp: number;
-  buckets: ConversationOverviewBucket[];
-  markers: ConversationOverviewMarker[];
-  latestPosition: number;
-};
-
 export const RESPONSE_BOARD_DEFAULT_TAB_ID = "response-board-default";
 
 export type ResponseBoardCard = {
@@ -749,15 +725,6 @@ export function deleteResponseBoardCard(cardId: string) {
   return request<void>(
     `/api/response-board/cards/${encodeURIComponent(cardId)}`,
     { method: "DELETE" },
-  );
-}
-
-export function fetchSessionOverview(sessionId: string, buckets = 200) {
-  const query = new URLSearchParams({
-    buckets: String(Math.max(1, Math.min(512, Math.floor(buckets)))),
-  });
-  return requestJsonFirst<SessionOverviewResponse>(
-    `/api/sessions/${encodeURIComponent(sessionId)}/overview?${query.toString()}`,
   );
 }
 

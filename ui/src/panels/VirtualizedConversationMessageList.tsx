@@ -91,6 +91,7 @@ import {
   type PendingPrependNativeReflow,
 } from "./virtualized-conversation-scroll-events";
 import { useCommittedRef } from "./use-committed-ref";
+import { withHistoryExtent } from "./conversation-history-scroll-geometry";
 import type {
   BoundCodexAppRequestSubmitHandler,
   BoundMcpElicitationSubmitHandler,
@@ -129,6 +130,8 @@ export function VirtualizedConversationMessageList({
   renderMessageCard,
   sessionId,
   messageStartIndex = 0,
+  historyBeforePx = 0,
+  historyAfterPx = 0,
   messages,
   scrollContainerRef,
   tailFollowIntent = false,
@@ -149,6 +152,8 @@ export function VirtualizedConversationMessageList({
   renderMessageCard: RenderMessageCard;
   sessionId: string;
   messageStartIndex?: number;
+  historyBeforePx?: number;
+  historyAfterPx?: number;
   messages: Message[];
   scrollContainerRef: RefObject<HTMLElement | null>;
   tailFollowIntent?: boolean;
@@ -816,7 +821,7 @@ export function VirtualizedConversationMessageList({
   const layoutPageHeightsRef = useCommittedRef<Record<string, number>>(
     layoutPageHeights,
   );
-  const pageLayout = useMemo(() => buildPageLayout(pageHeights), [pageHeights]);
+  const pageLayout = useMemo(() => withHistoryExtent(buildPageLayout(pageHeights), historyBeforePx, historyAfterPx), [pageHeights, historyBeforePx, historyAfterPx]);
   const estimatedBottomScrollTop = clampVirtualizedViewportScrollTop({
     scrollTop: pageLayout.totalHeight - viewportHeight,
     viewportHeight,
@@ -1155,9 +1160,7 @@ export function VirtualizedConversationMessageList({
     ],
   );
   const topSpacerHeight =
-    renderedMountedPageRange.startIndex > 0
-      ? (pageLayout.tops[renderedMountedPageRange.startIndex] ?? 0)
-      : 0;
+    pageLayout.tops[renderedMountedPageRange.startIndex] ?? historyBeforePx;
   const mountedPageEndOffset =
     renderedMountedPageRange.endIndex <= renderedMountedPageRange.startIndex
       ? topSpacerHeight
@@ -1466,6 +1469,7 @@ export function VirtualizedConversationMessageList({
   );
 
   useVirtualizedConversationPrependEffects({
+    tailFollowIntent: tailFollowIntentIsAuthoritative && tailFollowIntent,
     applyMountedPageRange,
     buildWorkingMountedRangeForScrollTop,
     clearPendingDeferredLayoutTimer,
@@ -1498,6 +1502,7 @@ export function VirtualizedConversationMessageList({
   });
 
   useVirtualizedConversationHandle({
+    estimatedResidentHeightPx: pageLayout.totalHeight - historyBeforePx - historyAfterPx,
     beginUserScrollNavigation,
     applyMountedPageRange,
     buildWorkingMountedRangeForScrollTop,

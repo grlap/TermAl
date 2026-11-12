@@ -1,6 +1,6 @@
 // Owns the isolated preview's fetch/EventSource boundary and finite wire replay.
 // Does not replace App adoption, session publication, or workspace navigation.
-import type { GitStatusResponse, SessionOverviewResponse, StateResponse } from "../api";
+import type { GitStatusResponse, StateResponse } from "../api";
 import type { Session } from "../types";
 import { FIXTURE_SERVER_INSTANCE, FIXTURE_WORKSPACE_ID,
   type StateEventPacket, type StateEventWorkload } from "./state-event-test-fixtures";
@@ -71,35 +71,13 @@ export function installStateEventFixtureTransport(workload: StateEventWorkload) 
         return Response.json(status);
       }
     }
-    const sessionRoute = /^\/api\/sessions\/([^/]+)(?:\/(agent-commands|history|overview))?$/.exec(url.pathname);
+    const sessionRoute = /^\/api\/sessions\/([^/]+)(?:\/(agent-commands|history))?$/.exec(url.pathname);
     const session = sessionRoute ? workload.sessions.get(decodeURIComponent(sessionRoute[1])) : undefined;
     if (method === "GET" && session) {
       if (sessionRoute![2] === "agent-commands") return Response.json({ commands: [] });
-      if (sessionRoute![2] === "overview") {
-        const requested = Number(url.searchParams.get("buckets") ?? 200);
-        if (!Number.isInteger(requested) || requested < 1 || requested > 512) {
-          throw new Error("Fixture overview requires between 1 and 512 buckets.");
-        }
-        // This fixture contains only alternating user/assistant text, without markers.
-        // Project the complete fixture transcript, independently of the loaded tail.
-        const count = session.messages.length;
-        const bucketCount = Math.min(requested, Math.max(1, count));
-        const overview: SessionOverviewResponse = {
-          sessionId: session.id, messageCount: count,
-          sessionMutationStamp: session.sessionMutationStamp ?? 0,
-          buckets: Array.from({ length: bucketCount }, (_, index) => {
-            const messages = session.messages.slice(Math.ceil(index * count / bucketCount),
-              Math.ceil((index + 1) * count / bucketCount));
-            return { c: messages.length, k: "text", m: false,
-              u: messages.filter(message => message.type === "text" && message.author === "you").length };
-          }),
-          markers: [], latestPosition: Math.max(0, count - 1),
-        };
-        return Response.json(overview);
-      }
       if (sessionRoute![2] === "history") {
         // This timing fixture supports tail and explicit-index pages only.
-        // Refuse cursor/overview navigation rather than report an unrelated tail.
+        // Refuse unsupported cursor navigation rather than report an unrelated tail.
         if ([...url.searchParams.keys()].some(key => key !== "limit" && key !== "start")) {
           const failure = `${method} ${url.pathname}${url.search}`;
           refusedRequests.push(failure);

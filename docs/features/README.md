@@ -45,7 +45,7 @@ next, see [Project Status](./project-status.md).
 
 - [Concurrent Session Link Cards](./concurrent-session-link-cards.md)
 - [Agent Delegation Sessions](./agent-delegation-sessions.md)
-- [Conversation Overview Map](./conversation-overview-map.md)
+- [Conversation Overview Map (superseded)](./conversation-overview-map.md)
 - [Conversation Markers](./conversation-markers.md)
 - [Code Navigation MCP](./code-navigation-mcp.md)
 - [Editor Buffer Persistence](./editor-buffer-persistence.md)

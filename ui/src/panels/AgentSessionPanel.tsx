@@ -27,11 +27,8 @@ import { SourceTrackingRecoveryIndicator } from "./source-tracking-recovery-card
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
 import { type RenderMessageCard } from "./virtualized-conversation-types";
 import { usePendingUserInputSubmissions } from "./pending-user-input-submissions";
-import {
-  CONVERSATION_OVERVIEW_MIN_MESSAGES,
-  ConversationOverviewRail,
-} from "./ConversationOverviewRail";
-import { useConversationOverviewController } from "./conversation-overview-controller";
+import { CheckpointScrollbarDots } from "./CheckpointScrollbarDots";
+import { useConversationHistoryScroll } from "./useConversationHistoryScroll";
 import {
   CONVERSATION_MESSAGE_ENTRY_REVEAL_CLASS_NAME,
   useConversationMessageRevealIds,
@@ -101,11 +98,9 @@ const NOOP_PIN_RESPONSE_BOARD_MESSAGE = () => {};
 const NOOP_OPEN_MAILBOX = () => {};
 const NOOP_RESUME_SESSION_QUEUE = () => {};
 
-// The transcript virtualizer and overview rail intentionally share the same
-// size threshold. The rail may still defer its first paint, but marker jumps
-// need the virtualizer handle as soon as the transcript itself virtualizes.
-const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES =
-  CONVERSATION_OVERVIEW_MIN_MESSAGES;
+// Preserve the transcript's existing virtualization threshold independently
+// of checkpoint presentation and bounded-history hydration.
+const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES = 30;
 
 function ConversationMessageRevealShell({
   className,
@@ -613,7 +608,6 @@ const SessionConversationPage = memo(
       }
       return () => cancelPendingSessionTranscriptCommit(session.id);
     }, [isActive, session.id]);
-    const overviewMessages = visibleMessages;
     // Pending prompts are the live tail's queued follow-ups, NOT bulk history — keep
     // them undeferred. The message list defers its bulk for streaming perf but always
     // splices the undeferred tail back in (`includeUndeferredMessageTail` below); the
@@ -651,34 +645,33 @@ const SessionConversationPage = memo(
       session.status === "active" ||
       session.status === "approval" ||
       session.status === "stopping";
-    const overviewMessageCount = Math.max(
+    const conversationMessageCount = Math.max(
       session.messageCount ?? 0,
-      overviewMessages.length,
+      visibleMessages.length,
     );
-    const overviewMessageStartIndex =
+    const conversationMessageStartIndex =
       session.messageStartIndex ??
       (hasNewerHistory && !hasOlderHistory
         ? 0
-        : Math.max(0, overviewMessageCount - overviewMessages.length));
+        : Math.max(0, conversationMessageCount - visibleMessages.length));
     const visiblePendingPromptIds = useMemo(
       () => visiblePendingPrompts.map((prompt) => prompt.id),
       [visiblePendingPrompts],
     );
-    const conversationOverview = useConversationOverviewController({
+    const conversationHistoryScroll = useConversationHistoryScroll({
       isActive,
-      messageCount: overviewMessageCount,
-      messageStartIndex: overviewMessageStartIndex,
-      renderedMessageCount: overviewMessages.length,
+      messageCount: conversationMessageCount,
+      messageStartIndex: conversationMessageStartIndex,
+      renderedMessageCount: visibleMessages.length,
       scrollContainerRef,
       scrollStateKey,
       sessionId: session.id,
-      sessionMutationStamp: session.sessionMutationStamp ?? 0,
-      tailFollowIntent: liveTailPinned,
       onNavigateStart: onOverviewNavigateStart,
+      tailFollowIntent: liveTailPinned,
       virtualizerHandleRef,
     });
     const messageRevealUserScrollGeneration =
-      conversationOverview.virtualizerHandleRef.current?.getUserScrollGeneration() ??
+      conversationHistoryScroll.virtualizerHandleRef.current?.getUserScrollGeneration() ??
       0;
     const messageRevealIds = useConversationMessageRevealIds({
       isActive,
@@ -697,11 +690,11 @@ const SessionConversationPage = memo(
         sortConversationMarkersForNavigation(
           visibleMarkers,
           visibleMessages,
-          overviewMessageStartIndex,
+          conversationMessageStartIndex,
         ),
-      [visibleMarkers, visibleMessages, overviewMessageStartIndex],
+      [visibleMarkers, visibleMessages, conversationMessageStartIndex],
     );
-    // activeMarkerId selects a persisted marker in the rail; activeMarkerMessageId
+    // activeMarkerId selects a persisted marker; activeMarkerMessageId
     // drives the message-shell highlight immediately, including the create flow
     // before the backend emits the new marker. pendingCreatedMarkers tie that
     // immediate highlight to markers that appear after create so color follows the
@@ -832,13 +825,13 @@ const SessionConversationPage = memo(
       jumpToMessageId,
     } = useConversationMarkerJump({
       historyWindowKey: `${visibleMessages[0]?.id ?? ""}:${visibleMessages[visibleMessages.length - 1]?.id ?? ""}:${hasOlderHistory}`,
-      messageStartIndex: overviewMessageStartIndex,
+      messageStartIndex: conversationMessageStartIndex,
       onMissingMessageJump: requestOlderTranscriptPage,
       onConversationSearchItemMount,
       requestMarkerHistoryAround: requestMarkerHistoryWindow,
       scrollContainerRef,
       sessionId: session.id,
-      virtualizerHandleRef: conversationOverview.virtualizerHandleRef,
+      virtualizerHandleRef: conversationHistoryScroll.virtualizerHandleRef,
     });
     useResponseBoardSourceNavigation({
       jumpToMessageId,
@@ -846,7 +839,7 @@ const SessionConversationPage = memo(
       scrollContainerRef,
       sessionId: session.id,
       subscriberKey: conversationPageRef,
-      virtualizerHandleRef: conversationOverview.virtualizerHandleRef,
+      virtualizerHandleRef: conversationHistoryScroll.virtualizerHandleRef,
     });
     const requestOlderPromptNavigationPage = useCallback(
       () => requestSessionHistoryOlderPage(session.id),
@@ -994,7 +987,7 @@ const SessionConversationPage = memo(
         userInputSubmissionPending,
       ) => {
         const currentUserScrollGeneration =
-          conversationOverview.virtualizerHandleRef.current?.getUserScrollGeneration() ??
+          conversationHistoryScroll.virtualizerHandleRef.current?.getUserScrollGeneration() ??
           0;
         const rendered = renderMessageCard(
           message,
@@ -1160,7 +1153,7 @@ const SessionConversationPage = memo(
         openMarkerContextMenu,
         pendingCreatedMarkers,
         renderMessageCard,
-        conversationOverview.virtualizerHandleRef,
+        conversationHistoryScroll.virtualizerHandleRef,
         session.id,
         scrollStateKey,
       ],
@@ -1200,15 +1193,17 @@ const SessionConversationPage = memo(
       <ConversationMessageList
         renderMessageCard={renderMarkedMessageCard}
         sessionId={session.id}
-        messageStartIndex={overviewMessageStartIndex}
+        messageStartIndex={conversationMessageStartIndex}
+        historyBeforePx={conversationHistoryScroll.prefixHeight}
+        historyAfterPx={conversationHistoryScroll.suffixHeight}
         messages={visibleMessages}
         scrollContainerRef={scrollContainerRef}
         tailFollowIntent={liveTailPinned}
         virtualizerHandleRef={
           // Marker jumps need the virtualizer handle whenever the transcript is
-          // virtualized, even while the overview rail is still deferred.
+          // virtualized, including bounded history without any checkpoints.
           isConversationVirtualized
-            ? conversationOverview.virtualizerHandleRef
+            ? conversationHistoryScroll.virtualizerHandleRef
             : undefined
         }
         isActive={isActive}
@@ -1303,18 +1298,19 @@ const SessionConversationPage = memo(
     const conversationContent = (
       <>
         {markerNavigation}
-        {conversationMessages}
+        <div ref={conversationHistoryScroll.contentRef} className="conversation-history-window">
+          {conversationMessages}
+        </div>
+        <CheckpointScrollbarDots markers={visibleMarkers} messageCount={conversationMessageCount}
+          scrollContainerRef={scrollContainerRef} isActive={isActive} onJump={jumpToMarker} />
         {markerContextMenuNode}
         {/* Queued content retains its identity across activity state changes. */}
         {queuedTail}
       </>
     );
-    // Overview eligibility, rather than async response readiness, owns the
-    // scrollbar replacement. The rail renders a visible pending state until
-    // data is ready, preserving both the layout width and a scroll affordance.
     const hasIncompleteLiveTail =
       hasOlderHistory && !hasNewerHistory && visibleMessages.length > 0;
-    const conversationPageClassName = `session-conversation-page${isActive ? " is-active" : ""}${conversationOverview.shouldRequestOverview ? " has-conversation-overview-scroll" : ""}${hasIncompleteLiveTail ? " has-incomplete-live-tail" : ""}`;
+    const conversationPageClassName = `session-conversation-page${isActive ? " is-active" : ""}${hasIncompleteLiveTail ? " has-incomplete-live-tail" : ""}`;
 
     return (
       <MessageNavigationProvider value={messageNavigationContextValue}>
@@ -1324,27 +1320,7 @@ const SessionConversationPage = memo(
           hidden={!isActive}
           tabIndex={-1}
         >
-          {conversationOverview.shouldRequestOverview ? (
-            <div className="conversation-with-overview">
-              <div className="conversation-overview-content">
-                {conversationContent}
-              </div>
-              {conversationOverview.shouldRenderRail ? (
-                <ConversationOverviewRail
-                  heightPx={conversationOverview.railHeightPx}
-                  messageCount={overviewMessageCount}
-                  portalTarget={conversationOverview.railPortalTarget}
-                  rightPx={conversationOverview.railRightPx}
-                  topPx={conversationOverview.railTopPx}
-                  overview={conversationOverview.overview}
-                  viewport={conversationOverview.viewport}
-                  onNavigate={conversationOverview.navigate}
-                />
-              ) : null}
-            </div>
-          ) : (
-            conversationContent
-          )}
+          {conversationContent}
         </div>
       </MessageNavigationProvider>
     );
@@ -1377,6 +1353,8 @@ const SessionConversationPage = memo(
 );
 
 export function ConversationMessageList({
+  historyBeforePx,
+  historyAfterPx,
   renderMessageCard,
   sessionId,
   messageStartIndex,
@@ -1455,6 +1433,8 @@ export function ConversationMessageList({
       renderMessageCard={renderMessageCard}
       sessionId={sessionId}
       messageStartIndex={messageStartIndex}
+      historyBeforePx={historyBeforePx}
+      historyAfterPx={historyAfterPx}
       messages={messages}
       scrollContainerRef={scrollContainerRef}
       tailFollowIntent={tailFollowIntent}

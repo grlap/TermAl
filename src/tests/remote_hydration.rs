@@ -6,8 +6,7 @@
 use super::remote::{
     make_remote_session_summary_only, materialize_remote_proxy_session_transcript_for_test,
     remote_text_message, seed_remote_proxy_session_via_state_inner_upsert,
-    spawn_remote_session_history_response_server, spawn_remote_session_overview_response_server,
-    spawn_remote_session_response_server,
+    spawn_remote_session_history_response_server, spawn_remote_session_response_server,
 };
 use super::remote_delta_replay::local_replay_test_remote;
 use super::*;
@@ -1179,102 +1178,6 @@ fn assert_bounded_history_proxy_sequence(body_seq: Option<u64>, epoch: Option<&s
     );
     join_test_server(server);
 
-    let _ = fs::remove_file(state.persistence_path.as_path());
-}
-
-#[test]
-fn conversation_overview_forwards_one_bounded_remote_request() {
-    let state = test_app_state();
-    let remote = RemoteConfig {
-        id: "ssh-lab".to_owned(),
-        name: "SSH Lab".to_owned(),
-        transport: RemoteTransport::Ssh,
-        enabled: true,
-        host: Some("example.com".to_owned()),
-        port: Some(22),
-        user: Some("alice".to_owned()),
-    };
-    create_test_remote_project(
-        &state,
-        &remote,
-        "/remote/repo",
-        "Remote Project",
-        "remote-project-1",
-    );
-    let mut summary_session = sample_remote_orchestrator_state(
-        "remote-project-1",
-        "/remote/repo",
-        1,
-        OrchestratorInstanceStatus::Running,
-    )
-    .sessions
-    .into_iter()
-    .find(|session| session.id == "remote-session-1")
-    .expect("sample remote session should exist");
-    make_remote_session_summary_only(&mut summary_session, 3);
-    state
-        .apply_remote_delta_event(
-            &remote.id,
-            DeltaEvent::SessionCreated {
-                revision: 2,
-                session_id: summary_session.id.clone(),
-                session: test_state_session_summary_from_session(&summary_session),
-            },
-        )
-        .expect("remote summary session create delta should apply");
-    let local_session_id = {
-        let inner = state.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_remote_session_index(&remote.id, "remote-session-1")
-            .expect("remote proxy session should exist");
-        inner.sessions[index].session.id.clone()
-    };
-
-    let (port, requests, server) =
-        spawn_remote_session_overview_response_server(SessionOverviewResponse {
-            session_id: "remote-session-1".to_owned(),
-            message_count: 3,
-            session_mutation_stamp: 7,
-            buckets: vec![
-                ConversationOverviewBucket {
-                    c: 2,
-                    k: ConversationOverviewKind::Text,
-                    u: 1,
-                    m: false,
-                },
-                ConversationOverviewBucket {
-                    c: 1,
-                    k: ConversationOverviewKind::Command,
-                    u: 0,
-                    m: false,
-                },
-            ],
-            markers: Vec::new(),
-            latest_position: 2,
-        });
-    insert_test_remote_connection(
-        &state,
-        &remote,
-        port,
-        TestRemoteBridgeOwnership::RequestOnly,
-    );
-
-    let overview = state
-        .get_session_overview(&local_session_id, 2)
-        .expect("remote overview should proxy directly to its owner");
-    assert_eq!(overview.session_id, local_session_id);
-    assert_eq!(overview.message_count, 3);
-    assert_eq!(overview.buckets.len(), 2);
-    assert_eq!(overview.buckets[1].k, ConversationOverviewKind::Command);
-
-    let request_lines = requests.lock().expect("requests mutex poisoned").clone();
-    assert!(
-        request_lines
-            .iter()
-            .any(|line| line.starts_with("GET /api/sessions/remote-session-1/overview?buckets=2 ")),
-        "expected bounded remote overview request, saw {request_lines:?}"
-    );
-    join_test_server(server);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 

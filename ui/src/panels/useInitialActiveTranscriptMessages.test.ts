@@ -549,12 +549,11 @@ describe("useInitialActiveTranscriptMessages", () => {
     cleanup();
   });
 
-  it("does not paginate when the conversation overview slider owns navigation keys", async () => {
+  it("does not paginate when a nested slider owns navigation keys", async () => {
     const { cleanup, node, ref } = makeScrollNodeRef();
-    const overviewSlider = document.createElement("div");
-    overviewSlider.setAttribute("role", "slider");
-    overviewSlider.dataset.testid = "conversation-overview-rail";
-    node.append(overviewSlider);
+    const nestedSlider = document.createElement("div");
+    nestedSlider.setAttribute("role", "slider");
+    node.append(nestedSlider);
     Object.defineProperties(node, {
       clientHeight: { configurable: true, value: 500 },
       scrollHeight: { configurable: true, value: 1_000 },
@@ -571,7 +570,7 @@ describe("useInitialActiveTranscriptMessages", () => {
       node.scrollTop = 0;
       await act(async () => {
         for (const key of ["ArrowUp", "PageUp"]) {
-          overviewSlider.dispatchEvent(
+          nestedSlider.dispatchEvent(
             new KeyboardEvent("keydown", { bubbles: true, key }),
           );
         }
@@ -581,7 +580,7 @@ describe("useInitialActiveTranscriptMessages", () => {
       node.scrollTop = 500;
       await act(async () => {
         for (const key of ["ArrowDown", "PageDown"]) {
-          overviewSlider.dispatchEvent(
+          nestedSlider.dispatchEvent(
             new KeyboardEvent("keydown", { bubbles: true, key }),
           );
         }

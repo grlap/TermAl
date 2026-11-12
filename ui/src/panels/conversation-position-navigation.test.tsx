@@ -1,4 +1,4 @@
-// Owns minimap cancellation across the real pane, virtualizer and history bridge.
+// Owns native history seek cancellation across the real pane, virtualizer and history bridge.
 // Does not own rail geometry or transcript rendering assertions.
 import { act, render, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -7,19 +7,18 @@ import { useSessionPaneScrollState } from "../SessionPaneView.scroll";
 import { installAnimationFrameHarness, params, session } from "../SessionPaneView.scroll.fixtures";
 import { addSessionHistoryPageDemandListener } from "../session-history-demand";
 import { loadBoundedSessionHistoryWindow, type SessionHistoryLoadingContext } from "../session-history-loading";
-import { useConversationOverviewController } from "./conversation-overview-controller";
+import { useConversationHistoryScroll } from "./useConversationHistoryScroll";
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
 import type { VirtualizedConversationMessageListHandleRef } from "./virtualized-conversation-types";
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-describe("minimap navigation ownership", () => {
+describe("native history navigation ownership", () => {
   it.each(["End", "Home", "marker", "Find input", "Find window adoption"] as const)(
     "preserves navigation ownership through %s",
     async (navigation) => {
       const { drainAnimationFrames } = installAnimationFrameHarness(1_000 / 60);
       const adoptingFindWindow = navigation === "Find window adoption";
-      vi.spyOn(api, "fetchSessionOverview").mockReturnValue(new Promise(() => {}));
       let current = { ...session(false), messageStartIndex: 999, sessionMutationStamp: 1 };
       const page = (position: number) => ({
         sessionId: current.id,
@@ -76,12 +75,12 @@ describe("minimap navigation ownership", () => {
         });
         pane.messageStackRef.current = node;
         pane.virtualizerHandleRef.current = virtualizerHandleRef.current;
-        const overview = useConversationOverviewController({
+        const overview = useConversationHistoryScroll({
           isActive: true, messageCount: 1_000, messageStartIndex: current.messageStartIndex,
           renderedMessageCount: current.messages.length, scrollContainerRef,
           scrollStateKey: input.scrollStateKey, sessionId: current.id,
-          sessionMutationStamp: 1, tailFollowIntent: pane.liveTailPinned,
           onNavigateStart: pane.beginOverviewNavigation, virtualizerHandleRef,
+          tailFollowIntent: pane.liveTailPinned,
         });
         return { pane, overview };
       }, { initialProps: { search: adoptingFindWindow } });

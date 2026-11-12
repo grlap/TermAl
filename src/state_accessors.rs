@@ -38,8 +38,6 @@ const REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT: Duration = Duration::from_secs(5
 const SESSION_TAIL_DEFAULT_MESSAGES: usize = 20;
 const SESSION_TAIL_HYDRATION_MAX_MESSAGES: usize = 64;
 const SESSION_HISTORY_PAGE_MAX_MESSAGES: usize = 64;
-const SESSION_OVERVIEW_DEFAULT_BUCKETS: usize = 200;
-const SESSION_OVERVIEW_MAX_BUCKETS: usize = 512;
 const SESSION_LIVE_ACTIVITY_SUMMARY_MAX_CHARS: usize = 160;
 
 #[cfg(test)]
@@ -84,13 +82,6 @@ fn bounded_live_activity_summary(
     })
 }
 
-#[derive(Clone, Copy, Default)]
-struct ConversationOverviewBucketCounts {
-    kinds: [u32; 4],
-    user_authored: u32,
-    marker_present: bool,
-}
-
 fn conversation_overview_kind_index(kind: ConversationOverviewKind) -> usize {
     match kind {
         ConversationOverviewKind::Text => 0,
@@ -98,26 +89,6 @@ fn conversation_overview_kind_index(kind: ConversationOverviewKind) -> usize {
         ConversationOverviewKind::Diff => 2,
         ConversationOverviewKind::Error => 3,
     }
-}
-
-fn dominant_conversation_overview_kind(counts: [u32; 4]) -> ConversationOverviewKind {
-    // Error wins ties, followed by command and diff. Equal-count buckets
-    // should preserve the visually strongest signal instead of dissolving it
-    // into ordinary text.
-    let mut dominant = ConversationOverviewKind::Error;
-    let mut dominant_count = counts[conversation_overview_kind_index(dominant)];
-    for kind in [
-        ConversationOverviewKind::Command,
-        ConversationOverviewKind::Diff,
-        ConversationOverviewKind::Text,
-    ] {
-        let count = counts[conversation_overview_kind_index(kind)];
-        if count > dominant_count {
-            dominant = kind;
-            dominant_count = count;
-        }
-    }
-    dominant
 }
 
 fn conversation_overview_message_metadata(message: &Message) -> (ConversationOverviewKind, bool) {
@@ -177,20 +148,6 @@ fn conversation_overview_message_metadata(message: &Message) -> (ConversationOve
         | Message::CodexAppRequest { author, .. } => (author, ConversationOverviewKind::Text),
     };
     (kind, matches!(author, Author::You))
-}
-
-fn conversation_overview_bucket_index(
-    position: usize,
-    message_count: usize,
-    bucket_count: usize,
-) -> usize {
-    debug_assert!(message_count > 0);
-    debug_assert!(bucket_count > 0);
-    position
-        .saturating_mul(bucket_count)
-        .checked_div(message_count)
-        .unwrap_or_default()
-        .min(bucket_count - 1)
 }
 
 /// A remote tail repair may fall back to applying the narrow SSE delta when
@@ -1073,144 +1030,6 @@ impl AppState {
                 messages_loaded,
             ),
             server_instance_id: self.server_instance_id.clone(),
-        })
-    }
-
-    /// Returns a whole-conversation, position-linear overview independent of
-    /// the transcript window currently retained in memory.
-    fn get_session_overview(
-        &self,
-        session_id: &str,
-        requested_bucket_count: usize,
-    ) -> Result<SessionOverviewResponse, ApiError> {
-        debug_assert!((1..=SESSION_OVERVIEW_MAX_BUCKETS).contains(&requested_bucket_count));
-        if let Some(target) = self.remote_session_target(session_id)? {
-            return self.fetch_remote_session_overview_target(
-                &target,
-                requested_bucket_count,
-                REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT,
-            );
-        }
-
-        let (
-            mut bucket_counts,
-            mut observed_positions,
-            resident_start_index,
-            message_count,
-            bucket_count,
-            session_mutation_stamp,
-            markers,
-        ) = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            let index = inner
-                .find_visible_session_index(session_id)
-                .ok_or_else(ApiError::local_session_missing)?;
-            let record = &inner.sessions[index];
-            let resident_start_index = record.message_start_index;
-            let message_count =
-                usize::try_from(session_message_count(record)).unwrap_or(usize::MAX);
-            let bucket_count = requested_bucket_count.min(message_count.max(1));
-            let mut bucket_counts = vec![ConversationOverviewBucketCounts::default(); bucket_count];
-            let mut observed_positions = 0usize;
-            for (local_index, message) in record.session.messages.iter().enumerate() {
-                let position = resident_start_index.saturating_add(local_index);
-                if position >= message_count {
-                    break;
-                }
-                let (kind, is_user) = conversation_overview_message_metadata(message);
-                let bucket_index =
-                    conversation_overview_bucket_index(position, message_count, bucket_count);
-                let bucket = &mut bucket_counts[bucket_index];
-                bucket.kinds[conversation_overview_kind_index(kind)] =
-                    bucket.kinds[conversation_overview_kind_index(kind)].saturating_add(1);
-                bucket.user_authored = bucket.user_authored.saturating_add(u32::from(is_user));
-                observed_positions = observed_positions.saturating_add(1);
-            }
-            (
-                bucket_counts,
-                observed_positions,
-                resident_start_index,
-                message_count,
-                bucket_count,
-                record.mutation_stamp,
-                record.session.markers.clone(),
-            )
-        };
-
-        if resident_start_index > 0 {
-            let connection =
-                open_sqlite_history_snapshot(self.persistence_path.as_ref()).map_err(|err| {
-                    ApiError::internal(format!("failed to open session overview snapshot: {err:#}"))
-                })?;
-            let persisted = load_persisted_message_overview_with_connection(
-                &connection,
-                session_id,
-                resident_start_index,
-                message_count,
-                bucket_count,
-            )
-            .map_err(|err| {
-                ApiError::internal(format!("failed to load session overview: {err:#}"))
-            })?;
-            let mut persisted_positions = 0usize;
-            for (bucket_index, kind, count, user_count) in persisted {
-                let bucket = &mut bucket_counts[bucket_index];
-                bucket.kinds[conversation_overview_kind_index(kind)] =
-                    bucket.kinds[conversation_overview_kind_index(kind)].saturating_add(count);
-                bucket.user_authored = bucket.user_authored.saturating_add(user_count);
-                persisted_positions = persisted_positions.saturating_add(count as usize);
-            }
-            if persisted_positions != resident_start_index {
-                return Err(ApiError::conflict(format!(
-                    "session overview loaded {persisted_positions} persisted positions but expected {resident_start_index}; refresh the session"
-                )));
-            }
-            observed_positions = observed_positions.saturating_add(persisted_positions);
-        }
-
-        if observed_positions != message_count {
-            return Err(ApiError::conflict(format!(
-                "session overview covered {observed_positions} positions but expected {message_count}; refresh the session"
-            )));
-        }
-
-        let overview_markers = markers
-            .into_iter()
-            .map(|marker| {
-                let position = if message_count == 0 {
-                    0
-                } else {
-                    marker.message_index_hint.min(message_count - 1)
-                };
-                if message_count > 0 {
-                    let bucket_index =
-                        conversation_overview_bucket_index(position, message_count, bucket_count);
-                    bucket_counts[bucket_index].marker_present = true;
-                }
-                ConversationOverviewMarker {
-                    position,
-                    kind: marker.kind,
-                    label: (!marker.name.trim().is_empty()).then_some(marker.name),
-                }
-            })
-            .collect();
-        let buckets = bucket_counts
-            .into_iter()
-            .map(|counts| ConversationOverviewBucket {
-                c: counts.kinds.into_iter().sum(),
-                k: dominant_conversation_overview_kind(counts.kinds),
-                u: counts.user_authored,
-                m: counts.marker_present,
-            })
-            .collect();
-
-        Ok(SessionOverviewResponse {
-            session_id: session_id.to_owned(),
-            message_count: u32::try_from(message_count).unwrap_or(u32::MAX),
-            session_mutation_stamp,
-            buckets,
-            markers: overview_markers,
-            latest_position: message_count.saturating_sub(1),
         })
     }
 

@@ -23,7 +23,7 @@ TermAl gives you one place to run, supervise, review, and steer long-running sof
 - **Coordination board** — root sessions share small, versioned project facts through a durable board; board writes do not wake sessions
 - **Engram work tracking** — project-scoped tracker integration, with a read-only Work tab for tasks, dependencies, hierarchy, labels, and retained project memories
 - **Test Runs** — inspect registered launcher runs and host-observed tests, their stages, logs, owner sessions, notification targets, and verification settlement
-- **Conversation minimap** — a position-space overview rail served by a single one-call API, rendered complete on session open with click-to-jump navigation
+- **Checkpoint navigation** — clickable checkpoint dots beside the native scrollbar; nearby checkpoints share a chooser, and jumps load bounded history when needed
 - **Bounded transcript paging** — large sessions (tens of thousands of messages) open instantly on a bounded tail; history pages in on demand with jump-to-start, marker jumps, and full-text search over loaded messages
 - **Session model controls** — Claude, Codex, Cursor, Gemini, OpenCode, and Kimi expose model lists and session controls according to each adapter's capabilities; Codex also exposes catalog-gated Fast mode
 - **SSH remotes** — connect to remote machines over SSH tunnels; run agents on a build server while supervising from your laptop
@@ -511,7 +511,7 @@ Instances can be **paused**, **resumed**, or **stopped** from the control panel 
   - [Agent mailboxes](docs/features/agent-mailboxes.md) — durable cross-session agent coordination
   - [Coordination board](docs/features/agent-boards.md) — versioned project facts shared by root sessions
   - [Agent delegation sessions](docs/features/agent-delegation-sessions.md) — child sessions, write policies, structured results
-  - [Conversation overview map](docs/features/conversation-overview-map.md) — the one-call minimap
+  - [Checkpoint navigation](docs/features/session-virtualized-transcript.md#native-scrollbar-and-checkpoint-dots) — native scrollbar reach and grouped checkpoint dots
   - [Virtualized transcripts](docs/features/session-virtualized-transcript.md) — bounded paging for huge sessions
   - [Project-scoped remotes](docs/features/project-scoped-remotes.md) — remote binding at project level
   - [Project status](docs/features/project-status.md) — dated snapshot: what works, active limitations, what comes next

@@ -1515,6 +1515,12 @@ textarea {
   align-self: stretch;
 }
 
+.conversation-history-window {
+  min-width: 0;
+  display: grid;
+  gap: var(--message-stack-gap);
+}
+
 .dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -4648,12 +4654,6 @@ textarea {
   align-content: safe end;
 }
 
-.message-stack:has(
-  .session-conversation-page.has-conversation-overview-scroll
-) {
-  scrollbar-width: none;
-}
-
 .message-stack.is-tail-following {
   /* The tail-follow controller owns live layout compensation. Keep this plain
      selector independent from :has() so older P0 browsers do not discard it. */
@@ -4667,13 +4667,6 @@ textarea {
   /* The virtualizer compensates layout changes itself. Chromium's native
      overflow anchoring would apply a second, browser-timed correction. */
   overflow-anchor: none;
-}
-
-.message-stack:has(
-    .session-conversation-page.has-conversation-overview-scroll
-  )::-webkit-scrollbar {
-  width: 0;
-  height: 0;
 }
 
 .message-stack.control-panel-stack {
@@ -5039,183 +5032,6 @@ textarea {
 .virtualized-message-list {
   min-height: 1px;
   min-width: 0;
-}
-
-.conversation-with-overview {
-  --conversation-overview-rail-width: 2.35rem;
-
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--conversation-overview-rail-width);
-  align-items: start;
-  gap: 0.65rem;
-  min-width: 0;
-}
-
-.conversation-overview-content {
-  display: grid;
-  gap: var(--message-stack-gap);
-  min-width: 0;
-}
-
-.conversation-overview-rail {
-  touch-action: none;
-  user-select: none;
-  --conversation-overview-rail-width: 2.35rem;
-  --conversation-overview-lane-left: 0.45rem;
-  --conversation-overview-lane-width: calc(100% - 0.9rem);
-  --conversation-overview-sticky-inset: 0.5rem;
-
-  position: absolute;
-  top: var(--conversation-overview-sticky-inset);
-  width: var(--conversation-overview-rail-width);
-  height: min(
-    32rem,
-    calc(100vh - (var(--conversation-overview-sticky-inset) * 2))
-  );
-  max-height: calc(100vh - (var(--conversation-overview-sticky-inset) * 2));
-  min-height: 6rem;
-  border: 1px solid var(--line);
-  border-radius: 0.45rem;
-  background: color-mix(in srgb, var(--surface-elevated) 80%, transparent);
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--surface-card) 72%, transparent);
-  overflow: hidden;
-  cursor: pointer;
-}
-
-.conversation-overview-rail::before {
-  content: "";
-  position: absolute;
-  inset: 0.45rem var(--conversation-overview-lane-left);
-  border-radius: 999px;
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--surface-card) 52%, transparent),
-    color-mix(in srgb, var(--muted) 18%, transparent)
-  );
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 65%, transparent);
-}
-
-.conversation-overview-rail.is-pending {
-  cursor: pointer;
-  opacity: 0.55;
-}
-
-.conversation-overview-rail.is-pending::before {
-  inset: 0.45rem var(--conversation-overview-lane-left);
-  background: color-mix(in srgb, var(--muted) 42%, transparent);
-  box-shadow: none;
-}
-
-.conversation-overview-rail:focus-visible {
-  outline: 1px solid var(--signal-blue);
-  outline-offset: 2px;
-}
-
-.conversation-overview-visual-track {
-  position: absolute;
-  z-index: 1;
-  top: 0;
-  bottom: 0;
-  left: var(--conversation-overview-lane-left);
-  width: var(--conversation-overview-lane-width);
-  border-radius: 999px;
-  background-repeat: no-repeat;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.conversation-overview-visual-segment {
-  position: absolute;
-  left: 0;
-  width: 100%;
-  min-height: 1px;
-  border-radius: 0;
-  background: color-mix(in srgb, var(--muted) 65%, transparent);
-}
-
-.conversation-overview-visual-segment.is-command {
-  background: color-mix(in srgb, var(--signal-green) 70%, transparent);
-}
-
-.conversation-overview-visual-segment.is-diff {
-  background: color-mix(in srgb, var(--signal-rose) 70%, transparent);
-}
-
-.conversation-overview-visual-segment.is-error {
-  background: color-mix(in srgb, var(--signal-red) 78%, transparent);
-}
-
-.conversation-overview-visual-segment.is-text.has-user-messages {
-  background: color-mix(in srgb, var(--signal-blue) 62%, transparent);
-}
-
-.conversation-overview-marker {
-  position: absolute;
-  z-index: 4;
-  right: 0.1rem;
-  width: 0.35rem;
-  height: 0.35rem;
-  margin-top: -0.175rem;
-  border-radius: 50%;
-  background: var(--conversation-overview-marker-color, var(--signal-blue));
-  box-shadow: 0 0 0 1px var(--surface-card);
-  pointer-events: none;
-}
-
-.conversation-overview-viewport-range {
-  position: absolute;
-  z-index: 2;
-  left: var(--conversation-overview-lane-left);
-  width: var(--conversation-overview-lane-width);
-  min-height: 2px;
-  box-sizing: border-box;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--signal-blue) 72%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--surface-card) 82%, transparent);
-  pointer-events: none;
-}
-
-.conversation-overview-viewport-handle {
-  position: absolute;
-  z-index: 3;
-  top: clamp(
-    0.75rem,
-    var(--conversation-overview-viewport-center, 50%),
-    calc(100% - 0.75rem)
-  );
-  left: calc(var(--conversation-overview-lane-left) - 0.16rem);
-  width: calc(var(--conversation-overview-lane-width) + 0.32rem);
-  box-sizing: border-box;
-  border: 2px solid color-mix(in srgb, var(--signal-blue) 84%, white);
-  border-radius: 0.45rem;
-  background: color-mix(in srgb, var(--surface-card) 74%, transparent);
-  box-shadow:
-    0 0 0 1px var(--surface-card),
-    0 0 0.45rem color-mix(in srgb, var(--signal-blue) 46%, transparent);
-  transform: translateY(-50%);
-  pointer-events: none;
-}
-
-.conversation-overview-viewport-handle::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  right: 0.2rem;
-  left: 0.2rem;
-  height: 2px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--signal-blue) 92%, white);
-  transform: translateY(-50%);
-}
-
-.conversation-overview-rail:hover .conversation-overview-viewport-handle,
-.conversation-overview-rail:focus-visible
-  .conversation-overview-viewport-handle {
-  border-color: color-mix(in srgb, var(--signal-blue) 68%, white);
-  box-shadow:
-    0 0 0 1px var(--surface-card),
-    0 0 0.6rem color-mix(in srgb, var(--signal-blue) 62%, transparent);
 }
 
 .virtualized-message-range-block {

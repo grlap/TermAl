@@ -1,0 +1,52 @@
+.checkpoint-scrollbar-dots {
+  position: fixed;
+  width: 14px;
+  z-index: var(--z-pane-overlay);
+  pointer-events: none;
+}
+.checkpoint-scrollbar-dot-group {
+  position: absolute;
+  transform: translateY(-50%);
+}
+.checkpoint-scrollbar-dot {
+  width: 12px;
+  min-height: 12px;
+  padding: 0;
+  border: 1px solid;
+  border-color: var(--signal-blue, #3b82f6);
+  border-radius: 50%;
+  background: var(--panel-strong);
+  color: var(--ink);
+  font-size: 9px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.checkpoint-scrollbar-chooser.is-above {
+  top: auto;
+  bottom: 0;
+}
+.checkpoint-scrollbar-dot:focus-visible,
+.checkpoint-scrollbar-chooser button:focus-visible {
+  outline: 2px solid var(--signal-blue, #3b82f6);
+  outline-offset: 2px;
+}
+.checkpoint-scrollbar-chooser {
+  position: absolute;
+  right: 16px;
+  top: 0;
+  min-width: 160px;
+  max-width: 280px;
+  max-height: 240px;
+  overflow: auto;
+  display: grid;
+  padding: 4px;
+  border: 1px solid;
+  border-color: var(--signal-blue, #3b82f6);
+  border-radius: 4px;
+  background: var(--panel-strong);
+  pointer-events: auto;
+}
+.checkpoint-scrollbar-chooser button {
+  text-align: left;
+  overflow-wrap: anywhere;
+}

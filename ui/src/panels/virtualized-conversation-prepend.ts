@@ -65,6 +65,7 @@ export function useVirtualizedConversationPrependEffects({
   renderedListRef,
   scrollContainerRef,
   sessionId,
+  tailFollowIntent = false,
   shouldKeepBottomAfterLayoutRef,
   skipNextMountedPrependRestoreRef,
   viewportHeight,
@@ -101,6 +102,7 @@ export function useVirtualizedConversationPrependEffects({
   renderedListRef: RefObject<HTMLDivElement | null>;
   scrollContainerRef: RefObject<HTMLElement | null>;
   sessionId: string;
+  tailFollowIntent?: boolean;
   shouldKeepBottomAfterLayoutRef: MutableRefObject<boolean>;
   skipNextMountedPrependRestoreRef: MutableRefObject<boolean>;
   viewportHeight: number;
@@ -154,7 +156,7 @@ export function useVirtualizedConversationPrependEffects({
       return;
     }
     const prependedHeightPx =
-      (pageLayout.tops[prependedPageIndex] ?? 0) + prependedOffsetWithinPage;
+      (pageLayout.tops[prependedPageIndex] ?? 0) - (pageLayout.tops[0] ?? 0) + prependedOffsetWithinPage;
     if (!Number.isFinite(prependedHeightPx) || prependedHeightPx <= 0) {
       return;
     }
@@ -223,13 +225,20 @@ export function useVirtualizedConversationPrependEffects({
             totalHeight: pageLayout.totalHeight,
             viewportHeight: viewportHeightPx,
           });
+    // Missing-prefix estimates cannot detach a pane whose owner still follows
+    // the global tail. Its physical bottom remains authoritative during load.
+    const followsGlobalTail =
+      tailFollowIntent && !hasUserScrollInteractionRef.current &&
+      (pageLayout.tops[0] ?? 0) > 0;
     const targetNearBottom =
+      followsGlobalTail ||
       pageLayout.totalHeight - (targetScrollTop + viewportHeightPx) <
-      SESSION_STICKY_BOTTOM_BAND_PX;
+        SESSION_STICKY_BOTTOM_BAND_PX;
     const preserveDetachedScroll =
-      hasUserScrollInteractionRef.current ||
-      isDetachedFromBottomRef.current ||
-      !isScrollContainerNearBottom(node);
+      !followsGlobalTail &&
+      (hasUserScrollInteractionRef.current ||
+        isDetachedFromBottomRef.current ||
+        !isScrollContainerNearBottom(node));
     shouldKeepBottomAfterLayoutRef.current =
       targetNearBottom && !preserveDetachedScroll;
     isDetachedFromBottomRef.current =
@@ -298,6 +307,7 @@ export function useVirtualizedConversationPrependEffects({
     pages,
     scrollContainerRef,
     sessionId,
+    tailFollowIntent,
     viewportHeight,
     writeScrollTopAndSyncViewport,
   ]);

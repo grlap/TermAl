@@ -139,7 +139,7 @@ resident transcript data such as the last visible author. Replacing residency
 can legitimately change that author without any new prompt having been sent.
 
 Boundary scrolling and search never recursively request pages merely because
-more history exists. Marker, prompt, and overview-rail jumps use their durable
+more history exists. Marker, prompt, and native history-position jumps use their durable
 global message position to request one centered page. They do not walk
 intervening pages and must never revive a full-transcript hydration branch.
 
@@ -195,41 +195,34 @@ features such as prompt recall or global search need their own indexed query;
 they must never revive a full-hydration branch or silently treat the resident
 window as the complete transcript.
 
-## Whole-conversation overview rail
+## Native scrollbar and checkpoint dots
 
-The overview rail is a bounded whole-conversation feature, not a virtualizer
-layout projection. On pane activation the browser makes one request:
+The conversation uses the native scrollbar, including its thumb, track,
+wheel, touch and keyboard navigation. Every checkpoint-kind marker has a dot
+at its global message position beside that scrollbar. Dots that would overlap
+share a count button; its keyboard-accessible chooser lists each checkpoint.
+Selecting one uses the existing marker navigation and centered bounded-history
+request when its message is not resident. Other marker kinds remain available
+through the marker controls.
 
-```text
-GET /api/sessions/{id}/overview?buckets=200
-```
+Missing history before and after the resident window contributes estimated
+space to the virtualizer's page layout. Its native extent, page positions and
+imperative jumps therefore share one coordinate system. Scrolling into missing
+space requests the corresponding global position through `around=`, without
+walking the intervening pages. Drag updates coalesce, and newer navigation,
+session changes or deactivation cancel stale work. Fully resident conversations
+have no extra estimated space.
 
-`buckets` accepts `1..=512`. The response partitions stable global message
-positions into equal ranges and returns each range's message count, dominant
-semantic kind, user-authored count, and marker-presence flag, plus marker
-positions and current transcript freshness metadata.
+Estimate corrections preserve the resident reader's anchor in STAY, while the
+pane's FOLLOW owner keeps the global live tail in view. A different history
+window is positioned by the navigation that requested it. Neither estimates nor
+history adoption choose a new FOLLOW/STAY state.
 
-The backend computes the same map whether the full transcript or only the
-bounded retained tail is resident. Persisted messages carry compact
-kind/author metadata in a transactionally maintained one-byte-per-message
-session blob; the endpoint therefore reads one small row rather than parsing or
-hydrating message bodies. The repeated JSON bucket contract is served with HTTP
-compression.
-
-Buckets, markers, click targets, and the viewport indicator all use global
-message position as their only coordinate system. The indicator interpolates
-the visible interval from `messageStartIndex`, resident message count, and
-scroll fraction. A click maps directly to a global position and then to the
-single `around=` history request above.
-
-The exact viewport range remains position-linear, while a 24-pixel outlined
-handle centered on that range keeps the current location visible even when the
-honest range would otherwise project to only one or two pixels.
-
-The rail deliberately has no dependency on virtualizer layout snapshots,
-measured or estimated pixel heights, focus state, mounted pages, or transcript
-residency. Pixel measurement remains solely in the transcript virtualizer.
-The overview refetches when `messageCount` or `sessionMutationStamp` changes.
+There is no colored segment rail or overview fetch. The server's session
+`/overview` route, remote forwarding and response types are removed. The compact
+persisted kind/author metadata remains written but unread: stopping those writes
+and removing storage belong to separately allocated persistence work. This UI
+change does not alter schema floors, migration or backfill behavior.
 
 ## Core Model
 

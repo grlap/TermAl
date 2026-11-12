@@ -147,8 +147,10 @@ maintained with each message write. The composite primary key answers ordered
 range reads without a table scan; the unique key answers stable message-id
 cursor lookups. `session_overviews.value_blob` stores those semantic fields in
 one byte per global message position. It is updated in the same transaction as
-the message rows and lets the whole-conversation overview endpoint read one
-small row instead of stepping through or parsing every persisted message.
+the message rows. The overview endpoint and its reader have been removed;
+these derived columns and the blob remain maintained but unread by transcript
+navigation. Removing their writes or storage requires a separate persistence
+change; this UI change leaves the schema and floors unchanged.
 `delegations.value_json` stores one serialized delegation record per row.
 
 Startup validates every normalized row against its durable key: session and
@@ -415,9 +417,8 @@ The normalized transcript schema and bounded HTTP reads are implemented:
   never returns an unbounded local transcript.
 - `/history` returns at most 64 messages per request in backwards,
   true-start, forwards, or centered `around` mode.
-- `/overview` returns one whole-conversation, position-linear semantic map from
-  the compact per-session overview blob plus the retained live tail. The same
-  session produces the same map regardless of transcript residency.
+- Native scrollbar navigation and checkpoint jumps use bounded `/history` reads;
+  the removed `/overview` endpoint is not requested.
 - The frontend demand-loads older pages and does not schedule a background
   all-history fetch.
 - Startup loads at most the latest 64 messages per session. After a successful
@@ -446,9 +447,7 @@ Backend tests:
 - `GET /api/sessions/{id}/history` returns an ascending page using one of
   `before={messageId}`, `after={messageId}`, `around={position}`, or
   `from=start`, with `N <= 64`.
-- `GET /api/sessions/{id}/overview?buckets=512` remains under 8 KiB on the
-  compressed wire and answers a 25k-message persisted transcript in under
-  10 ms.
+- The removed overview route returns 404, while bounded history remains available.
 - Creating a session inserts one session row and does not load/write unrelated
   messages.
 - Appending/updating a message touches only that session's message rows.

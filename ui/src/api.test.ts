@@ -16,7 +16,6 @@ import {
   fetchDelegationResult,
   fetchDelegationStatus,
   fetchSessionHistory,
-  fetchSessionOverview,
   fetchSessionTail,
   fetchTelegramStatus,
   fetchWorkspaceLayout,
@@ -657,39 +656,7 @@ describe("session API helpers", () => {
     );
   });
 
-  it("fetches one bounded whole-conversation overview", async () => {
-    const fetchMock = vi.fn<typeof fetch>(
-      async () =>
-        new Response(
-          JSON.stringify({
-            sessionId: "session/one",
-            messageCount: 100,
-            sessionMutationStamp: 1,
-            buckets: [],
-            markers: [],
-            latestPosition: 99,
-          }),
-          {
-            status: 200,
-            headers: {
-              "Content-Type": "application/json",
-            },
-          },
-        ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
 
-    await fetchSessionOverview("session/one", 999);
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/sessions/session%2Fone/overview?buckets=512",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          "Content-Type": "application/json",
-        }),
-      }),
-    );
-  });
 });
 
 describe("telegram API helpers", () => {

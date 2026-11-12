@@ -90,6 +90,8 @@ export type VirtualizedConversationLayoutSnapshot = {
   sessionId: string;
   messageCount: number;
   estimatedTotalHeightPx: number;
+  /** Resident pages only, excluding estimated nonresident history space. */
+  estimatedResidentHeightPx?: number;
   viewportTopPx: number;
   viewportHeightPx: number;
   viewportWidthPx: number;

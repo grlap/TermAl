@@ -59,6 +59,7 @@ type VirtualizerHandleState = {
 };
 
 export function useVirtualizedConversationHandle({
+  estimatedResidentHeightPx,
   beginUserScrollNavigation,
   applyMountedPageRange,
   buildWorkingMountedRangeForScrollTop,
@@ -96,6 +97,7 @@ export function useVirtualizedConversationHandle({
   visiblePageRange,
   writeScrollTopAndSyncViewport,
 }: {
+  estimatedResidentHeightPx?: number;
   beginUserScrollNavigation: VirtualizedConversationMessageListHandle["beginUserScrollNavigation"];
   applyMountedPageRange: (nextRange: VirtualizedRange, options?: { flush?: boolean }) => void;
   buildWorkingMountedRangeForScrollTop: (
@@ -313,6 +315,7 @@ export function useVirtualizedConversationHandle({
       sessionId,
       messageCount: messages.length,
       estimatedTotalHeightPx: pageLayout.totalHeight,
+      estimatedResidentHeightPx,
       viewportTopPx: viewportScrollTop,
       viewportHeightPx: viewportHeight,
       viewportWidthPx: viewportWidth,
@@ -322,6 +325,7 @@ export function useVirtualizedConversationHandle({
       messages: snapshotMessages,
     };
   }, [
+    estimatedResidentHeightPx,
     estimateMessageHeight,
     isActive,
     messages.length,

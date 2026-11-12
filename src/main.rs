@@ -541,7 +541,6 @@ fn app_router_with_acceptance_policy_limiter(
         .route("/api/sessions", post(create_session))
         .route("/api/sessions/{id}", get(get_session))
         .route("/api/sessions/{id}/history", get(get_session_history))
-        .route("/api/sessions/{id}/overview", get(get_session_overview))
         .route(
             "/api/sessions/{id}/delegations",
             get(list_session_delegations).post(create_session_delegation),
@@ -815,9 +814,6 @@ fn app_router_with_acceptance_policy_limiter(
         // One 10 MiB image expands to about 13.4 MiB when base64-encoded.
         .layer(DefaultBodyLimit::max(MAX_JSON_REQUEST_BODY_BYTES))
         .layer(axum::middleware::from_fn(output_size_http_observer))
-        // The bounded conversation overview intentionally favors a stable,
-        // explicit JSON contract. HTTP compression keeps its 512 repeated
-        // bucket objects well below the rail's 8 KiB network budget.
         .layer(CompressionLayer::new())
         .layer(cors)
 }

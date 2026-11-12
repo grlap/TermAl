@@ -440,7 +440,6 @@ Local operator routes are under `/api`; pair-authenticated domain routes use a d
 | POST | `/api/sessions` | Create session |
 | GET | `/api/sessions/{id}` | Fetch one bounded recent suffix -> `SessionResponse { revision, serverInstanceId, session }`. The default is 20 messages; `?tail=N` accepts `1..=64`. There is no unbounded transcript response or summary fallback. Remote-proxy sessions forward the same bounded tail request to the owner. |
 | GET | `/api/sessions/{id}/history` | Fetch one ascending transcript page by exclusive `before`/`after` cursor, true start, centered global `around` position, or latest tail -> `SessionHistoryResponse`. `limit` defaults to and is capped at 64. Capture shares immutable resident message bodies; only the selected page is materialized, with the existing pinned SQLite prefix and cursor consistency. |
-| GET | `/api/sessions/{id}/overview` | Fetch one whole-conversation position map -> `SessionOverviewResponse`. `buckets` defaults to 200 and accepts `1..=512`; repeated bucket JSON is gzip-compressed on the wire. |
 | POST | `/api/sessions/{id}/settings` | Update session config |
 | POST | `/api/sessions/{id}/model-options/refresh` | Refresh live model list/options |
 | GET | `/api/sessions/{id}/codex/mcp-servers` | List sanitized Codex MCP server/tool status |
@@ -563,21 +562,15 @@ through authoritative resync.
 Direct jumps use `around={globalMessagePosition}` and return one centered page
 with `messageStartIndex`; they never page-walk through intervening history.
 
-`GET /api/sessions/{id}/overview?buckets=N` is the separate bounded
-whole-conversation summary used by the minimap rail. The server maps message
-positions into equal semantic buckets from typed resident messages plus a
-transactionally maintained one-byte-per-message SQLite overview blob. The rail
-uses only this position-space response; virtualizer layout snapshots, pixel
-estimates, focus state, and resident-message fallbacks are intentionally not
-part of the overview path. Bucket `h` counts source-free human text prompts,
-separately from the broader user-author field `u`, which can also include peer/mailbox
-messages authored as `you`. The UI keeps ordinary kind buckets quiet and
-reserves strong accents for `h`, errors, markers, and the outlined viewport
-handle.
+The native scrollbar reaches unloaded history through bounded `around` reads.
+Checkpoint dots beside it use the existing marker jump path; nearby dots share
+a chooser that exposes each checkpoint. The colored overview rail and its
+`/overview` endpoint are removed. Geometry and hydration preserve the pane
+scroll owner and FOLLOW/STAY intent. See [virtualized transcripts](features/session-virtualized-transcript.md).
 
 Remote proxies preserve the same bounds at the source: tail requests forward
 `?tail=N` to the owner, history requests forward the selected bounded cursor or
-position plus `limit`, and overview requests forward the bucket count. They do
+position plus `limit`. They do
 not fetch a whole remote transcript and slice it locally, and a targeted
 transcript read does not trigger a broad remote `/api/state` side fetch.
 

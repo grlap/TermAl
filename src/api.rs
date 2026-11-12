@@ -794,19 +794,8 @@ struct GetSessionHistoryQuery {
     limit: usize,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GetSessionOverviewQuery {
-    #[serde(default = "default_session_overview_bucket_count")]
-    buckets: usize,
-}
-
 fn default_session_history_page_limit() -> usize {
     SESSION_HISTORY_PAGE_MAX_MESSAGES
-}
-
-fn default_session_overview_bucket_count() -> usize {
-    SESSION_OVERVIEW_DEFAULT_BUCKETS
 }
 
 /// Gets one bounded recent suffix of a session.
@@ -933,41 +922,6 @@ async fn get_session_history(
     .await?;
     Ok((
         axum::Extension(OutputSizeRevision(revision)),
-        [(
-            axum::http::header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        )],
-        body,
-    )
-        .into_response())
-}
-
-/// Gets one whole-conversation, position-linear overview.
-async fn get_session_overview(
-    State(state): State<AppState>,
-    AxumPath(session_id): AxumPath<String>,
-    query: Result<Query<GetSessionOverviewQuery>, QueryRejection>,
-) -> Result<Response, ApiError> {
-    let Query(query) =
-        query.map_err(|rejection| api_query_rejection("session overview query", rejection))?;
-    if query.buckets == 0 {
-        return Err(ApiError::bad_request(
-            "session overview buckets must be at least 1",
-        ));
-    }
-    if query.buckets > SESSION_OVERVIEW_MAX_BUCKETS {
-        return Err(ApiError::bad_request(format!(
-            "session overview buckets must be at most {SESSION_OVERVIEW_MAX_BUCKETS}"
-        )));
-    }
-    let body = run_blocking_api(move || {
-        let response = state.get_session_overview(&session_id, query.buckets)?;
-        serde_json::to_vec(&response).map_err(|err| {
-            ApiError::internal(format!("failed to serialize session overview: {err}"))
-        })
-    })
-    .await?;
-    Ok((
         [(
             axum::http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/json"),

@@ -2497,55 +2497,6 @@ pub(super) fn spawn_remote_session_history_response_server(
     (port, requests, server)
 }
 
-pub(super) fn spawn_remote_session_overview_response_server(
-    response: SessionOverviewResponse,
-) -> (u16, Arc<Mutex<Vec<String>>>, std::thread::JoinHandle<()>) {
-    let response_body =
-        serde_json::to_string(&response).expect("session overview response should encode");
-    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
-    let requests_for_server = requests.clone();
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
-    let port = listener.local_addr().expect("listener addr").port();
-    let server = std::thread::spawn(move || {
-        for _ in 0..2 {
-            let mut stream =
-                accept_test_connection(&listener, "remote session overview test listener");
-            let request = read_test_http_request(&mut stream);
-            requests_for_server
-                .lock()
-                .expect("requests mutex poisoned")
-                .push(request.request_line.clone());
-
-            if request.request_line.starts_with("GET /api/health ") {
-                write_test_http_response(
-                    &mut stream,
-                    StatusCode::OK,
-                    "application/json",
-                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
-                );
-                continue;
-            }
-
-            if request
-                .request_line
-                .starts_with("GET /api/sessions/remote-session-1/overview?")
-            {
-                write_test_http_response(
-                    &mut stream,
-                    StatusCode::OK,
-                    "application/json",
-                    &response_body,
-                );
-                continue;
-            }
-
-            panic!("unexpected request: {}", request.request_line);
-        }
-    });
-
-    (port, requests, server)
-}
-
 pub(super) fn spawn_remote_state_response_server(
     response: impl Into<StateResponse>,
 ) -> (u16, Arc<Mutex<Vec<String>>>, std::thread::JoinHandle<()>) {

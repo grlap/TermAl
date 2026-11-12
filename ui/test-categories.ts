@@ -72,6 +72,16 @@ export const APP_TEST_FILES: readonly string[] = [
 
 export const HEAVY_TEST_FILES: readonly HeavyTestFile[] = [
   {
+    file: "src/panels/useConversationHistoryScroll.test.tsx",
+    tags: [],
+    reason: "native history extent and real virtualizer adoption lifecycle",
+  },
+  {
+    file: "src/panels/conversation-position-navigation.test.tsx",
+    tags: [],
+    reason: "pane, bounded history and virtualizer cancellation lifecycle",
+  },
+  {
     file: "src/SessionListWindow.test.tsx",
     tags: [],
     reason: "measured virtualizer lifecycle with 8,327-row and 3,000-row fixtures",
@@ -182,6 +192,7 @@ export const UNIT_TEST_FILES: readonly string[] = [
   "src/panels/session-tab-status-tooltip.test.ts",
   "src/panels/use-response-board-tabs.test.ts",
   "src/panels/virtualized-conversation-measurement.test.ts",
+  "src/panels/conversation-history-scroll-geometry.test.ts",
   "src/panels/work-labels.test.ts",
   "src/panels/work-sort.test.ts",
   "src/panels/work-tree.test.ts",
@@ -244,7 +255,6 @@ export const DOM_TS_TEST_FILES: readonly string[] = [
   "src/pane-keyboard.test.ts",
   "src/panels/conversation-markers.test.ts",
   "src/panels/conversation-message-reveal.test.ts",
-  "src/panels/conversation-overview-map.test.ts",
   "src/panels/conversation-virtualization.test.ts",
   "src/panels/markdown-commit-ranges.test.ts",
   "src/panels/markdown-diff-change-index.test.ts",

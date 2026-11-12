@@ -18,6 +18,36 @@
 
 use super::*;
 
+#[tokio::test]
+async fn session_overview_endpoint_is_removed_without_losing_history() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Codex);
+    seed_loaded_history_messages(&state, &session_id, 3);
+    let app = app_router(state);
+    let removed = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/sessions/{session_id}/overview?buckets=200"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(removed.status(), StatusCode::NOT_FOUND);
+    let (status, history): (StatusCode, SessionHistoryResponse) = request_json(
+        &app,
+        Request::builder()
+            .uri(format!("/api/sessions/{session_id}/history?limit=1"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(history.messages.len(), 1);
+}
+
 #[path = "session_projection_contract.rs"]
 mod session_projection_contract;
 
@@ -156,94 +186,6 @@ fn seed_loaded_history_messages(
     record.message_positions = build_message_positions(&record.session.messages);
     record.mutation_stamp = record.mutation_stamp.saturating_add(1);
     message_ids
-}
-
-#[cfg(unix)]
-fn current_thread_cpu_time() -> Duration {
-    let mut timestamp = std::mem::MaybeUninit::<libc::timespec>::uninit();
-    let result =
-        unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, timestamp.as_mut_ptr()) };
-    assert_eq!(
-        result,
-        0,
-        "thread CPU clock should be available: {}",
-        std::io::Error::last_os_error()
-    );
-    let timestamp = unsafe { timestamp.assume_init() };
-    Duration::new(
-        u64::try_from(timestamp.tv_sec).expect("thread CPU seconds should be non-negative"),
-        u32::try_from(timestamp.tv_nsec).expect("thread CPU nanoseconds should fit in a duration"),
-    )
-}
-
-#[cfg(unix)]
-fn measured_service_duration(operation: impl FnOnce()) -> Duration {
-    let started = current_thread_cpu_time();
-    operation();
-    current_thread_cpu_time().saturating_sub(started)
-}
-
-#[cfg(windows)]
-fn current_thread_cpu_time() -> Duration {
-    use windows_sys::Win32::Foundation::FILETIME;
-    use windows_sys::Win32::System::Threading::{GetCurrentThread, GetThreadTimes};
-
-    let mut creation = FILETIME {
-        dwLowDateTime: 0,
-        dwHighDateTime: 0,
-    };
-    let mut exit = creation;
-    let mut kernel = creation;
-    let mut user = creation;
-    let result = unsafe {
-        GetThreadTimes(
-            GetCurrentThread(),
-            &mut creation,
-            &mut exit,
-            &mut kernel,
-            &mut user,
-        )
-    };
-    assert_ne!(
-        result,
-        0,
-        "thread CPU clock should be available: {}",
-        std::io::Error::last_os_error()
-    );
-    let filetime_ticks =
-        |value: FILETIME| (u64::from(value.dwHighDateTime) << 32) | u64::from(value.dwLowDateTime);
-    // FILETIME CPU counters use 100-nanosecond units.
-    Duration::from_nanos(
-        filetime_ticks(kernel)
-            .saturating_add(filetime_ticks(user))
-            .saturating_mul(100),
-    )
-}
-
-#[cfg(windows)]
-fn measured_service_duration(operation: impl FnOnce()) -> Duration {
-    let started = current_thread_cpu_time();
-    operation();
-    current_thread_cpu_time().saturating_sub(started)
-}
-
-#[cfg(not(any(unix, windows)))]
-fn measured_service_duration(operation: impl FnOnce()) -> Duration {
-    // Rust's standard library has no portable per-thread CPU clock. Keep the
-    // latency assertion available on uncommon targets with a wall-clock
-    // fallback; Unix and Windows CI use thread CPU time so scheduler
-    // contention cannot masquerade as product latency.
-    let started = std::time::Instant::now();
-    operation();
-    started.elapsed()
-}
-
-fn fastest_service_duration(sample_count: usize, mut operation: impl FnMut()) -> Duration {
-    assert!(sample_count > 0, "timing sample count must be positive");
-    (0..sample_count)
-        .map(|_| measured_service_duration(&mut operation))
-        .min()
-        .expect("positive timing sample count should produce a duration")
 }
 
 struct TempProjectRoot;
@@ -689,145 +631,6 @@ async fn get_session_history_route_pages_large_transcript_by_message_id() {
     assert!(forward.messages.iter().all(|message| message.id() != after));
 }
 
-#[tokio::test]
-async fn get_session_overview_route_is_complete_for_a_retained_tail() {
-    let state = test_app_state();
-    let _files = HttpRouteTestFiles::capture(&state);
-    let session_id = test_session_id(&state, Agent::Codex);
-    {
-        let mut inner = state.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(&session_id)
-            .expect("session should exist");
-        let record = &mut inner.sessions[index];
-        record.session.messages = ((0..100)
-            .map(|position| {
-                let id = format!("overview-message-{position:03}");
-                if position < 25 {
-                    Message::Text {
-                        attachments: Vec::new(),
-                        id,
-                        timestamp: "12:00".to_owned(),
-                        author: Author::You,
-                        text: format!("Prompt {position}"),
-                        expanded_text: None,
-                        source: None,
-                    }
-                } else if position < 50 {
-                    Message::Command {
-                        id,
-                        timestamp: "12:00".to_owned(),
-                        author: Author::Assistant,
-                        command: format!("command-{position}"),
-                        command_language: None,
-                        output: String::new(),
-                        output_language: None,
-                        status: CommandStatus::Success,
-                    }
-                } else if position < 75 {
-                    Message::Diff {
-                        id,
-                        timestamp: "12:00".to_owned(),
-                        author: Author::Assistant,
-                        change_set_id: None,
-                        file_path: format!("file-{position}.rs"),
-                        summary: "Changed".to_owned(),
-                        diff: String::new(),
-                        language: None,
-                        change_type: ChangeType::Edit,
-                    }
-                } else {
-                    Message::Command {
-                        id,
-                        timestamp: "12:00".to_owned(),
-                        author: Author::Assistant,
-                        command: format!("failing-{position}"),
-                        command_language: None,
-                        output: String::new(),
-                        output_language: None,
-                        status: CommandStatus::Error,
-                    }
-                }
-            })
-            .collect::<Vec<_>>())
-        .into();
-        record.session.messages_loaded = true;
-        record.session.message_count = 100;
-        record.message_start_index = 0;
-        record.message_positions = build_message_positions(&record.session.messages);
-        record.session.markers = vec![ConversationMarker {
-            id: "overview-marker".to_owned(),
-            session_id: session_id.clone(),
-            kind: ConversationMarkerKind::Review,
-            name: "Review bucket".to_owned(),
-            body: None,
-            color: "#4488ff".to_owned(),
-            message_id: "overview-message-040".to_owned(),
-            message_index_hint: 40,
-            end_message_id: None,
-            end_message_index_hint: None,
-            created_at: "12:00".to_owned(),
-            updated_at: "12:00".to_owned(),
-            created_by: ConversationMarkerAuthor::User,
-        }];
-        record.mutation_stamp = 9;
-        persist_state(state.persistence_path.as_ref(), &inner)
-            .expect("overview fixture should persist");
-    }
-    let fully_resident_overview = state
-        .get_session_overview(&session_id, 4)
-        .expect("fully resident overview should load");
-    {
-        let mut inner = state.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(&session_id)
-            .expect("session should exist");
-        let record = &mut inner.sessions[index];
-        record.session.messages.discard(..70);
-        record.message_start_index = 70;
-        record.message_positions = build_message_positions(&record.session.messages);
-        record.session.messages_loaded = false;
-    }
-    let app = app_router(state);
-
-    let (status, overview): (StatusCode, SessionOverviewResponse) = request_json(
-        &app,
-        Request::builder()
-            .method("GET")
-            .uri(format!("/api/sessions/{session_id}/overview?buckets=4"))
-            .body(Body::empty())
-            .unwrap(),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(overview.session_id, session_id);
-    assert_eq!(overview.message_count, 100);
-    assert_eq!(overview.session_mutation_stamp, 9);
-    assert_eq!(overview.buckets.len(), 4);
-    assert_eq!(
-        overview
-            .buckets
-            .iter()
-            .map(|bucket| bucket.k)
-            .collect::<Vec<_>>(),
-        vec![
-            ConversationOverviewKind::Text,
-            ConversationOverviewKind::Command,
-            ConversationOverviewKind::Diff,
-            ConversationOverviewKind::Error,
-        ]
-    );
-    assert_eq!(overview.buckets[0].u, 25);
-    assert!(overview.buckets[1].m);
-    assert_eq!(overview.markers[0].position, 40);
-    assert_eq!(overview.latest_position, 99);
-    assert_eq!(
-        overview, fully_resident_overview,
-        "overview must not depend on transcript residency"
-    );
-}
-
 #[test]
 fn conversation_overview_classifies_declined_input_as_text_not_error() {
     // Deliberate asymmetry: an answerless resolution (Declined), whether the
@@ -948,104 +751,6 @@ async fn get_session_history_route_reads_exact_start_ranges() {
 }
 
 #[tokio::test]
-async fn get_session_overview_meets_large_transcript_latency_and_network_budgets() {
-    let state = test_app_state();
-    let _files = HttpRouteTestFiles::capture(&state);
-    let session_id = test_session_id(&state, Agent::Codex);
-    seed_loaded_history_messages(&state, &session_id, 25_000);
-    {
-        let mut inner = state.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(&session_id)
-            .expect("session should exist");
-        inner.sessions[index].session.message_count = 25_000;
-    }
-
-    let overview = state
-        .get_session_overview(&session_id, SESSION_OVERVIEW_MAX_BUCKETS)
-        .expect("large overview should load");
-    assert_eq!(overview.buckets.len(), SESSION_OVERVIEW_MAX_BUCKETS);
-    // Measure this synchronous operation's thread CPU service time rather than
-    // wall time so the parallel suite cannot fail merely because the host
-    // descheduled this test. The best warm sample still excludes cold-cache
-    // setup while preserving the strict product budget.
-    let elapsed = fastest_service_duration(5, || {
-        std::hint::black_box(
-            state
-                .get_session_overview(&session_id, SESSION_OVERVIEW_MAX_BUCKETS)
-                .expect("large overview timing sample should load"),
-        );
-    });
-    assert!(
-        elapsed < Duration::from_millis(10),
-        "fastest 25k-message overview sample took {elapsed:?}"
-    );
-
-    {
-        let mut inner = state.inner.lock().expect("state mutex poisoned");
-        persist_state(state.persistence_path.as_ref(), &inner)
-            .expect("large overview fixture should persist");
-        let index = inner
-            .find_session_index(&session_id)
-            .expect("session should exist");
-        let record = &mut inner.sessions[index];
-        record.session.messages.discard(..24_970);
-        record.message_start_index = 24_970;
-        record.message_positions = build_message_positions(&record.session.messages);
-        record.session.messages_loaded = false;
-    }
-    let bounded_overview = state
-        .get_session_overview(&session_id, SESSION_OVERVIEW_MAX_BUCKETS)
-        .expect("bounded-resident large overview should load");
-    assert_eq!(
-        bounded_overview, overview,
-        "large overview must not depend on transcript residency"
-    );
-    let bounded_elapsed = fastest_service_duration(5, || {
-        std::hint::black_box(
-            state
-                .get_session_overview(&session_id, SESSION_OVERVIEW_MAX_BUCKETS)
-                .expect("bounded-resident overview timing sample should load"),
-        );
-    });
-    assert!(
-        bounded_elapsed < Duration::from_millis(10),
-        "fastest 25k-message bounded-resident overview sample took {bounded_elapsed:?}"
-    );
-
-    let app = app_router(state);
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri(format!(
-                    "/api/sessions/{session_id}/overview?buckets={SESSION_OVERVIEW_MAX_BUCKETS}"
-                ))
-                .header(axum::http::header::ACCEPT_ENCODING, "gzip")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .expect("overview request should complete");
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        response
-            .headers()
-            .get(axum::http::header::CONTENT_ENCODING)
-            .and_then(|value| value.to_str().ok()),
-        Some("gzip")
-    );
-    let body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("compressed overview body should load");
-    assert!(
-        body.len() < 8 * 1024,
-        "compressed 512-bucket overview was {} bytes",
-        body.len()
-    );
-}
-
-#[tokio::test]
 async fn get_session_history_route_rejects_missing_cursor() {
     let state = test_app_state();
     let _files = HttpRouteTestFiles::capture(&state);
@@ -1144,39 +849,6 @@ async fn get_session_history_route_rejects_out_of_range_page_limits() {
             Request::builder()
                 .method("GET")
                 .uri(format!("/api/sessions/{session_id}/history?limit={limit}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(
-            response.get("error").and_then(Value::as_str),
-            Some(expected_error.as_str())
-        );
-    }
-}
-
-#[tokio::test]
-async fn get_session_overview_route_rejects_out_of_range_bucket_counts() {
-    let state = test_app_state();
-    let _files = HttpRouteTestFiles::capture(&state);
-    let session_id = test_session_id(&state, Agent::Codex);
-    let app = app_router(state);
-
-    for (buckets, expected_error) in [
-        (0, "session overview buckets must be at least 1".to_owned()),
-        (
-            SESSION_OVERVIEW_MAX_BUCKETS + 1,
-            format!("session overview buckets must be at most {SESSION_OVERVIEW_MAX_BUCKETS}"),
-        ),
-    ] {
-        let (status, response): (StatusCode, Value) = request_json(
-            &app,
-            Request::builder()
-                .method("GET")
-                .uri(format!(
-                    "/api/sessions/{session_id}/overview?buckets={buckets}"
-                ))
                 .body(Body::empty())
                 .unwrap(),
         )

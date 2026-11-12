@@ -72,14 +72,6 @@ describe("App live state - sparse tail activation", () => {
         const fetchTail = vi.spyOn(api, "fetchSessionTail").mockImplementation((id, limit) =>
           id === summary.id ? pendingTail.promise : originalFetchTail(id, limit),
         );
-        vi.spyOn(api, "fetchSessionOverview").mockResolvedValue({
-          sessionId: summary.id,
-          messageCount: 1000,
-          sessionMutationStamp: 8 + deltaCount,
-          buckets: [],
-          markers: [],
-          latestPosition: 999,
-        });
         const tail: Message[] = Array.from({ length: 20 }, (_, index) => ({
           id: `tail-${980 + index}`,
           type: "text",

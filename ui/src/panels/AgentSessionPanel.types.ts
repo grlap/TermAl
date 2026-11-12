@@ -341,6 +341,8 @@ export type SessionConversationPageProps = {
 };
 
 export type ConversationMessageListProps = {
+  historyBeforePx?: number;
+  historyAfterPx?: number;
   renderMessageCard: RenderMessageCard;
   sessionId: string;
   messageStartIndex: number;

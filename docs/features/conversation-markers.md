@@ -4,7 +4,7 @@
 
 In progress. The current tree has the shared marker data model, session
 persistence, marker CRUD routes, marker SSE deltas, frontend API helpers, live
-delta application, overview-rail marker pins, transcript chips, marker
+delta application, checkpoint dots beside the native scrollbar, transcript chips, marker
 list/previous-next navigation, and a quick checkpoint action on transcript
 messages. Full marker edit/delete UI and agent workflow actions are still
 pending.
@@ -14,7 +14,7 @@ conversation. They let the user mark important points in a long transcript,
 name and color those points, jump between them, and optionally ask agents to
 use them as context boundaries.
 
-Related feature: [Conversation Overview Map](conversation-overview-map.md).
+Related feature: [Virtualized transcripts and checkpoint dots](session-virtualized-transcript.md#native-scrollbar-and-checkpoint-dots).
 
 ## Problem
 

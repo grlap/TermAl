@@ -1690,7 +1690,6 @@ describe("App scroll behaviour", () => {
             messages: makeMessages(sessionId),
           }),
       );
-      const session1OverviewResolvers: Array<(response: Response) => void> = [];
       const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const requestUrl = new URL(String(input), "http://localhost");
         if (requestUrl.pathname === "/api/state") {
@@ -1720,26 +1719,6 @@ describe("App scroll behaviour", () => {
             throw new Error(`Missing session fixture for ${sessionId}`);
           }
           return jsonResponse(makeSessionHydrationResponse(session, 1));
-        }
-        const overviewMatch = requestUrl.pathname.match(
-          /^\/api\/sessions\/([^/]+)\/overview$/,
-        );
-        if (overviewMatch) {
-          const sessionId = decodeURIComponent(overviewMatch[1] ?? "");
-          const response = jsonResponse({
-            sessionId,
-            messageCount: 80,
-            sessionMutationStamp: 1,
-            buckets: [{ c: 80, k: "text", u: 8, m: false }],
-            markers: [],
-            latestPosition: 79,
-          });
-          if (sessionId === "session-1") {
-            return new Promise<Response>((resolve) => {
-              session1OverviewResolvers.push(resolve);
-            });
-          }
-          return response;
         }
         throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
       });
@@ -1824,8 +1803,7 @@ describe("App scroll behaviour", () => {
           latestEventSource().dispatchError();
         });
         await settleAsyncUi();
-        const initialOverviewRequestCount = session1OverviewResolvers.length;
-        expect(initialOverviewRequestCount).toBeGreaterThanOrEqual(1);
+        expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/overview"))).toBe(false);
 
         const session1Tab = screen.getByRole("tab", { name: "Session 1" });
         const session2Tab = screen.getByRole("tab", { name: "Session 2" });
@@ -1892,9 +1870,7 @@ describe("App scroll behaviour", () => {
           fireEvent.dragEnd(dragGrip, { dataTransfer });
         });
         await settleAsyncUi();
-        expect(session1OverviewResolvers).toHaveLength(
-          initialOverviewRequestCount + 1,
-        );
+        expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/overview"))).toBe(false);
 
         const movedSessionTab = screen.getByRole("tab", {
           name: "Session 1",
@@ -1920,22 +1896,10 @@ describe("App scroll behaviour", () => {
         expect(targetScrollKinds).not.toContain("bottom_pin");
 
         targetScrollKinds.length = 0;
-        session1OverviewResolvers[session1OverviewResolvers.length - 1]?.(
-          jsonResponse({
-            sessionId: "session-1",
-            messageCount: 80,
-            sessionMutationStamp: 1,
-            buckets: [{ c: 80, k: "text", u: 8, m: false }],
-            markers: [],
-            latestPosition: 79,
-          }),
-        );
+        // A later viewport-layout signal must retain the restored reader.
+        act(() => { fireEvent.resize(window); });
         await settleAsyncUi();
-        await waitFor(() =>
-          expect(
-            movedPane?.querySelector(".conversation-with-overview"),
-          ).not.toBeNull(),
-        );
+        expect(movedPane?.querySelector(".virtualized-message-list")).not.toBeNull();
         expect(targetStack.scrollTop).toBe(5_000);
         expect(targetScrollKinds).not.toContain("bottom_pin");
         expect(targetScrollKinds).not.toContain("position_restore");
@@ -1985,9 +1949,7 @@ describe("App scroll behaviour", () => {
           });
         });
         await settleAsyncUi();
-        expect(session1OverviewResolvers).toHaveLength(
-          initialOverviewRequestCount + 2,
-        );
+        expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/overview"))).toBe(false);
 
         const edgeMovedSessionTab = screen.getByRole("tab", {
           name: "Session 1",
@@ -2037,23 +1999,11 @@ describe("App scroll behaviour", () => {
         expect((edgeMovedStack as HTMLElement).scrollTop).toBe(4_000);
         expect(edgeMovedStack).not.toHaveClass("is-tail-following");
 
-        session1OverviewResolvers[session1OverviewResolvers.length - 1]?.(
-          jsonResponse({
-            sessionId: "session-1",
-            messageCount: 80,
-            sessionMutationStamp: 1,
-            buckets: [{ c: 80, k: "text", u: 8, m: false }],
-            markers: [],
-            latestPosition: 79,
-          }),
-        );
+        // A later viewport-layout signal must retain the restored reader.
+        act(() => { fireEvent.resize(window); });
         await settleAsyncUi();
-        await waitFor(() =>
-          expect(
-            edgeMovedPane?.querySelector(".conversation-with-overview"),
-          ).not.toBeNull(),
-        );
-        const edgeScrollKindsAfterOverview =
+        expect(edgeMovedPane?.querySelector(".virtualized-message-list")).not.toBeNull();
+        const edgeScrollKindsAfterResize =
           dispatchEventSpy.mock.calls.flatMap((call, index) => {
             const event = call[0];
             return dispatchEventSpy.mock.contexts[index] === edgeMovedStack &&
@@ -2065,7 +2015,7 @@ describe("App scroll behaviour", () => {
                 ]
               : [];
           });
-        expect(edgeScrollKindsAfterOverview).not.toContain("bottom_pin");
+        expect(edgeScrollKindsAfterResize).not.toContain("bottom_pin");
         expect((edgeMovedStack as HTMLElement).scrollTop).toBe(4_000);
 
         const freshSessionTab = screen.getByRole("tab", {

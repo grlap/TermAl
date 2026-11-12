@@ -3159,41 +3159,6 @@ enum ConversationOverviewKind {
     Error,
 }
 
-/// One equal-position bucket in a bounded conversation overview response.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
-struct ConversationOverviewBucket {
-    /// Message count.
-    c: u32,
-    /// Dominant message kind.
-    k: ConversationOverviewKind,
-    /// User-authored message count.
-    u: u32,
-    /// Whether at least one conversation marker falls in this bucket.
-    m: bool,
-}
-
-/// One marker projected into whole-transcript position space.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ConversationOverviewMarker {
-    position: usize,
-    kind: ConversationMarkerKind,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    label: Option<String>,
-}
-
-/// Whole-conversation overview returned independently of transcript residency.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionOverviewResponse {
-    session_id: String,
-    message_count: u32,
-    session_mutation_stamp: u64,
-    buckets: Vec<ConversationOverviewBucket>,
-    markers: Vec<ConversationOverviewMarker>,
-    latest_position: usize,
-}
-
 /// Defines the workspace control panel side variants.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

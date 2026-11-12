@@ -91,45 +91,6 @@ function makeTextMessages(count: number): Message[] {
   }));
 }
 
-function stubConversationOverview(
-  sessionId: string,
-  messageCount: number,
-  sessionMutationStamp = 0,
-) {
-  return vi
-    .spyOn(api, "fetchSessionOverview")
-    .mockResolvedValue(
-      makeConversationOverviewResponse(
-        sessionId,
-        messageCount,
-        sessionMutationStamp,
-      ),
-    );
-}
-
-function makeConversationOverviewResponse(
-  sessionId: string,
-  messageCount: number,
-  sessionMutationStamp = 0,
-): Awaited<ReturnType<typeof api.fetchSessionOverview>> {
-  const bucketCount = Math.min(4, Math.max(1, messageCount));
-  return {
-    sessionId,
-    messageCount,
-    sessionMutationStamp,
-    buckets: Array.from({ length: bucketCount }, (_, index) => ({
-        c:
-          Math.floor(((index + 1) * messageCount) / bucketCount) -
-          Math.floor((index * messageCount) / bucketCount),
-        k: index === 1 ? "command" : "text",
-        u: index === 0 ? 1 : 0,
-        m: false,
-    })),
-    markers: [],
-    latestPosition: Math.max(0, messageCount - 1),
-  };
-}
-
 function installLongTranscriptScrollNodeMocks(scrollNode: HTMLElement) {
   const originalGetBoundingClientRect =
     Element.prototype.getBoundingClientRect;
@@ -401,8 +362,21 @@ function lastJsonRequestBody(fetchMock: ReturnType<typeof stubResolvedAgentComma
 }
 
 describe("AgentSessionPanel virtualization", () => {
+  it("keeps a long checkpoint-free conversation on the native scrollbar without overview requests", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ commands: [] }), {
+      headers: { "Content-Type": "application/json" },
+    }));
+    const { container } = renderSessionPanelWithDefaults({
+      activeSession: makeSession("without-checkpoints", { messages: makeTextMessages(80), markers: [] }),
+    });
+    await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector(".virtualized-message-list")).not.toBeNull();
+    expect(screen.queryByRole("slider")).toBeNull();
+    expect(screen.queryByRole("button", { name: /checkpoint/i })).toBeNull();
+    expect(fetch.mock.calls.filter(([request]) => String(request).includes("/overview"))).toHaveLength(0);
+    expect(container.querySelector(".has-conversation-overview-scroll")).toBeNull();
+  });
   it("moves the virtualizer handle when its caller replaces the ref", async () => {
-    stubConversationOverview("active-session", 40);
     const firstHandleRef: VirtualizedConversationMessageListHandleRef = {
       current: null,
     };
@@ -543,241 +517,84 @@ describe("AgentSessionPanel virtualization", () => {
     }
   });
 
-  it("renders a conversation overview rail when long-session data is ready", async () => {
-    const OriginalResizeObserver = window.ResizeObserver;
-
-    class ResizeObserverMock {
-      observe() {}
-      disconnect() {}
-    }
-
-    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-    try {
-      stubConversationOverview("active-session", 40);
-      const { container } = renderSessionPanelWithDefaults({
-        activeSession: makeSession("active-session", {
-          status: "active",
-          // 40 keeps the rail in per-segment (button) mode: still long enough to
-          // render the rail + virtualize (>= the 30 gate), but under the
-          // 64-segment compact threshold that turns alternating transcripts into
-          // visual spans instead of named buttons.
-          messages: makeTextMessages(40),
-        }),
-      });
-
-      await screen.findByLabelText(/^Conversation overview,/);
-      expect(
-        container.querySelector(
-          ".session-conversation-page.has-conversation-overview-scroll",
-        ),
-      ).not.toBeNull();
-      expect(container.querySelector(".conversation-with-overview")).not.toBeNull();
-      const overviewContentBefore = container.querySelector(
-        ".conversation-overview-content",
-      );
-      const virtualizedListBefore = container.querySelector(
-        ".virtualized-message-list",
-      );
-      expect(overviewContentBefore).not.toBeNull();
-      expect(virtualizedListBefore).not.toBeNull();
-
-      const rail = screen.getByLabelText(/^Conversation overview,/);
-      expect(screen.getAllByLabelText(/^Conversation overview,/)).toHaveLength(1);
-      expect(rail).toBeInTheDocument();
-      expect(rail).toHaveStyle({ zIndex: "var(--z-pane-overlay)" });
-      expect(
-        rail.querySelectorAll(".conversation-overview-visual-segment"),
-      ).toHaveLength(4);
-      expect(container.querySelector(".conversation-overview-content")).toBe(
-        overviewContentBefore,
-      );
-      expect(container.querySelector(".virtualized-message-list")).toBe(
-        virtualizedListBefore,
-      );
-      expect(rail.parentElement).toHaveClass("workspace-pane");
-      expect(container.querySelector(".activity-card-live")).toBeNull();
-      expect(container.querySelector(".conversation-queued-tail")).toBeNull();
-    } finally {
-      window.ResizeObserver = OriginalResizeObserver;
-    }
-  });
-
-  it.each([
-    {
-      label: "detached",
-      liveTailPinned: false,
-      scrollTop: 12_000,
-      scrollKind: "position_restore",
-    },
-    {
-      label: "attached at bottom",
-      liveTailPinned: true,
-      scrollTop: 23_400,
-      scrollKind: "bottom_pin",
-    },
-  ] as const)(
-    "keeps scrollbar eligibility stable and uses current $label intent when overview readiness changes the wrapper",
-    async ({ liveTailPinned, scrollKind, scrollTop }) => {
-      const scrollNode = document.createElement("section");
-      scrollNode.className = "message-stack";
-      const scrollMocks = installLongTranscriptScrollNodeMocks(scrollNode);
-      const overviewScrollKinds: Array<string | undefined> = [];
-      scrollNode.addEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, (event) => {
-        overviewScrollKinds.push(
-          (event as CustomEvent<{ scrollKind?: string }>).detail?.scrollKind,
-        );
-      });
-      let resolveOverview:
-        | ((value: ReturnType<typeof makeConversationOverviewResponse>) => void)
-        | null = null;
-      const overviewSpy = vi
-        .spyOn(api, "fetchSessionOverview")
-        .mockImplementationOnce(
-          () =>
-            new Promise<ReturnType<typeof makeConversationOverviewResponse>>(
-              (resolve) => {
-              resolveOverview = resolve;
-              },
-            ),
-        );
-
-      try {
-        const { container } = renderSessionPanelWithDefaults({
-          activeSession: makeSession("overview-transition", {
-            messages: makeTextMessages(40),
-          }),
-          liveTailPinned,
-          scrollContainerRef: { current: scrollNode },
-        });
-        await waitFor(() => expect(overviewSpy).toHaveBeenCalledTimes(1));
-        expect(
-          container.querySelector(
-            ".session-conversation-page.has-conversation-overview-scroll",
-          ),
-        ).not.toBeNull();
-        expect(container.querySelector(".conversation-with-overview")).not.toBeNull();
-        expect(
-          screen.getByLabelText(/Conversation overview loading/),
-        ).toHaveClass("is-pending");
-
-        act(() => {
-          scrollMocks.setScrollTop(scrollTop);
-          notifyMessageStackScrollWrite(scrollNode, { scrollKind });
-        });
-        const scrollTopBeforeOverview = scrollNode.scrollTop;
-        overviewScrollKinds.length = 0;
-
-        await act(async () => {
-          resolveOverview?.(
-            makeConversationOverviewResponse("overview-transition", 40),
-          );
-          await Promise.resolve();
-        });
-        await waitFor(() =>
-          expect(
-            container.querySelector(
-              ".session-conversation-page.has-conversation-overview-scroll",
-            ),
-          ).not.toBeNull(),
-        );
-
-        expect(container.querySelector(".conversation-with-overview")).not.toBeNull();
-        expect(overviewScrollKinds).toEqual(
-          liveTailPinned ? ["bottom_pin"] : [],
-        );
-        if (liveTailPinned) {
-          expect(scrollNode.scrollTop).toBe(scrollTopBeforeOverview);
-        }
-      } finally {
-        scrollMocks.cleanup();
+  it("keeps the native history wrapper and long unbreakable messages shrinkable", async () => {
+    const nodeFsModule = "node:fs";
+    const { readFileSync } = (await import(nodeFsModule)) as {
+      readFileSync: (path: string, encoding: "utf8") => string;
+    };
+    const runtimeProcess = (
+      globalThis as typeof globalThis & {
+        process: { cwd: () => string };
       }
-    },
-  );
-
-  it("keeps a visible pending rail when an eligible overview request fails", async () => {
-    const overviewSpy = vi
-      .spyOn(api, "fetchSessionOverview")
-      .mockRejectedValueOnce(new Error("overview unavailable"));
-    const { container } = renderSessionPanelWithDefaults({
-      activeSession: makeSession("overview-failure", {
-        messages: makeTextMessages(40),
-      }),
-    });
-
-    await waitFor(() => expect(overviewSpy).toHaveBeenCalledTimes(1));
-    await act(async () => Promise.resolve());
-    expect(
-      container.querySelector(
-        ".session-conversation-page.has-conversation-overview-scroll",
-      ),
-    ).not.toBeNull();
-    expect(container.querySelector(".conversation-with-overview")).not.toBeNull();
-    expect(screen.getByLabelText(/Conversation overview loading/)).toHaveClass(
-      "is-pending",
+    ).process;
+    const stylesCss = readFileSync(
+      `${runtimeProcess.cwd()}/src/styles.css`,
+      "utf8",
     );
-  });
-
-  it("keeps the native scrollbar for a transcript below the overview threshold", () => {
-    const overviewSpy = vi.spyOn(api, "fetchSessionOverview");
-    const { container } = renderSessionPanelWithDefaults({
-      activeSession: makeSession("short-session", {
-        messages: makeTextMessages(29),
-      }),
-    });
-
-    expect(overviewSpy).not.toHaveBeenCalled();
-    expect(
-      container.querySelector(
-        ".session-conversation-page.has-conversation-overview-scroll",
-      ),
-    ).toBeNull();
-    expect(
-      container.querySelectorAll(".message-slot[data-message-id]"),
-    ).toHaveLength(29);
-  });
-
-  it("never restores the native scrollbar during a large-session switch", async () => {
-    const overviewSpy = vi
-      .spyOn(api, "fetchSessionOverview")
-      .mockImplementation(
-        () =>
-          new Promise<ReturnType<typeof makeConversationOverviewResponse>>(
-            () => {},
-          ),
-      );
-    const firstSession = makeSession("large-session-a", {
-      messages: makeTextMessages(40),
-    });
-    const secondSession = makeSession("large-session-b", {
-      messages: makeTextMessages(40),
-    });
-    const panel = createAgentSessionPanelHarness({
-      activeSession: firstSession,
-    });
-    const rendered = render(panel());
-
-    await waitFor(() => expect(overviewSpy).toHaveBeenCalledTimes(1));
-    expect(
-      rendered.container.querySelector(
-        ".session-conversation-page.has-conversation-overview-scroll",
-      ),
-    ).not.toBeNull();
-
-    act(() => {
-      syncComposerSessionsStore({
-        sessions: [firstSession, secondSession],
-        draftsBySessionId: {},
-        draftAttachmentsBySessionId: {},
+    const productionStyles = document.createElement("style");
+    productionStyles.dataset.testProductionStyles = "true";
+    productionStyles.textContent = stylesCss;
+    document.head.append(productionStyles);
+    const messages = makeTextMessages(40);
+    try {
+      const { container } = renderSessionPanelWithDefaults({
+        activeSession: makeSession("wide-session", { messages }),
+        renderMessageCard: (message) => (
+          <article
+            className={`message-card ${
+              message.author === "you" ? "bubble-you" : "bubble-assistant"
+            }`}
+          >
+            {message.id === "message-40" ? (
+              <pre>
+                <code>{"unbreakable".repeat(200)}</code>
+              </pre>
+            ) : (
+              message.id
+            )}
+          </article>
+        ),
       });
-    });
-    rendered.rerender(panel({ activeSessionId: secondSession.id }));
 
-    await waitFor(() => expect(overviewSpy).toHaveBeenCalledTimes(2));
-    expect(
-      rendered.container.querySelector(
-        ".session-conversation-page.has-conversation-overview-scroll",
-      ),
-    ).not.toBeNull();
+      await waitFor(() =>
+        expect(
+          container.querySelector(".virtualized-message-list"),
+        ).not.toBeNull(),
+      );
+      // AgentSessionPanel is rendered without SessionPaneView's outer stack in
+      // this unit harness. Give the RTL container that production role so the
+      // resolved :has(.virtualized-message-list) selector is exercised without
+      // falling back to a source-text assertion.
+      container.classList.add("message-stack");
+      expect(window.getComputedStyle(container).scrollbarGutter).toBe(
+        "stable",
+      );
+
+      const widthConstraintSelectors = [
+        ".session-conversation-page",
+        ".conversation-history-window",
+        ".virtualized-message-list",
+        ".virtualized-message-page",
+        ".virtualized-message-range",
+        ".virtualized-message-slot",
+        ".message-slot",
+      ];
+      widthConstraintSelectors.forEach((selector) => {
+        const node = container.querySelector<HTMLElement>(selector);
+        expect(
+          node,
+          `missing production width constraint ${selector}`,
+        ).not.toBeNull();
+        expect(
+          window.getComputedStyle(node as HTMLElement).minWidth,
+          `${selector} must remain shrinkable in the production cascade`,
+        ).toMatch(/^0(?:px)?$/);
+      });
+
+      expect(container.querySelector(".bubble-you")).not.toBeNull();
+    } finally {
+      productionStyles.remove();
+    }
   });
 
   it.each([
@@ -797,7 +614,6 @@ describe("AgentSessionPanel virtualization", () => {
     const productionStyles = document.createElement("style");
     productionStyles.textContent = readFileSync(`${runtimeProcess.cwd()}/src/styles.css`, "utf8");
     document.head.append(productionStyles);
-    stubConversationOverview("partial-session", 1000);
     try {
       const { container } = renderSessionPanelWithDefaults({
         activeSession: makeSession("partial-session", {
@@ -823,127 +639,6 @@ describe("AgentSessionPanel virtualization", () => {
       expect(container.querySelector(".message-card")).toBeInTheDocument();
     } finally {
       productionStyles.remove();
-    }
-  });
-
-  it("keeps the production rail wrapper from widening the transcript pane", async () => {
-    const nodeFsModule = "node:fs";
-    const { readFileSync } = (await import(nodeFsModule)) as {
-      readFileSync: (path: string, encoding: "utf8") => string;
-    };
-    const runtimeProcess = (
-      globalThis as typeof globalThis & {
-        process: { cwd: () => string };
-      }
-    ).process;
-    const stylesCss = readFileSync(
-      `${runtimeProcess.cwd()}/src/styles.css`,
-      "utf8",
-    );
-    const productionStyles = document.createElement("style");
-    productionStyles.dataset.testProductionStyles = "true";
-    productionStyles.textContent = stylesCss;
-    document.head.append(productionStyles);
-    const messages = makeTextMessages(40);
-    stubConversationOverview("wide-session", messages.length);
-    try {
-      const { container } = renderSessionPanelWithDefaults({
-        activeSession: makeSession("wide-session", { messages }),
-        renderMessageCard: (message) => (
-          <article
-            className={`message-card ${
-              message.author === "you" ? "bubble-you" : "bubble-assistant"
-            }`}
-          >
-            {message.id === "message-40" ? (
-              <pre>
-                <code>{"unbreakable".repeat(200)}</code>
-              </pre>
-            ) : (
-              message.id
-            )}
-          </article>
-        ),
-      });
-      await screen.findByLabelText(/^Conversation overview,/);
-
-      await waitFor(() =>
-        expect(
-          container.querySelector(".virtualized-message-list"),
-        ).not.toBeNull(),
-      );
-      // AgentSessionPanel is rendered without SessionPaneView's outer stack in
-      // this unit harness. Give the RTL container that production role so the
-      // resolved :has(.virtualized-message-list) selector is exercised without
-      // falling back to a source-text assertion.
-      container.classList.add("message-stack");
-      expect(window.getComputedStyle(container).scrollbarGutter).toBe(
-        "stable",
-      );
-
-      const widthConstraintSelectors = [
-        ".session-conversation-page",
-        ".conversation-with-overview",
-        ".conversation-overview-content",
-        ".virtualized-message-list",
-        ".virtualized-message-page",
-        ".virtualized-message-range",
-        ".virtualized-message-slot",
-        ".message-slot",
-      ];
-      widthConstraintSelectors.forEach((selector) => {
-        const node = container.querySelector<HTMLElement>(selector);
-        expect(
-          node,
-          `missing production width constraint ${selector}`,
-        ).not.toBeNull();
-        expect(
-          window.getComputedStyle(node as HTMLElement).minWidth,
-          `${selector} must remain shrinkable in the production cascade`,
-        ).toMatch(/^0(?:px)?$/);
-      });
-
-      expect(container.querySelector(".bubble-you")).not.toBeNull();
-      expect(
-        window.getComputedStyle(
-          container.querySelector<HTMLElement>(".conversation-with-overview")!,
-        ).gridTemplateColumns,
-      ).toContain("minmax(0, 1fr)");
-    } finally {
-      productionStyles.remove();
-    }
-  });
-
-  it("keeps the overview mounted and globally positioned for a 20-message tail of a large session", async () => {
-    const OriginalResizeObserver = window.ResizeObserver;
-    class ResizeObserverMock {
-      observe() {}
-      disconnect() {}
-    }
-    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-    try {
-      stubConversationOverview("tail-session", 1_000);
-      renderSessionPanelWithDefaults({
-        activeSession: makeSession("tail-session", {
-          status: "idle",
-          messages: makeTextMessages(20),
-          messageCount: 1_000,
-          messageStartIndex: 980,
-          messagesLoaded: false,
-          hasOlderHistory: true,
-          hasNewerHistory: false,
-        }),
-      });
-
-      expect(
-        await screen.findByLabelText(/^Conversation overview,/),
-      ).toBeInTheDocument();
-      await waitFor(() => {
-        const viewport = screen.getByTestId("conversation-overview-viewport");
-        expect(Number.parseFloat(viewport.style.top)).toBeGreaterThan(0);
-      });
-    } finally {
-      window.ResizeObserver = OriginalResizeObserver;
     }
   });
 
@@ -979,195 +674,6 @@ describe("AgentSessionPanel virtualization", () => {
     expect(screen.getByRole("tooltip")).toHaveTextContent("Fix the paging bug");
     expect(screen.queryByText("cargo test session_history")).toBeNull();
     expect(screen.queryByText("Agent command")).toBeNull();
-  });
-
-  it("navigates the virtualized transcript from conversation overview items", async () => {
-    const OriginalResizeObserver = window.ResizeObserver;
-    const originalRequestAnimationFrame = window.requestAnimationFrame;
-    const originalCancelAnimationFrame = window.cancelAnimationFrame;
-    const scrollNode = document.createElement("section");
-    let scrollTop = 0;
-    const scrollWrites: number[] = [];
-
-    class ResizeObserverMock {
-      observe() {}
-      disconnect() {}
-    }
-
-    Object.defineProperty(scrollNode, "clientHeight", {
-      configurable: true,
-      get: () => 500,
-    });
-    Object.defineProperty(scrollNode, "clientWidth", {
-      configurable: true,
-      get: () => 1000,
-    });
-    Object.defineProperty(scrollNode, "scrollHeight", {
-      configurable: true,
-      get: () => 20_000,
-    });
-    Object.defineProperty(scrollNode, "scrollTop", {
-      configurable: true,
-      get: () => scrollTop,
-      set: (nextValue: number) => {
-        scrollTop = nextValue;
-        scrollWrites.push(nextValue);
-      },
-    });
-
-    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
-      callback(performance.now());
-      return 1;
-    }) as typeof requestAnimationFrame;
-    window.cancelAnimationFrame = vi.fn() as unknown as typeof cancelAnimationFrame;
-
-    try {
-      stubConversationOverview("active-session", 40);
-      renderSessionPanelWithDefaults({
-        activeSession: makeSession("active-session", {
-          status: "active",
-          // See the sibling rail test: 40 stays under the compact-segment
-          // threshold so per-segment navigation buttons render.
-          messages: makeTextMessages(40),
-        }),
-        scrollContainerRef: { current: scrollNode },
-      });
-
-      await waitFor(() => {
-        expect(
-          screen.getByLabelText(/^Conversation overview,/),
-        ).toBeInTheDocument();
-      });
-
-      const rail = screen.getByLabelText(/^Conversation overview,/);
-      Object.defineProperty(rail, "getBoundingClientRect", {
-        configurable: true,
-        value: () =>
-          ({
-            bottom: 500,
-            height: 500,
-            left: 0,
-            right: 20,
-            top: 0,
-            width: 20,
-            x: 0,
-            y: 0,
-            toJSON: () => ({}),
-          }) as DOMRect,
-      });
-      act(() => {
-        fireEvent.pointerDown(rail, {
-          button: 0,
-          clientY: 375,
-          pointerId: 1,
-        });
-      });
-
-      expect(scrollTop).toBeGreaterThan(0);
-      expect(scrollWrites.length).toBeGreaterThan(0);
-    } finally {
-      window.ResizeObserver = OriginalResizeObserver;
-      window.requestAnimationFrame = originalRequestAnimationFrame;
-      window.cancelAnimationFrame = originalCancelAnimationFrame;
-    }
-  });
-
-  it("tracks the owning message-stack height while the composer is focused", async () => {
-    const OriginalResizeObserver = window.ResizeObserver;
-    const originalRequestAnimationFrame = window.requestAnimationFrame;
-    const originalCancelAnimationFrame = window.cancelAnimationFrame;
-    const scrollNode = document.createElement("section");
-    scrollNode.className = "message-stack";
-    const focusedComposer = document.createElement("textarea");
-    focusedComposer.dataset.conversationComposerInput = "true";
-    document.body.append(scrollNode, focusedComposer);
-    focusedComposer.focus();
-    let clientHeight = 576;
-    let scrollTop = 0;
-
-    const resizeCallbacks: ResizeObserverCallback[] = [];
-    class ResizeObserverMock {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallbacks.push(callback);
-      }
-      observe() {}
-      disconnect() {}
-    }
-
-    Object.defineProperty(scrollNode, "clientHeight", {
-      configurable: true,
-      get: () => clientHeight,
-    });
-    Object.defineProperty(scrollNode, "clientWidth", {
-      configurable: true,
-      get: () => 1000,
-    });
-    Object.defineProperty(scrollNode, "scrollHeight", {
-      configurable: true,
-      get: () => 20_000,
-    });
-    Object.defineProperty(scrollNode, "scrollTop", {
-      configurable: true,
-      get: () => scrollTop,
-      set: (nextValue: number) => {
-        scrollTop = nextValue;
-      },
-    });
-
-    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
-      callback(performance.now());
-      return 1;
-    }) as typeof requestAnimationFrame;
-    window.cancelAnimationFrame = vi.fn() as unknown as typeof cancelAnimationFrame;
-
-    try {
-      stubConversationOverview("active-session", 90);
-      renderSessionPanelWithDefaults({
-        activeSession: makeSession("active-session", {
-          status: "active",
-          messages: makeTextMessages(90),
-        }),
-        scrollContainerRef: { current: scrollNode },
-      });
-
-      const rail = await screen.findByLabelText(/^Conversation overview,/);
-      const viewport = screen.getByTestId("conversation-overview-viewport");
-
-      await waitFor(() => {
-        expect(rail).toHaveStyle({ height: "552px" });
-      });
-      const initialViewportTop = viewport.style.top;
-      const initialViewportHeight = viewport.style.height;
-
-      act(() => {
-        scrollTop = 1_500;
-        fireEvent.scroll(scrollNode);
-      });
-
-      await waitFor(() => {
-        expect(viewport.style.top).not.toBe(initialViewportTop);
-      });
-
-      act(() => {
-        clientHeight = 976;
-        resizeCallbacks.forEach((callback) =>
-          callback([], {} as ResizeObserver),
-        );
-      });
-
-      await waitFor(() => {
-        expect(rail).toHaveStyle({ height: "952px" });
-        expect(viewport.style.height).not.toBe(initialViewportHeight);
-      });
-    } finally {
-      focusedComposer.remove();
-      scrollNode.remove();
-      window.ResizeObserver = OriginalResizeObserver;
-      window.requestAnimationFrame = originalRequestAnimationFrame;
-      window.cancelAnimationFrame = originalCancelAnimationFrame;
-    }
   });
 
   it("does not carry deferred transcript cards across session switches", async () => {

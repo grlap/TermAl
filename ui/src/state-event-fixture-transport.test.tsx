@@ -1,7 +1,6 @@
-// Exercises the isolated transport through the production API and overview consumer.
+// Exercises the isolated transport through the production session/history APIs.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { fetchGitStatus, fetchSessionHistory, fetchSessionOverview, fetchSessionTail } from "./api";
-import { projectConversationOverviewBuckets } from "./panels/conversation-overview-map";
+import { fetchGitStatus, fetchSessionHistory, fetchSessionTail } from "./api";
 import { installStateEventFixtureTransport } from "./dev/state-event-fixture-transport";
 import { createStateEventWorkload } from "./dev/state-event-test-fixtures";
 
@@ -13,32 +12,12 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it("serves a complete bounded overview while the real API loads only a tail", async () => {
-  const workload = createStateEventWorkload(2);
-  const transport = installStateEventFixtureTransport(workload);
-  const id = "synthetic-session-0";
-  const tail = await fetchSessionTail(id, 20);
-  expect(tail.session.messages).toHaveLength(20);
-  expect(tail.session.messageCount).toBe(800);
-
-  const overview = await fetchSessionOverview(id, 7);
-  const projected = projectConversationOverviewBuckets(overview);
-  expect(overview.sessionId).toBe(id);
-  expect(overview.buckets).toHaveLength(7);
-  expect(overview.buckets.reduce((count, bucket) => count + bucket.c, 0)).toBe(800);
-  expect(overview.buckets.reduce((count, bucket) => count + bucket.u, 0)).toBe(400);
-  expect(projected[0].startPosition).toBe(0);
-  expect(projected[projected.length - 1].endPosition).toBe(800);
-  expect(overview.latestPosition).toBe(799);
-  expect(transport.refusedRequests).toEqual([]);
-});
-
 it("serves synthetic Git status and keeps unknown sessions and paths isolated", async () => {
   const transport = installStateEventFixtureTransport(createStateEventWorkload(2));
   const status = await fetchGitStatus("/synthetic", "synthetic-session-0");
   expect(status).toMatchObject({ workdir: "/synthetic", isClean: true, files: [] });
   await expect(fetchGitStatus("/unrelated", "synthetic-session-0")).rejects.toThrow();
-  await expect(fetchSessionOverview("unknown-session")).rejects.toThrow();
+  await expect(fetchSessionTail("unknown-session", 20)).rejects.toThrow();
   expect(transport.refusedRequests).toHaveLength(2);
 });
 
