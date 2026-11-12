@@ -32,6 +32,9 @@ mod selection_edges;
 #[path = "acceptance_committed_source_owner.rs"]
 mod source_owner;
 
+#[path = "acceptance_metadata_window.rs"]
+mod metadata_window;
+
 #[path = "acceptance_committed_input_unheld.rs"]
 mod unheld;
 

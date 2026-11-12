@@ -119,7 +119,12 @@ fn engram_source_owner_run(
             command.env_remove(key);
         }
     }
-    run_engram_bounded_read_command(&mut command, deadline, limit, "source observation")
+    let operation = if args == ["--version"] {
+        "source owner version probe"
+    } else {
+        "source observation"
+    };
+    run_engram_bounded_read_command(&mut command, deadline, limit, operation)
 }
 
 fn engram_source_owner_metadata_with(
@@ -162,7 +167,13 @@ fn engram_source_owner_observe_with_clock(
     let deadline = plan.probe_deadline;
     let binary = resolve_engram_source_program(configured, root, deadline)?;
     let sha256 = engram_source_binary_hash(&binary, deadline)?;
-    let version = run(&binary, cwd, &["--version".into()], deadline, 4096)?;
+    // The version process owns one finite window, independently of a longer
+    // caller's source/admission deadline. Do not refresh that caller's plan.
+    let version_deadline = std::time::Instant::now()
+        + ENGRAM_MIN_CALL_TIMEOUT
+        + Duration::from_millis(ENGRAM_CALL_BUDGET_MS[1]);
+    let version = run(&binary, cwd, &["--version".into()], version_deadline, 4096)?;
+    engram_source_before_deadline(version_deadline)?;
     engram_source_before_deadline(deadline)?;
     if !version.status.success() || !version.stderr.is_empty() || version.stdout.len() > 4096 {
         bail!("Engram source owner version probe failed");

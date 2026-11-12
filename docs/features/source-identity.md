@@ -252,9 +252,11 @@ czasu.” On 2026-11-11 he raised the operation minimum to one minute:
 „Min 1 minuta.” Calls still running after ten seconds log a warning and continue.
 The 1 MiB output bound is unchanged. TermAl's source-owner operations
 retain one admitted phase plan through queueing, authority locks and nested helpers.
-Version/preparation and the subsequent source process each receive at least
-62 s (60 s plus 2 s process delivery); existing longer version windows remain
-longer. The aggregate metadata reserve is 124 s, with 5 s HTTP delivery (129 s).
+The `--version` process has its own 62 s window (60 s plus 2 s process
+delivery), with one warning after 10 s that does not abort or resend it.
+The subsequent source process retains its admitted window of at least 62 s,
+including any longer caller deadline. The aggregate metadata reserve is
+124 s, with 5 s HTTP delivery (129 s).
 TermAl omits `--timeout-ms` from source-owner arguments.
 Before the Engram sync, the source owner's own default is 30 s; TermAl no longer
 imposes a source limit and waits at least 60 s plus overhead. This does not claim

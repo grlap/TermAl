@@ -2553,10 +2553,13 @@ The request's admission budget is 1024 seconds: 120 for preliminary recovery
 including its last admitted call; 120 for opening core/show; 120 for optional
 I/O; 120 for held/full; 120 for the mandatory evidence phase including its last
 admitted call; and 424 for closing show/core, requested-claim maintenance,
-policy and source capture. Committed-input preflight still receives the remaining
-request deadline: a slow metadata probe can consume the mandatory tail's reserve.
-It has no separately funded window yet. Selected bodies and closure-index reads retain a
-bounded mandatory admission phase. The closing basis and identity calls have
+policy and source capture. Each metadata `--version` process has a separately
+funded 62-second window and warns once after 10 seconds without aborting or
+resending. It cannot inherit the whole remaining request window as its timeout.
+Committed-input preflight's source processes retain their existing caller
+deadlines; this change does not give those processes a separate phase or refresh
+the request. Selected bodies and closure-index reads retain a bounded mandatory
+admission phase. The closing basis and identity calls have
 their own funding, independent of optional reads. The MCP bridge adds evaluator
 delivery and its HTTP allowance to the same request budget; Codex's tool
 allowance derives from the longest bridge call and adds its own margin.

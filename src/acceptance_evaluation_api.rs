@@ -38,8 +38,9 @@ const ACCEPTANCE_OPTIONAL_EVIDENCE_BUDGET: Duration = ENGRAM_MIN_CALL_TIMEOUT.sa
 
 /// Closing show/core, requested-claim maintenance (one admission window plus
 /// one issued overrun), policy and source capture keep independent funding.
-/// Committed-input preflight retains its existing remaining-request deadline;
-/// a slow metadata probe can still consume that tail's reserved time.
+/// Committed-input preflight retains its existing remaining-request deadline.
+/// Its version process has a separate finite window; source stages retain
+/// their existing deadlines.
 fn acceptance_evaluation_closing_budget() -> Duration {
     ENGRAM_WORK_BINDING_COMMAND_TIMEOUT * 2
         + ENGRAM_MIN_CALL_TIMEOUT * 2

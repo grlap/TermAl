@@ -17,7 +17,8 @@ const ENGRAM_SOURCE_METADATA_BUDGET: Duration = ENGRAM_SOURCE_PROCESS_BUDGET.sat
 
 /// One admitted plan, retained through queueing and every nested source helper.
 /// The first window funds preparation/version; the second leaves a late-issued
-/// source process its own default and delivery reserve. Longer stages stay longer.
+/// source process its own default and delivery reserve. Longer source stages
+/// stay longer; the owner gives its version process a separate finite window.
 #[derive(Clone, Copy, Debug)]
 struct EngramSourcePhasePlan {
     probe_deadline: std::time::Instant,

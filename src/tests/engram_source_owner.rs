@@ -205,10 +205,12 @@ fn source_owner_preserves_a_longer_observation_deadline() {
     let deadline = std::time::Instant::now() + Duration::from_secs(180);
     let mut calls = 0;
     engram_source_owner_metadata_with(&binary, &root, &root, deadline, |_, _, args, until, _| {
-        assert_eq!(
-            until, deadline,
-            "a longer operation window must not be shortened"
-        );
+        if args != ["--version"] {
+            assert_eq!(
+                until, deadline,
+                "a longer source window must not be shortened"
+            );
+        }
         calls += 1;
         Ok(source_owner_reply(args))
     })

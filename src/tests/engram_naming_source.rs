@@ -320,7 +320,10 @@ fn naming_owner_capture_keeps_the_existing_capacity_and_deadline_bounds() {
         .lock()
         .unwrap()
         .test_observation_source_owner = Some(Arc::new(move |_, _, args, deadline, limit| {
-        observed.lock().unwrap().push((deadline, limit));
+        observed
+            .lock()
+            .unwrap()
+            .push((args[0].clone(), deadline, limit));
         if args[0] == "--version" {
             return Ok(source_owner_reply(args));
         }
@@ -342,16 +345,18 @@ fn naming_owner_capture_keeps_the_existing_capacity_and_deadline_bounds() {
     );
     let bounds = bounds.lock().unwrap();
     assert_eq!(bounds.len(), 2);
-    assert_eq!(
-        bounds[0].0, bounds[1].0,
-        "both probes share the aggregate deadline"
-    );
-    assert!(bounds[0].0 >= before);
+    assert_eq!(bounds[0].0, "--version");
+    assert_eq!(bounds[1].0, "source");
+    assert!(bounds[0].1 >= before + Duration::from_secs(62));
     assert!(
-        bounds[0].0 >= before + ENGRAM_SOURCE_COMMAND_BUDGET * 2,
-        "a longer admitted caller window is not shortened"
+        bounds[0].1 <= std::time::Instant::now() + Duration::from_secs(62),
+        "the version probe has its own finite window"
     );
-    assert!(bounds[0].0 <= std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET * 2);
-    assert_eq!(bounds[0].1, 4096);
-    assert_eq!(bounds[1].1, ENGRAM_SOURCE_JSON_LIMIT + 1);
+    assert!(
+        bounds[1].1 >= before + ENGRAM_SOURCE_COMMAND_BUDGET * 2,
+        "a longer admitted source window is not shortened"
+    );
+    assert!(bounds[1].1 <= std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET * 2);
+    assert_eq!(bounds[0].2, 4096);
+    assert_eq!(bounds[1].2, ENGRAM_SOURCE_JSON_LIMIT + 1);
 }
