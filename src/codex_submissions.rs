@@ -565,12 +565,7 @@ impl AppState {
             decision,
             ApprovalDecision::Accepted | ApprovalDecision::AcceptedForSession
         ) {
-            self.ensure_read_only_delegation_allows_write_action(
-                Some(session_id),
-                None,
-                None,
-                "approval acceptance",
-            )?;
+            self.ensure_read_only_delegation_allows_approval(session_id)?;
         }
 
         let mut claude_runtime_action: Option<(ClaudeRuntimeHandle, ClaudePendingApproval)> = None;

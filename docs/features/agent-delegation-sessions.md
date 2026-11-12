@@ -2030,6 +2030,15 @@ be explicit about which guarantees are enforced and which are advisory.
   TermAl-mediated writes from parent or sibling sessions that target the same
   project/workdir scope. This fail-closed project lock prevents bypassing a
   reviewer delegation by switching session ids.
+- Approval acceptance uses the session's workdir instead of the project lock.
+  It remains disabled in the read-only child and in sessions at or inside the
+  reviewed directory. Sessions above that directory are also blocked unless
+  valid Git metadata establishes an independent worktree boundary between them.
+  This lets a main checkout accept approvals while a nested `.tmp` worktree is
+  reviewed. Missing, invalid or unreadable Git metadata does not establish that exemption. The
+  check scopes the approving session, not the paths an approved command may
+  subsequently write; an allowed command can still target the reviewed tree.
+  Other TermAl-mediated writes retain the project/workdir protection above.
 - The final result records commands run and declares whether any file changes
   were observed.
 - If the underlying agent CLI cannot be hard-sandboxed, the UI must label the

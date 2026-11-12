@@ -5,6 +5,8 @@
 // and delegation SSE deltas. It does not remote-forward delegation creation or
 // implement shared-worktree/worker policies yet.
 
+mod delegation_git_boundary;
+
 // Keep prompts bounded because they are embedded into child-agent startup input.
 // Keep in sync with `MAX_DELEGATION_PROMPT_BYTES` in
 // `ui/src/delegation-commands.ts`; if this changes, update the parity-pin test
@@ -2081,6 +2083,36 @@ impl AppState {
         workdir: Option<&str>,
         action: &str,
     ) -> Result<(), ApiError> {
+        self.ensure_read_only_delegation_allows_scoped_action(
+            session_id,
+            project_id,
+            workdir,
+            action,
+            DelegationWriteScopeMode::Project,
+        )
+    }
+
+    fn ensure_read_only_delegation_allows_approval(
+        &self,
+        session_id: &str,
+    ) -> Result<(), ApiError> {
+        self.ensure_read_only_delegation_allows_scoped_action(
+            Some(session_id),
+            None,
+            None,
+            "approval acceptance",
+            DelegationWriteScopeMode::Approval,
+        )
+    }
+
+    fn ensure_read_only_delegation_allows_scoped_action(
+        &self,
+        session_id: Option<&str>,
+        project_id: Option<&str>,
+        workdir: Option<&str>,
+        action: &str,
+        scope_mode: DelegationWriteScopeMode,
+    ) -> Result<(), ApiError> {
         self.inner
             .lock()
             .expect("state mutex poisoned")
@@ -2163,10 +2195,12 @@ impl AppState {
                 } else {
                     Vec::new()
                 };
-                let needs_local_project_inference = write_targets.iter().any(|target| {
-                    target.workdir.is_some()
-                        || (target.project_id.is_some() && target.workdir.is_none())
-                });
+                let needs_local_project_inference =
+                    matches!(scope_mode, DelegationWriteScopeMode::Project)
+                        && write_targets.iter().any(|target| {
+                            target.workdir.is_some()
+                                || (target.project_id.is_some() && target.workdir.is_none())
+                        });
                 let local_projects: Vec<LocalProjectWriteScope> = if needs_local_project_inference {
                     inner
                         .projects
@@ -2193,12 +2227,15 @@ impl AppState {
         };
         append_local_project_write_targets(&mut write_targets, &local_projects);
         let blocked_by_scope_delegation = delegated_write_scopes.iter().find(|scope| {
-            write_targets.iter().any(|target| {
-                delegation_write_scope_matches(
+            write_targets.iter().any(|target| match scope_mode {
+                DelegationWriteScopeMode::Project => delegation_write_scope_matches(
                     scope,
                     target.project_id.as_deref(),
                     target.workdir.as_deref(),
-                )
+                ),
+                DelegationWriteScopeMode::Approval => {
+                    delegation_approval_scope_matches(scope, target.workdir.as_deref())
+                }
             })
         });
         if blocked_by_session_delegation.is_some() || blocked_by_scope_delegation.is_some() {
@@ -4993,6 +5030,12 @@ struct DelegationWriteScope {
     workdir: String,
 }
 
+#[derive(Clone, Copy)]
+enum DelegationWriteScopeMode {
+    Project,
+    Approval,
+}
+
 struct DelegationWriteTarget {
     project_id: Option<String>,
     workdir: Option<String>,
@@ -5090,6 +5133,49 @@ fn delegation_write_scope_matches(
         path_contains(scope_workdir, FsPath::new(workdir))
             || path_contains(workdir, FsPath::new(scope_workdir))
     })
+}
+
+fn delegation_approval_scope_matches(scope: &DelegationWriteScope, workdir: Option<&str>) -> bool {
+    let scope_workdir = scope.workdir.trim();
+    let Some(workdir) = workdir.filter(|_| !scope_workdir.is_empty()) else {
+        return false;
+    };
+    let reviewed = normalize_path_best_effort(FsPath::new(scope_workdir));
+    let target = normalize_path_best_effort(FsPath::new(workdir));
+    if target.starts_with(&reviewed) {
+        return true;
+    }
+    if !reviewed.starts_with(&target) {
+        return false;
+    }
+
+    // Reviews often live in independent worktrees nested under the main checkout.
+    // Their Git boundary does not freeze approvals in the containing checkout.
+    // This filesystem inspection happens after the state snapshot lock is released.
+    for directory in reviewed
+        .ancestors()
+        .take_while(|path| *path != target.as_path())
+    {
+        match fs::metadata(directory.join(".git")) {
+            Ok(metadata) if metadata.is_file() || metadata.is_dir() => {
+                return match delegation_git_boundary::is_valid(directory, metadata.is_dir()) {
+                    Ok(valid) => !valid,
+                    Err(err) => {
+                        eprintln!("delegation approval Git boundary validation failed: {err}");
+                        true
+                    }
+                };
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            // An unreadable or unusual marker cannot establish an independent tree.
+            Err(err) => {
+                eprintln!("delegation approval Git boundary inspection failed: {err}");
+                return true;
+            }
+            Ok(_) => return true,
+        }
+    }
+    true
 }
 
 fn delegated_child_dispatch_is_blocked_locked(inner: &StateInner, session_index: usize) -> bool {

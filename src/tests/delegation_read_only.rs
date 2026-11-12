@@ -980,6 +980,320 @@ async fn read_only_delegation_blocks_overlapping_project_id_only_writes() {
 }
 
 #[test]
+fn approvals_use_session_workdirs_without_inheriting_project_scope() {
+    let state = test_app_state();
+    let root = test_temp_dir().join(format!("termal-approval-scope-{}", Uuid::new_v4()));
+    let reviewed = root.join("reviewed");
+    let descendant = reviewed.join("src");
+    let sibling = root.join("sibling");
+    let prefix_sibling = root.join("reviewed-other");
+    for path in [&descendant, &sibling, &prefix_sibling] {
+        fs::create_dir_all(path).unwrap();
+    }
+    let project_id = create_test_project(&state, &root, "Shared Approval Project");
+    let parent = create_test_project_session(&state, Agent::Codex, &project_id, &reviewed);
+    let created = state
+        .create_read_only_delegation(
+            &parent,
+            CreateDelegationRequest {
+                prompt: "Inspect without writing.".to_owned(),
+                title: Some("Approval Scope Review".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .unwrap();
+
+    for (workdir, allowed) in [
+        (&sibling, true),
+        (&prefix_sibling, true),
+        (&reviewed, false),
+        (&descendant, false),
+        (&root, false),
+    ] {
+        let session = create_test_project_session(&state, Agent::Codex, &project_id, workdir);
+        assert_scope_approval_delivery(&state, &session, allowed);
+        let err = state
+            .ensure_read_only_delegation_allows_write_action(
+                Some(&session),
+                None,
+                None,
+                "file writes",
+            )
+            .expect_err("ordinary file writes still inherit project protection");
+        assert_eq!(err.status, StatusCode::FORBIDDEN);
+    }
+
+    // Child identity remains a protection even if its workdir no longer overlaps.
+    {
+        let mut inner = state.inner.lock().unwrap();
+        inner
+            .session_mut(&created.delegation.child_session_id)
+            .unwrap()
+            .session
+            .workdir = sibling.to_string_lossy().into_owned();
+    }
+    assert_scope_approval_delivery(&state, &created.delegation.child_session_id, false);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+    remove_test_directory(root);
+}
+
+#[test]
+fn approvals_in_main_checkout_cross_a_nested_review_worktree_boundary() {
+    let state = test_app_state();
+    let root = test_temp_dir().join(format!("termal-approval-worktree-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    init_git_document_test_repo(&root);
+    run_git_test_command(&root, &["commit", "--allow-empty", "-m", "fixture"]);
+    let worktree = root.join(".tmp").join("review-worktree");
+    let worktree_label = worktree.to_string_lossy().into_owned();
+    run_git_test_command(&root, &["worktree", "add", "--detach", &worktree_label]);
+    let reviewed = worktree.join("src");
+    fs::create_dir_all(&reviewed).unwrap();
+    let project_id = create_test_project(&state, &root, "Nested Review Project");
+    let parent = create_test_project_session(&state, Agent::Codex, &project_id, &reviewed);
+    state
+        .create_read_only_delegation(
+            &parent,
+            CreateDelegationRequest {
+                prompt: "Inspect the nested worktree.".to_owned(),
+                title: Some("Nested Worktree Review".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .unwrap();
+    let main_session = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    assert_scope_approval_delivery(&state, &main_session, true);
+
+    // Within the reviewed worktree, an ancestor still shares the review's tree.
+    let worktree_session =
+        create_test_project_session(&state, Agent::Codex, &project_id, &worktree);
+    assert_scope_approval_delivery(&state, &worktree_session, false);
+
+    let git_dir = PathBuf::from(run_git_test_command_output(
+        &worktree,
+        &["rev-parse", "--absolute-git-dir"],
+    ));
+    let common_path = git_dir.join("commondir");
+    let original_common = fs::read(&common_path).unwrap();
+    fs::write(&common_path, "missing-common-dir\n").unwrap();
+    assert_scope_approval_delivery(&state, &main_session, false);
+    fs::write(&common_path, original_common).unwrap();
+
+    state
+        .create_read_only_delegation(
+            &main_session,
+            CreateDelegationRequest {
+                prompt: "Inspect the main checkout itself.".to_owned(),
+                title: Some("Main Checkout Review".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .unwrap();
+    assert_scope_approval_delivery(&state, &main_session, false);
+    run_git_test_command(&root, &["worktree", "remove", "--force", &worktree_label]);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+    remove_test_directory(root);
+}
+
+#[test]
+fn invalid_git_markers_do_not_exempt_ancestor_approvals() {
+    for marker in ["empty", "malformed", "broken", "directory", "head-only"] {
+        let state = test_app_state();
+        let root = test_temp_dir().join(format!("termal-approval-invalid-git-{}", Uuid::new_v4()));
+        let reviewed = root.join("reviewed");
+        fs::create_dir_all(&reviewed).unwrap();
+        init_git_document_test_repo(&root);
+        match marker {
+            "empty" => fs::write(reviewed.join(".git"), "").unwrap(),
+            "malformed" => fs::write(reviewed.join(".git"), "not a gitfile\n").unwrap(),
+            "broken" => fs::write(reviewed.join(".git"), "gitdir: missing-git-dir\n").unwrap(),
+            "directory" => fs::create_dir(reviewed.join(".git")).unwrap(),
+            "head-only" => {
+                fs::create_dir(reviewed.join(".git")).unwrap();
+                fs::write(reviewed.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let project_id = create_test_project(&state, &root, "Invalid Git Boundary");
+        let parent = create_test_project_session(&state, Agent::Codex, &project_id, &reviewed);
+        state
+            .create_read_only_delegation(
+                &parent,
+                CreateDelegationRequest {
+                    prompt: "Inspect without writing.".to_owned(),
+                    title: Some(format!("Invalid Git Boundary {marker}")),
+                    cwd: None,
+                    agent: Some(Agent::Codex),
+                    model: None,
+                    mode: Some(DelegationMode::Reviewer),
+                    write_policy: Some(DelegationWritePolicy::ReadOnly),
+                },
+            )
+            .unwrap();
+        let ancestor = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+        assert_scope_approval_delivery(&state, &ancestor, false);
+        let _ = fs::remove_file(state.persistence_path.as_path());
+        remove_test_directory(root);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn fifo_git_metadata_refuses_ancestor_approvals_without_a_writer() {
+    use std::os::unix::ffi::OsStrExt;
+    let state = test_app_state();
+    let root = test_temp_dir().join(format!("termal-approval-fifo-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    init_git_document_test_repo(&root);
+    run_git_test_command(&root, &["commit", "--allow-empty", "-m", "fixture"]);
+    let worktree = root.join(".tmp/review-worktree");
+    let worktree_label = worktree.to_string_lossy().into_owned();
+    run_git_test_command(&root, &["worktree", "add", "--detach", &worktree_label]);
+    let git_dir = PathBuf::from(run_git_test_command_output(
+        &worktree,
+        &["rev-parse", "--absolute-git-dir"],
+    ));
+    let project_id = create_test_project(&state, &root, "FIFO Git Metadata");
+    let parent = create_test_project_session(&state, Agent::Codex, &project_id, &worktree);
+    state
+        .create_read_only_delegation(
+            &parent,
+            CreateDelegationRequest {
+                prompt: "Inspect without writing.".to_owned(),
+                title: Some("FIFO Git Metadata Review".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .unwrap();
+    let ancestor = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    for path in [
+        git_dir.join("HEAD"),
+        git_dir.join("gitdir"),
+        root.join(".git/HEAD"),
+    ] {
+        let original = fs::read(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+        let fifo_path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+        // SAFETY: the NUL-terminated path remains alive throughout mkfifo.
+        assert_eq!(unsafe { libc::mkfifo(fifo_path.as_ptr(), 0o600) }, 0);
+        // No FIFO writer exists. The approval must return without opening it.
+        assert_scope_approval_delivery(&state, &ancestor, false);
+        fs::remove_file(&path).unwrap();
+        fs::write(&path, original).unwrap();
+    }
+    assert_scope_approval_delivery(&state, &ancestor, true);
+    run_git_test_command(&root, &["worktree", "remove", "--force", &worktree_label]);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+    remove_test_directory(root);
+}
+
+fn assert_scope_approval_delivery(state: &AppState, session: &str, allowed: bool) {
+    for (decision, wire_decision) in [
+        (ApprovalDecision::Accepted, "accept"),
+        (ApprovalDecision::AcceptedForSession, "acceptForSession"),
+    ] {
+        let (runtime, input_rx) = test_codex_runtime_handle("scope-approval");
+        {
+            let mut inner = state.inner.lock().unwrap();
+            inner.session_mut(session).unwrap().runtime = SessionRuntime::Codex(runtime);
+        }
+        let message_id = state.allocate_message_id();
+        state
+            .push_message(
+                session,
+                Message::Approval {
+                    id: message_id.clone(),
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    title: "Approve command".to_owned(),
+                    command: "echo approved".to_owned(),
+                    command_language: Some(shell_language().to_owned()),
+                    detail: "Approval required.".to_owned(),
+                    decision: ApprovalDecision::Pending,
+                    supported_decisions: None,
+                },
+            )
+            .unwrap();
+        state
+            .register_codex_pending_approval(
+                session,
+                message_id.clone(),
+                CodexPendingApproval {
+                    kind: CodexApprovalKind::CommandExecution,
+                    request_id: json!(message_id),
+                },
+            )
+            .unwrap();
+        let result = state.update_approval(session, &message_id, decision);
+        if allowed {
+            result.expect("a disjoint review must not block a live approval");
+            match input_rx.try_recv().expect("approval reaches the runtime") {
+                CodexRuntimeCommand::JsonRpcResponse { response } => {
+                    assert_eq!(response.request_id, json!(message_id));
+                    assert_eq!(
+                        response.payload,
+                        CodexJsonRpcResponsePayload::Result(json!({"decision": wire_decision}))
+                    );
+                }
+                _ => panic!("expected approval response"),
+            }
+        } else {
+            let err = result.err().expect("reviewed scope must remain protected");
+            assert_eq!(err.status, StatusCode::FORBIDDEN);
+            assert!(
+                err.message
+                    .contains("approval acceptance is disabled for read-only delegated sessions")
+            );
+            assert!(matches!(
+                input_rx.try_recv(),
+                Err(mpsc::TryRecvError::Empty)
+            ));
+        }
+        let inner = state.inner.lock().unwrap();
+        let record = inner
+            .sessions
+            .get(inner.find_session_index(session).unwrap())
+            .unwrap();
+        assert_eq!(
+            record.pending_codex_approvals.contains_key(&message_id),
+            !allowed
+        );
+        let expected = if allowed {
+            decision
+        } else {
+            ApprovalDecision::Pending
+        };
+        assert!(
+            record
+                .session
+                .messages
+                .iter()
+                .any(|message| matches!(message,
+                    Message::Approval { id, decision: actual, .. }
+                        if id == &message_id && actual == &expected
+                ))
+        );
+    }
+}
+
+#[test]
 fn read_only_delegation_rejects_approval_acceptance() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);
