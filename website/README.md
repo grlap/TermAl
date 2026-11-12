@@ -40,6 +40,7 @@ The launch-mode verifier is expected to fail until those prerequisites exist.
 - “Source available” is intentional. Do not change it to “open source” until a license is declared.
 - Approval and sandbox controls vary by agent and configuration. Do not promise that every command is sandboxed or requires approval.
 - Multi-browser layouts are separate persisted views, not collaborative multi-user editing.
+- Federation connects enrolled hosts through authenticated links. Cross-host agent mail and remote test runs are distinct from SSH project workspaces; do not imply automatic workload placement or direct remote prompt submission. The topology on the page is illustrative, with generic host labels, not a live status display. See `docs/features/native-mailbox-relay.md` and `docs/features/remote-full-gates.md` for the underlying workflows.
 - Rendered Markdown diff editing is available only when TermAl has a complete document and an unambiguous live worktree save target. Patch-only and unsafe staged states remain read-only.
 - Mermaid and KaTeX views are source-derived renders, not executable notebooks or a general WYSIWYG environment.
 - Never advise exposing the local API on port `8787` to an untrusted network.

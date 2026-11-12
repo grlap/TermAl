@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TermAl — The local control room for coding agents</title>
-  <meta name="description" content="Run Claude Code, Codex, Gemini CLI, Cursor Agent, OpenCode, and Kimi Code CLI from one local control room with durable sessions, delegations, approvals, diffs, and remote workspaces.">
+  <meta name="description" content="Run six coding-agent runtimes from one local control room. Connect hosts through federation, exchange agent messages, and bring remote test results back to the coordinator.">
   <meta name="theme-color" content="#f2f0e9">
   <meta name="color-scheme" content="dark light">
   <meta name="robots" content="noindex,nofollow">
@@ -47,10 +47,11 @@
       </a>
 
       <div class="nav__links">
-        <a href="#control-desk"><small>02</small> The workspace</a>
+        <a href="#control-desk"><small>02</small> Workspace</a>
         <a href="#product"><small>03</small> Working together</a>
-        <a href="#personalize"><small>05</small> Make it yours</a>
-        <a href="#get-started"><small>07</small> Begin</a>
+        <a href="#federation"><small>04</small> Federation</a>
+        <a href="#personalize"><small>06</small> Themes</a>
+        <a href="#get-started"><small>08</small> Begin</a>
       </div>
 
       <a class="nav__github" href="https://github.com/grlap/TermAl" target="_blank" rel="noopener">
@@ -61,10 +62,11 @@
       <details class="mobile-menu" id="mobile-menu">
         <summary><span>Menu</span><i aria-hidden="true"><b></b><b></b></i></summary>
         <div class="mobile-menu__panel">
-          <a href="#control-desk"><span>02</span><b>The workspace</b></a>
+          <a href="#control-desk"><span>02</span><b>Workspace</b></a>
           <a href="#product"><span>03</span><b>Working together</b></a>
-          <a href="#personalize"><span>05</span><b>Make it yours</b></a>
-          <a href="#get-started"><span>07</span><b>Begin</b></a>
+          <a href="#federation"><span>04</span><b>Federation</b></a>
+          <a href="#personalize"><span>06</span><b>Themes</b></a>
+          <a href="#get-started"><span>08</span><b>Begin</b></a>
           <a href="https://github.com/grlap/TermAl" target="_blank" rel="noopener"><span aria-hidden="true">↗</span><b>View source</b></a>
         </div>
       </details>
@@ -77,7 +79,7 @@
         <div class="hero__copy">
           <p class="eyebrow hero__eyebrow"><span></span>01 / THE ART OF COORDINATION</p>
           <h1 id="hero-heading"><span class="hero__line"><span>Many minds.</span></span><span class="hero__line hero__line--italic"><span>One direction.</span></span></h1>
-          <p class="hero__lead">A shared workspace for coding agents.<br>Bring the conversations, the decisions, and the work into view.</p>
+          <p class="hero__lead">A shared workspace for coding agents.<br>Across sessions. Across machines.<br>Bring the conversations, the decisions, and the work into view.</p>
           <div class="hero__actions">
             <a class="button button--primary" href="#control-desk">Enter the control room <span aria-hidden="true">↘</span></a>
             <a class="hero-text-link" href="#get-started">Run it locally <span aria-hidden="true">↗</span></a>
@@ -244,6 +246,57 @@
       </div>
     </section>
 
+    <section class="federation section" id="federation" aria-labelledby="federation-heading">
+      <div class="shell">
+        <div class="section-kicker"><span>04 / FEDERATION</span><i></i><b>Your machines. A connected team.</b></div>
+        <div class="section-heading">
+          <div><p class="eyebrow"><span></span>Coordination across hosts</p><h2 id="federation-heading">One team.<br><em>More than one machine.</em></h2></div>
+          <p>Connect a central TermAl host with enrolled satellites. Agents exchange durable messages across machines, and remote runners send test results back to the coordinator. Put the work on the machine that has the platform and capacity it needs.</p>
+        </div>
+
+        <figure class="federation-map" aria-labelledby="federation-caption">
+          <div class="federation-map__legend"><span>EXAMPLE TOPOLOGY</span><span>Central + two satellites</span></div>
+          <div class="federation-map__grid">
+            <div class="federation-host federation-host--central">
+              <span class="federation-host__role">01 / CENTRAL HOST</span>
+              <h3>The coordinator</h3>
+              <p>The brief, the handoffs,<br>the results in one place.</p>
+              <ul class="federation-host__sessions"><li><i aria-hidden="true"></i>Coordinator session</li><li><i aria-hidden="true"></i>Review session</li></ul>
+              <div class="federation-host__footer">Shared mailbox history</div>
+            </div>
+            <div class="federation-relay">
+              <span class="federation-relay__line" aria-hidden="true">↔</span>
+              <strong>Mailbox relay</strong>
+              <span>Requests out<br>Results back</span>
+              <small>Authenticated links</small>
+            </div>
+            <div class="federation-map__satellites">
+              <div class="federation-host">
+                <span class="federation-host__role">02 / WINDOWS SATELLITE</span>
+                <h3>A dedicated runner</h3>
+                <p>Run the requested checks in a worktree at the exact commit.</p>
+                <div class="federation-host__footer">Own checkout · own processes</div>
+              </div>
+              <div class="federation-host">
+                <span class="federation-host__role">03 / macOS SATELLITE</span>
+                <h3>Another platform</h3>
+                <p>Check the same input on a different operating system.</p>
+                <div class="federation-host__footer">Run identity · results · evidence</div>
+              </div>
+            </div>
+          </div>
+          <figcaption id="federation-caption"><span>Independent hosts. Connected through TermAl.</span><span>An illustrative workflow, not a live status display.</span></figcaption>
+        </figure>
+
+        <div class="federation-details">
+          <article><span>01 / CONNECT</span><h3>A trusted connection.</h3><p>Enrolled hosts communicate over authenticated federation links. Each machine keeps its own agent processes and checkout.</p></article>
+          <article><span>02 / COORDINATE</span><h3>A message becomes a handoff.</h3><p>Send a task to a remote agent by mailbox. Messages are retained with receipts, and a mailbox wake can start an idle session’s turn.</p></article>
+          <article><span>03 / VERIFY</span><h3>The result travels back.</h3><p>A remote runner checks the requested commit and returns the run identity, stage results, and input fingerprints to the coordinator.</p></article>
+        </div>
+        <div class="federation-links"><a href="https://github.com/grlap/TermAl/blob/master/docs/features/satellite-onboarding.md" target="_blank" rel="noopener">Connect a satellite <span aria-hidden="true">↗</span></a><a href="https://github.com/grlap/TermAl/blob/master/docs/features/remote-full-gates.md" target="_blank" rel="noopener">How remote test runs work <span aria-hidden="true">↗</span></a></div>
+      </div>
+    </section>
+
     <section class="operations section shell" id="operations" aria-labelledby="operations-heading">
       <div class="section-kicker"><span>WORK + VERIFICATION</span><i></i><b>Keep the evidence in view</b></div>
       <div class="section-heading">
@@ -274,7 +327,7 @@
     </section>
 
     <section class="workspace section shell" id="workspace">
-      <div class="section-kicker" data-reveal><span>04 / THE ARTIFACTS</span><i></i><b>Rich artifacts, native views</b></div>
+      <div class="section-kicker" data-reveal><span>05 / THE ARTIFACTS</span><i></i><b>Rich artifacts, native views</b></div>
       <div class="section-heading">
         <div><p class="eyebrow" data-reveal><span></span>Most tools stop at source</p><h2 data-reveal>Read the change.<br><em>Edit the document.</em></h2></div>
         <p data-reveal>Markdown files move between Code, Preview, and Split. Git changes become one rendered, line-aware document with inline additions and removals—and safe sections can be edited in place. Mermaid and KaTeX stay live inside source and diff views.</p>
@@ -340,7 +393,7 @@
     <section class="personalize section" id="personalize">
       <div class="personalize__inner shell">
         <div class="personalize__copy">
-          <div class="section-kicker section-kicker--dark" data-reveal><span>05 / PERSONALIZE</span><i></i><b>A real appearance system</b></div>
+          <div class="section-kicker section-kicker--dark" data-reveal><span>06 / PERSONALIZE</span><i></i><b>A real appearance system</b></div>
           <p class="eyebrow eyebrow--dark" data-reveal><span></span>21 color themes · four chrome overrides</p>
           <h2 data-reveal>Daylight. After dark.<br><em>Make both yours.</em></h2>
           <p data-reveal>Choose one theme for light mode and another for dark. Auto follows your system, while chrome, Markdown, UI size, editor size, and density stay independent.</p>
@@ -446,7 +499,7 @@
 
     <section class="boundary section" id="boundary">
       <div class="boundary__inner shell">
-        <div class="section-kicker section-kicker--dark" data-reveal><span>06 / TRUST BOUNDARY</span><i></i><b>Power needs a clear edge</b></div>
+        <div class="section-kicker section-kicker--dark" data-reveal><span>07 / TRUST BOUNDARY</span><i></i><b>Power needs a clear edge</b></div>
         <div class="section-heading section-heading--dark">
           <div><p class="eyebrow eyebrow--dark" data-reveal><span></span>Know what runs, and where</p><h2 data-reveal>Local by default.<br><em>Explicit by design.</em></h2></div>
           <p data-reveal>TermAl is a single-user local control surface. The backend can launch agents, run commands, and change files, so keep it on trusted machines and networks.</p>
@@ -460,7 +513,7 @@
     </section>
 
     <section class="getting-started section shell" id="get-started" aria-labelledby="start-heading">
-      <div class="section-kicker"><span>07 / GET STARTED</span><i></i><b>Run from source</b></div>
+      <div class="section-kicker"><span>08 / GET STARTED</span><i></i><b>Run from source</b></div>
       <div class="section-heading">
         <div><p class="eyebrow"><span></span>Your machine. Your workspace.</p><h2 id="start-heading">Bring your<br><em>first agent.</em></h2></div>
         <p>You’ll need Rust, the Node.js version specified in the repository, and at least one supported agent CLI installed and authenticated.</p>
@@ -494,7 +547,7 @@ npm run dev</code></pre></li>
         <span>Term<span>Al</span></span>
       </a>
       <p>A local control room for AI coding agents. Built for people who need to see the whole operation.</p>
-      <nav class="footer__links" aria-label="Footer navigation"><a href="#product">Product</a><a href="#coordination">Coordination</a><a href="#personalize">Themes</a><a href="https://github.com/grlap/TermAl" target="_blank" rel="noopener">GitHub ↗</a></nav>
+      <nav class="footer__links" aria-label="Footer navigation"><a href="#product">Product</a><a href="#federation">Federation</a><a href="#coordination">Coordination</a><a href="#personalize">Themes</a><a href="https://github.com/grlap/TermAl" target="_blank" rel="noopener">GitHub ↗</a></nav>
       <div class="footer__bottom"><span>Source available · macOS · Windows · Linux</span><span>Local backend · no cloud sync · single-user by design</span></div>
     </div>
   </footer>
