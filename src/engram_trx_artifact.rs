@@ -763,7 +763,7 @@ fn engram_inspect_artifact(
 
 /// Whether the file at `canonical`, inside the worktree at `root`, is
 /// untracked and ignored there, in the Git context of the source basis
-/// (`content_revision.rs`): a path the basis lists (tracked, or untracked and
+/// (`source_id`): a path the basis lists (tracked, or untracked and
 /// not ignored) is refused, and Git must list it as ignored.
 fn engram_artifact_ignored(root: &FsPath, canonical: &FsPath) -> Result<(), &'static str> {
     const UNREAD: &str = "the artifact's ignore state cannot be read";

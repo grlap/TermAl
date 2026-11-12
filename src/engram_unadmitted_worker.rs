@@ -69,6 +69,7 @@ fn runtime_observation_notice_code(code: &str) -> &'static str {
         "runtime_observation_policy_unavailable" => "runtime_observation_policy_unavailable",
         "runtime_observation_scope_changed" => "runtime_observation_scope_changed",
         "runtime_observation_source_refused" => "runtime_observation_source_refused",
+        "legacy_source_input_retired" => "legacy_source_input_retired",
         _ => "runtime_observation_failed",
     }
 }
@@ -621,6 +622,15 @@ impl AppState {
                 Some(format!(
                     "Whether Engram recorded the observation of the runtime-started turn is unresolved ({code}). \
                      The request is kept and not sent again; read the item's observations before deciding. Its checks remain uncredited."
+                ))
+            }
+            EngramRuntimeObservationDelivery::LocalFailure { code, .. }
+                if code == "legacy_source_input_retired" =>
+            {
+                Some(format!(
+                    "The retained observation has a revision-only source input and is retired locally ({code}). \
+                     It is kept and not sent again; any earlier Engram outcome is unchanged and may be unknown. \
+                     Read the item's observations before deciding. Its checks remain uncredited."
                 ))
             }
             EngramRuntimeObservationDelivery::LocalFailure { code, .. } => Some(format!(

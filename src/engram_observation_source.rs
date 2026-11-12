@@ -12,8 +12,18 @@ fn engram_observation_identity_valid(
         Some(source_id) => revision.is_empty()
             && serde_json::to_vec(source_id).is_ok_and(|bytes| bytes.len() <= ENGRAM_SOURCE_JSON_LIMIT)
             && source_id.validate(std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET).is_ok(),
-        None => !revision.trim().is_empty() && revision.trim() == revision && revision.len() <= 512,
+        None => false,
     }
+}
+
+// Receipt read-back keeps the predecessor's identity contract. This is not
+// admission for a new send: outbound builders use the SourceId-only check.
+fn engram_observation_stored_identity_valid(
+    revision: &str, source_id: Option<&EngramSourceId>,
+) -> bool {
+    engram_observation_identity_valid(revision, source_id)
+        || source_id.is_none() && !revision.trim().is_empty()
+            && revision.trim() == revision && revision.len() <= 512
 }
 
 fn engram_observation_same_source(

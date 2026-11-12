@@ -1521,16 +1521,28 @@ fn earlier_baseline_envelope_keeps_the_existing_out_of_window_protocol_rejection
     let change = EngramObservedSourceChange::ContentComparison {
         workspace_id: "workspace-interval".to_owned(),
         baseline: EngramMeasuredBaseline {
-            source_id: None,
+            source_id: Some(
+                serde_json::from_value(json!({
+                    "commit": "a".repeat(40), "tree": "b".repeat(40),
+                    "submodules": [], "changes": []
+                }))
+                .unwrap(),
+            ),
             workspace_id: "workspace-interval".to_owned(),
-            source_revision: "content-v1:before".to_owned(),
+            source_revision: String::new(),
             observed_at: "2026-10-18T10:00:00Z".to_owned(),
         },
         sighting: EngramMeasuredSighting {
             source_basis: EngramExecutionSourceBasis {
-                source_id: None,
+                source_id: Some(
+                    serde_json::from_value(json!({
+                        "commit": "a".repeat(40), "tree": "c".repeat(40),
+                        "submodules": [], "changes": []
+                    }))
+                    .unwrap(),
+                ),
                 workspace_id: "workspace-interval".to_owned(),
-                source_revision: "content-v1:after".to_owned(),
+                source_revision: String::new(),
                 source_root_generation: None,
                 source_root_state: None,
             },
