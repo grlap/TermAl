@@ -15,6 +15,9 @@ mod committed_input;
 #[path = "acceptance_evaluation_successor.rs"]
 mod successor;
 
+#[path = "acceptance_legacy_sighting.rs"]
+mod legacy_sighting;
+
 const SIGHTED_WORK_ID: &str = "01a0b6c5-4b4f-7b41-9e32-edc597077acf";
 
 /// A parent session bound to the claim that named a worktree as the work's
@@ -140,9 +143,11 @@ fn named_parent_binding() -> EngramControlWorkBinding {
 /// The task's active run, as the fixture's canonical core receipt names it.
 const SIGHTED_RUN_ID: &str = "01a0b6c5-4b4f-7b41-9e32-edd7dea8b369";
 
-/// A present sighting record at the cut.
+/// A current source-identity sighting record at the cut.
 pub(super) fn present_sighting() -> Value {
-    json!({"state": "present", "record": "fixture-sighting", "position": 2, "revision": "content-v1:fixture"})
+    json!({"state": "present", "record": "fixture-sighting", "position": 2,
+        "source_id_summary": {"commit": "a".repeat(40), "tree": "b".repeat(40),
+            "changes": 0, "submodules": 0}})
 }
 
 /// Engram's answer to the sighting read at the task's evidence basis (42):

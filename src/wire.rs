@@ -122,8 +122,8 @@ enum ApiErrorKind {
     /// source root: the root takes effect at the naming session's next turn,
     /// whose opening Engram sights, so a later turn may request it again.
     AcceptanceEvaluationNamedRootTurnPending,
-    /// The normal sighting read was absent and ordinary turns in the naming
-    /// session's project do not produce mediated sightings with control off.
+    /// The named root has no current source-identity sighting at the judged
+    /// cut. A retained revision-only sighting does not satisfy this precondition.
     AcceptanceEvaluationNamedRootSightingUnavailable,
     /// Federation operator settings refusals. The settings route alone puts
     /// their stable code beside `error` (`federation_operator_code`).

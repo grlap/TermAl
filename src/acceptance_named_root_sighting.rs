@@ -74,7 +74,11 @@ impl<'de> Deserialize<'de> for EngramRootSighting {
         #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
         enum Legacy {
             Absent,
-            Present { record: String, position: i64, revision: String },
+            Present {
+                record: String,
+                position: i64,
+                revision: String,
+            },
         }
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -88,17 +92,33 @@ impl<'de> Deserialize<'de> for EngramRootSighting {
         if value.get("source_id_summary").is_some() {
             let shared: Shared = serde_json::from_value(value)
                 .map_err(|_| serde::de::Error::custom("malformed shared root sighting"))?;
-            if shared.state != "present" || !engram_source_id_oid(&shared.source_id_summary.commit)
+            if shared.state != "present"
+                || !engram_source_id_oid(&shared.source_id_summary.commit)
                 || !engram_source_id_oid(&shared.source_id_summary.tree)
             {
-                return Err(serde::de::Error::custom("invalid shared root sighting summary"));
+                return Err(serde::de::Error::custom(
+                    "invalid shared root sighting summary",
+                ));
             }
-            Ok(Self::PresentShared { record: shared.record, position: shared.position,
-                source_id_summary: shared.source_id_summary })
+            Ok(Self::PresentShared {
+                record: shared.record,
+                position: shared.position,
+                source_id_summary: shared.source_id_summary,
+            })
         } else {
-            match serde_json::from_value(value).map_err(|_| serde::de::Error::custom("malformed historical root sighting"))? {
+            match serde_json::from_value(value)
+                .map_err(|_| serde::de::Error::custom("malformed historical root sighting"))?
+            {
                 Legacy::Absent => Ok(Self::Absent),
-                Legacy::Present { record, position, revision } => Ok(Self::Present { record, position, revision }),
+                Legacy::Present {
+                    record,
+                    position,
+                    revision,
+                } => Ok(Self::Present {
+                    record,
+                    position,
+                    revision,
+                }),
             }
         }
     }
@@ -127,7 +147,12 @@ impl AcceptanceSightingQuery<'_> {
     fn local_root(&self) -> String {
         self.root.map_or_else(
             || "no named source root (it reads the session's workdir)".to_owned(),
-            |root| format!("named source root {}", engram_source_root_display(&root.root)),
+            |root| {
+                format!(
+                    "named source root {}",
+                    engram_source_root_display(&root.root)
+                )
+            },
         )
     }
 }
@@ -136,7 +161,10 @@ impl EngramNamedRootSightingRead {
     /// Why this answer does not describe `query` coherently, if it does not.
     fn incoherence(&self, query: &AcceptanceSightingQuery<'_>) -> Option<String> {
         if self.schema_version != ENGRAM_NAMED_ROOT_SIGHTING_READ_SCHEMA_VERSION {
-            return Some(format!("unsupported schema version {}", self.schema_version));
+            return Some(format!(
+                "unsupported schema version {}",
+                self.schema_version
+            ));
         }
         if self.project_id != query.project_id
             || self.work_id != query.work_id
@@ -198,8 +226,9 @@ fn acceptance_sighting_unknown(query: &AcceptanceSightingQuery<'_>, why: &str) -
 }
 
 /// The decision for a coherent answer: proceed when neither side binds a root,
-/// or when Engram binds the local root, at its generation, with a sighting at
-/// the cut.
+/// or when Engram binds the local root, at its generation, with a current
+/// source-identity sighting at the cut. Revision-only sightings remain readable
+/// history, but cannot satisfy this precondition.
 fn acceptance_sighting_decision(
     read: &EngramNamedRootSightingRead,
     query: &AcceptanceSightingQuery<'_>,
@@ -258,33 +287,32 @@ fn acceptance_sighting_decision(
         )));
     }
     match sighting {
-        EngramRootSighting::Present { .. } | EngramRootSighting::PresentShared { .. } => Ok(()),
-        EngramRootSighting::Absent => {
+        EngramRootSighting::PresentShared { .. } => Ok(()),
+        EngramRootSighting::Absent | EngramRootSighting::Present { .. } => {
             let remedy = evaluation_notice.map_or_else(
-                || format!(
-                    "That root needs an acknowledged capture under `{}`'s claim first: a \
+                || {
+                    format!(
+                        "That root needs an acknowledged capture of its current source identity \
+                     under `{}`'s claim first: a \
                      mediated turn of the claim's session that opens in the named root after \
                      its naming, with `{}` as its focus, acknowledged by Engram. The turn the \
                      root was named in does not capture it. Then request a new evaluation \
                      from a later turn.",
-                    query.work_ref, query.work_ref,
-                ),
+                        query.work_ref, query.work_ref,
+                    )
+                },
                 |notice| notice.message().to_owned(),
             );
             let error = ApiError::conflict(format!(
-                "Engram has no sighting of `{}`'s named source root {root} (generation {}) at the \
+                "Engram has no sighting of a current source identity for `{}`'s named source \
+                 root {root} (generation {}) at the \
                  task's evidence basis (run {}, cut {}), so an evaluation recorded there would be \
-                 refused; no evaluator was started. {ENGRAM_NAMED_ROOT_SIGHTING_PRECONDITION} {remedy}",
-                query.work_ref,
-                local.generation,
-                query.run_id,
-                query.cut,
+                 refused; no evaluator was started. {ENGRAM_NAMED_ROOT_SIGHTING_PRECONDITION} \
+                 A revision-only sighting needs a fresh acknowledged capture of the root's \
+                 current source identity. {remedy}",
+                query.work_ref, local.generation, query.run_id, query.cut,
             ));
-            Err(if evaluation_notice.is_some() {
-                error.with_kind(ApiErrorKind::AcceptanceEvaluationNamedRootSightingUnavailable)
-            } else {
-                error
-            })
+            Err(error.with_kind(ApiErrorKind::AcceptanceEvaluationNamedRootSightingUnavailable))
         }
     }
 }
@@ -405,9 +433,10 @@ impl AppState {
     /// basis, off the state lock, for every evaluation whether or not a root
     /// is named locally (`root`), and refuses before any evaluator or brief
     /// exists unless neither side binds a root, or Engram binds that same root
-    /// with a sighting there. A named local root is checked again afterwards:
-    /// a rename during the read refuses too. A failed, refused, unsupported or
-    /// malformed read is unknown, never taken as absent or present.
+    /// with a current source-identity sighting there. A named local root is
+    /// checked again afterwards: a rename during the read refuses too. A failed,
+    /// refused, unsupported or malformed read is unknown, never taken as absent
+    /// or present.
     fn require_acceptance_named_root_sighting(
         &self,
         parent_session_id: &str,
@@ -436,7 +465,10 @@ impl AppState {
             root,
         };
         let Some(run_id) = run_id else {
-            return Err(acceptance_sighting_unknown(&query, "the task has no active run"));
+            return Err(acceptance_sighting_unknown(
+                &query,
+                "the task has no active run",
+            ));
         };
         if work_id.is_empty() {
             return Err(acceptance_sighting_unknown(
@@ -451,11 +483,15 @@ impl AppState {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let current = acceptance_evaluation_host_target_locked(&inner, parent_session_id)?;
             if current.store != *store || current.connection != *reader {
-                return Err(ApiError::conflict(ACCEPTANCE_EVALUATION_STORE_CHANGED_ERROR));
+                return Err(ApiError::conflict(
+                    ACCEPTANCE_EVALUATION_STORE_CHANGED_ERROR,
+                ));
             }
             // Known locally, before the read: a root named during the naming
             // session's current turn has no opening Engram could have sighted.
-            if root.is_some_and(|root| acceptance_named_root_turn_pending_locked(&inner, store, root)) {
+            if root
+                .is_some_and(|root| acceptance_named_root_turn_pending_locked(&inner, store, root))
+            {
                 return Err(acceptance_named_root_turn_pending(&query));
             }
             inner.engram_host_adapter.clone()
@@ -464,7 +500,10 @@ impl AppState {
             .saturating_duration_since(now())
             .min(Duration::from_millis(ENGRAM_DEFAULT_CALL_TIMEOUT_MS));
         if budget.is_zero() {
-            return Err(acceptance_sighting_unknown(&query, "the request budget was spent"));
+            return Err(acceptance_sighting_unknown(
+                &query,
+                "the request budget was spent",
+            ));
         }
         let request = EngramControlRequest::NamedRootSightingRead {
             work_ref: work_id.to_owned(),
@@ -474,10 +513,13 @@ impl AppState {
         let value = adapter
             .request(reader, &request, budget)
             .map_err(|error| acceptance_sighting_unknown(&query, &error.to_string()))?;
-        if serde_json::to_vec(&value)
-            .map_or(true, |bytes| bytes.len() > ENGRAM_NAMED_ROOT_SIGHTING_READ_MAX_BYTES)
-        {
-            return Err(acceptance_sighting_unknown(&query, "the answer exceeds 16 KiB"));
+        if serde_json::to_vec(&value).map_or(true, |bytes| {
+            bytes.len() > ENGRAM_NAMED_ROOT_SIGHTING_READ_MAX_BYTES
+        }) {
+            return Err(acceptance_sighting_unknown(
+                &query,
+                "the answer exceeds 16 KiB",
+            ));
         }
         let read = parse_engram_named_root_sighting_read(value)
             .map_err(|why| acceptance_sighting_unknown(&query, &why))?;
@@ -499,7 +541,10 @@ impl AppState {
         // read; in particular, an existing sighting still passes under OFF.
         let evaluation_notice = root.and_then(|root| {
             engram_work_source_root_for_claim(
-                &inner.engram_work_source_roots, store, &root.work_id, &root.claim_id,
+                &inner.engram_work_source_roots,
+                store,
+                &root.work_id,
+                &root.claim_id,
             )
             .filter(|entry| entry.generation == root.generation && entry.root == root.root)
             .and_then(|entry| {

@@ -665,9 +665,9 @@ enum EngramControlRequest {
         end_reason: Option<EngramNamedRootEndReason>,
         idempotency_key: String,
     },
-    /// Retained host-private verification-bind request shape. Its constructor
-    /// is test-only (`engram_verification_bind.rs`); TermAl sends no batch
-    /// binds. Existing bound records remain readable as acceptance evidence.
+    /// Retained closed host-private verification-bind wire shape. TermAl has
+    /// no batch-binding decision or request sender. Existing bound records
+    /// remain readable as acceptance evidence.
     VerificationBind {
         idempotency_key: String,
         original: String,

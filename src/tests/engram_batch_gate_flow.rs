@@ -92,6 +92,49 @@ fn an_ordinary_launch_preserves_the_members_original_fence_without_binding_its_a
 }
 
 #[test]
+fn legacy_or_absent_member_sightings_cannot_turn_a_carried_artifact_into_credit() {
+    for (label, sighting) in [
+        ("batch-absent-sighting", json!({"state": "absent"})),
+        (
+            "batch-legacy-sighting",
+            json!({"state": "present", "record": "historical-sighting", "position": 2,
+                "revision": "content-v1:historical"}),
+        ),
+    ] {
+        let (turn, worktree) = ordinary_carried_turn(label);
+        let member = name_member(&turn);
+        script_members(&turn, Some(1), 0);
+        // Either answer is available if a retired bind path tries to read it.
+        // Actual ordinary settlement must not consult it or send a bind.
+        turn.transport.script_sighting_reads([Ok(json!({
+            "schema_version": 1, "project_id": member.store.project_id,
+            "work_id": member.work_id, "run_id": "run-member",
+            "read_cut": 40, "head_cut": 40, "current_binding": null,
+            "binding_changed": false,
+            "root": {"state": "bound", "workspace_id": member.root,
+                "generation": member.generation, "binding_event": "named-member",
+                "binding_position": 1, "sighting": sighting}
+        }))]);
+        ordinary_launch_gate(&turn, &worktree, false);
+        let original = turn.record(|record| record.engram.carried_checks[0].bind_targets.clone());
+        assert_eq!(original.len(), 1);
+        let run = finish_run(&worktree, "passed", &"f".repeat(64));
+        assert_carried_artifact_custody(&turn, &run, true);
+        turn.state.engram_verification_records_tick();
+        turn.record(|record| {
+            assert_eq!(record.engram.carried_checks[0].bind_targets, original);
+        });
+        assert_ordinary_turn_has_no_native_requests(&turn);
+        assert!(
+            turn.transport
+                .requests()
+                .iter()
+                .all(|request| { request.request["operation"] != "named_root_sighting_read" })
+        );
+    }
+}
+
+#[test]
 fn an_unread_member_claim_creates_no_captured_target_or_native_binding() {
     let (turn, worktree) = ordinary_carried_turn("ordinary-member-unread");
     name_member(&turn);

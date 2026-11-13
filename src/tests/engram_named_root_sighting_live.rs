@@ -11,10 +11,10 @@
 // The states are those of Engram's own result (Engram
 // src/domain/named_root_sighting_read.rs: `NamedRootAtCut` and
 // `InitialSighting`). Covered here: root `none`; root `bound` with sighting
-// `absent`; root `bound` with sighting `present`; and `binding_changed` for a
-// cut read from before the root was bound. Not set up here: a binding that
-// moves between the task's read and the sighting read, a race the scripted
-// checks cover.
+// `absent`; root `bound` with a current source-identity sighting after capture;
+// and `binding_changed` for a cut read from before the root was bound. Not set
+// up here: a binding that moves between the task's read and the sighting read,
+// a race the scripted checks cover.
 use super::*;
 
 /// Stops the host reader's control process, which these reads start and the
@@ -257,21 +257,25 @@ fn live_sighting_preflight_follows_each_state_of_the_real_producer() {
         .expect_err("a basis whose binding moved since is refused");
     assert!(error.message.contains("moved after"), "{}", error.message);
 
-    // A checkpointed turn of the claim sights the root: the evaluation may go.
+    // The current producer must record a source-identity sighting after the
+    // checkpointed turn, and that sighting must admit an evaluation.
     fixture.begin(&session, "Look at the named worktree.");
     finish_live_root(&fixture.live.state, &session);
     fixture.wait_for_reports(&session);
     let sighted = live_task(&fixture, &session, &work_ref);
     let read = live_sighting(&fixture, &session, &sighted, sighted.evidence_basis);
-    match &read.root {
-        EngramSightingRoot::Bound { sighting, .. } => assert!(
-            matches!(sighting, EngramRootSighting::Present { .. }),
-            "the checkpointed turn sighted the root: {read:#?}"
-        ),
-        EngramSightingRoot::None => panic!("the named root is still bound: {read:#?}"),
-    }
     assert!(!read.binding_changed, "{read:#?}");
+    assert!(
+        matches!(
+            &read.root,
+            EngramSightingRoot::Bound {
+                sighting: EngramRootSighting::PresentShared { .. },
+                ..
+            }
+        ),
+        "the checkpointed turn records a current source-identity sighting: {read:#?}"
+    );
     let local = live_local_root(&fixture, &session, &sighted).expect("still named");
     live_preflight(&fixture, &session, &sighted, Some(&local))
-        .unwrap_or_else(|error| panic!("a sighted root admits: {}", error.message));
+        .expect("a current source-identity sighting admits");
 }
