@@ -294,10 +294,9 @@ impl AcpAgent {
     }
 
     /// Builds the `std::process::Command` used to spawn this ACP
-    /// agent. Cursor is invoked as `cursor-agent acp`; Gemini is
-    /// invoked as `gemini --acp [--approval-mode ...]`. The binary
-    /// must be on `PATH` — absent binary returns a friendly error
-    /// rather than a cryptic "No such file" from the OS.
+    /// agent. Cursor uses `cursor-agent acp`; the Gemini harness uses
+    /// Antigravity's `agy acp`. Each adapter resolves its native executable
+    /// before changing the working directory and reports missing setup.
     fn command(self, launch_options: AcpLaunchOptions) -> Result<Command> {
         match self {
             Self::Kimi => kimi_acp_command(resolve_kimi_executable()),
@@ -308,16 +307,10 @@ impl AcpAgent {
                 command.arg("acp");
                 Ok(command)
             }
-            Self::Gemini => {
-                let exe = find_command_on_path("gemini")
-                    .ok_or_else(|| anyhow!("`gemini` was not found on PATH"))?;
-                let mut command = Command::new(exe);
-                command.arg("--acp");
-                if let Some(approval_mode) = launch_options.gemini_approval_mode {
-                    command.args(["--approval-mode", approval_mode.as_cli_value()]);
-                }
-                Ok(command)
-            }
+            Self::Gemini => gemini_acp_command(
+                resolve_gemini_executable(),
+                launch_options.gemini_approval_mode,
+            ),
             Self::OpenCode => {
                 let exe = resolve_opencode_executable()
                     .ok_or_else(|| anyhow!("`opencode` was not found on PATH"))?;

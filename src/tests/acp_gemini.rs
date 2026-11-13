@@ -4,12 +4,8 @@
 // `session/load`, and prompt turns. Resume is used only when explicitly
 // advertised under `sessionCapabilities.resume`; `session/load` likewise
 // requires explicit support. Continuation errors never replace the saved id.
-// Gemini CLI adds its own quirks: it reads `~/.gemini/settings.json` and
-// `.env` files from the home directory only, so workspace-local `.env` files
-// must be ignored for credentials (they can be committed to a repo and leak
-// keys). TermAl also writes an override settings file on Windows to force
-// `enableInteractiveShell=false` for headless ACP runs. Production surfaces
-// live in `src/acp.rs` and `src/gemini.rs`; protocol types live in runtime.rs.
+// Antigravity CLI is launched through this adapter for Gemini sessions.
+// Its own cached credentials and settings remain operator-owned.
 
 use super::*;
 
@@ -797,265 +793,163 @@ fn cursor_deliberate_stop_keeps_immediate_termination_contract() {
     );
 }
 
-// Pins `disable_gemini_interactive_shell_in_settings` flipping
-// `tools.shell.enableInteractiveShell` to `false` while leaving sibling keys
-// (`pager`, `security.auth.selectedType`) intact. Guards against a rewrite
-// that clobbers the user's auth selection or other shell preferences.
+fn agy_fixture_executable(dir: &FsPath) -> PathBuf {
+    fs::create_dir_all(dir).unwrap();
+    let path = dir.join(if cfg!(windows) { "agy.exe" } else { "agy" });
+    fs::write(&path, "native executable discovery fixture; never executed").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    fs::canonicalize(path).unwrap()
+}
+
 #[test]
-fn disable_gemini_interactive_shell_in_settings_preserves_other_values() {
-    let mut settings = json!({
-        "security": {
-            "auth": {
-                "selectedType": "oauth-personal"
-            }
-        },
-        "tools": {
-            "shell": {
-                "enableInteractiveShell": true,
-                "pager": "less"
-            }
-        }
-    });
+fn gemini_launches_antigravity_acp_with_each_approval_mode() {
+    let root = TestTempRoot::create("agy-launch");
+    let exe = agy_fixture_executable(&root.path().join("native path with spaces"));
+    // Assert the command delivered to the process boundary, including no legacy
+    // flags, rather than testing a second implementation of the mapping.
+    for (mode, expected) in [
+        (None, vec!["acp"]),
+        (Some(GeminiApprovalMode::Default), vec!["acp"]),
+        (
+            Some(GeminiApprovalMode::Yolo),
+            vec!["acp", "--dangerously-skip-permissions"],
+        ),
+        (
+            Some(GeminiApprovalMode::AutoEdit),
+            vec!["acp", "--mode", "accept-edits"],
+        ),
+        (
+            Some(GeminiApprovalMode::Plan),
+            vec!["acp", "--mode", "plan"],
+        ),
+    ] {
+        let command = gemini_acp_command(Some(exe.clone()), mode).unwrap();
+        assert_eq!(command.get_program(), exe.as_os_str());
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(std::ffi::OsStr::new)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            command.get_envs().next().is_none(),
+            "launch must not inject credential or settings overrides"
+        );
+    }
+    assert!(gemini_acp_command(None, None).is_err());
+}
 
-    disable_gemini_interactive_shell_in_settings(&mut settings);
+#[test]
+fn gemini_discovery_uses_native_agy_and_pins_it_before_changing_cwd() {
+    let root = TestTempRoot::create("agy-discovery");
+    let shim = root.path().join("shim");
+    fs::create_dir_all(&shim).unwrap();
+    for name in ["agy.cmd", "agy.bat", "agy.ps1", "gemini.exe", "gemini"] {
+        fs::write(shim.join(name), "not the Antigravity native executable").unwrap();
+    }
+    let path = std::env::join_paths([&shim]).unwrap();
+    assert!(resolve_gemini_executable_with(Some(&path), None).is_none());
+    let install = agy_fixture_executable(&root.path().join("agy/bin"));
+    if cfg!(windows) {
+        assert_eq!(
+            resolve_gemini_executable_with(Some(&path), Some(root.path())),
+            Some(install.clone())
+        );
+        assert_eq!(
+            resolve_gemini_executable_with(None, Some(root.path())),
+            Some(install)
+        );
+    }
+    let path_dir = root.path().join("path with spaces");
+    let native = agy_fixture_executable(&path_dir);
+    let path = std::env::join_paths([&shim, &path_dir]).unwrap();
+    assert_eq!(
+        resolve_gemini_executable_with(Some(&path), Some(root.path())),
+        Some(native.clone())
+    );
+    let ready = gemini_agent_readiness_with(|| Some(native));
+    assert_eq!(ready.agent, Agent::Gemini);
+    assert_eq!(ready.status, AgentReadinessStatus::Ready);
+    assert!(!ready.blocking);
+    assert!(gemini_agent_readiness_with(|| None).blocking);
+}
 
+#[cfg(unix)]
+#[test]
+fn gemini_discovery_skips_nonexecutable_agy_files() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = TestTempRoot::create("agy-nonexecutable");
+    let first = root.path().join("nonexecutable");
+    let first_exe = agy_fixture_executable(&first);
+    fs::set_permissions(first_exe, fs::Permissions::from_mode(0o644)).unwrap();
+    let second = root.path().join("executable");
+    let native = agy_fixture_executable(&second);
+    let path = std::env::join_paths([first, second]).unwrap();
     assert_eq!(
-        settings.pointer("/tools/shell/enableInteractiveShell"),
-        Some(&Value::Bool(false))
-    );
-    assert_eq!(
-        settings.pointer("/tools/shell/pager"),
-        Some(&Value::String("less".to_owned()))
-    );
-    assert_eq!(
-        settings.pointer("/security/auth/selectedType"),
-        Some(&Value::String("oauth-personal".to_owned()))
+        resolve_gemini_executable_with(Some(&path), None),
+        Some(native)
     );
 }
 
-// Pins the override helper creating the full `/tools/shell/enableInteractiveShell`
-// pointer path when the input is `{}`. Guards against a missing-key early return
-// that would leave headless runs with Gemini's interactive shell still on.
 #[test]
-fn disable_gemini_interactive_shell_in_settings_builds_shell_path_from_empty_object() {
-    let mut settings = json!({});
-
-    disable_gemini_interactive_shell_in_settings(&mut settings);
-
+fn gemini_auth_uses_only_advertised_noninteractive_methods() {
+    let advertised = json!({"authMethods":[
+        {"id":"oauth-personal"}, {"id":"oauth-business"}, {"id":"terminal-login"},
+        {"id":"gemini-api-key"}, {"id":"agent-platform"}
+    ]});
+    assert_eq!(agy_auth_method_with(&advertised, false, false), None);
     assert_eq!(
-        settings.pointer("/tools/shell/enableInteractiveShell"),
-        Some(&Value::Bool(false))
+        agy_auth_method_with(&advertised, true, false).as_deref(),
+        Some("gemini-api-key")
     );
+    assert_eq!(
+        agy_auth_method_with(&advertised, false, true).as_deref(),
+        Some("agent-platform")
+    );
+    for initialization in [
+        json!({}),
+        json!({"authMethods":[]}),
+        json!({"authMethods":[{"id":"oauth-personal"},{"id":"terminal-login"},{"id":"vertex-ai"}]}),
+    ] {
+        assert_eq!(agy_auth_method_with(&initialization, true, true), None);
+    }
 }
 
-// Pins `load_gemini_settings_json` returning `{}` (not panicking or propagating
-// the parse error) when the file contains broken JSON, and
-// `gemini_selected_auth_type_from_settings_file` returning `None`. Guards against
-// a malformed user settings file bricking TermAl's own override-file write or
-// auth inspection on Windows.
 #[test]
-fn load_gemini_settings_json_ignores_malformed_input() {
-    let temp_root = TestTempRoot::create("termal-gemini-settings-invalid");
-    let settings_path = temp_root.path().join("settings.json");
-    fs::write(
-        &settings_path,
-        r#"{"security": { "auth": { "selectedType": "oauth-personal" }"#,
-    )
-    .expect("invalid Gemini settings should be written");
-
-    let loaded = load_gemini_settings_json(Some(settings_path.as_path()));
-    assert_eq!(loaded, json!({}));
-    assert_eq!(
-        gemini_selected_auth_type_from_settings_file(settings_path.as_path()),
-        None
-    );
-}
-
-// Pins `gemini_dotenv_env_pairs` returning empty even when a workspace `.env`
-// with plausible Gemini/Google keys is present in the current project root.
-// Guards against a credential-leak regression where a committed repo `.env`
-// would be silently injected into the Gemini ACP child process.
-//
-// The exact child starts with an empty home, so home-file discovery cannot
-// consult the developer's keys or a sibling test's synthetic credentials.
-#[test]
-fn gemini_dotenv_env_pairs_ignore_workspace_env_files() {
+fn gemini_readiness_and_auth_do_not_consume_legacy_settings_or_dotenv() {
     home_fixture::run(
-        "tests::acp_gemini::gemini_dotenv_env_pairs_ignore_workspace_env_files",
-        |_home| {
-            let temp_root = TestTempRoot::create("termal-gemini-dotenv");
-            let project_root = temp_root.path().join("project");
-            fs::create_dir_all(&project_root).expect("project root should be created");
+        "tests::acp_gemini::gemini_readiness_and_auth_do_not_consume_legacy_settings_or_dotenv",
+        |home| {
+            let legacy = home.join(".gemini");
+            fs::create_dir_all(&legacy).unwrap();
+            let settings = legacy.join("settings.json");
+            let dotenv = legacy.join(".env");
             fs::write(
-        project_root.join(".env"),
-        "GEMINI_API_KEY=dotenv-gemini-key\nexport GOOGLE_API_KEY='vertex-key'\nGOOGLE_CLOUD_PROJECT=demo-project\nGOOGLE_CLOUD_LOCATION=us-central1\n",
-    )
-    .expect("Gemini dotenv file should be written");
-
-            let overrides = gemini_dotenv_env_pairs()
-                .into_iter()
-                .collect::<HashMap<_, _>>();
-
-            assert!(overrides.is_empty());
-        },
-    );
-}
-
-// Pins `find_gemini_env_file` preferring `~/.gemini/.env` and falling back to
-// `~/.env`, resolved via the `HOME`/`USERPROFILE` indirection so tests can
-// redirect. Guards against workspace-walking behavior re-entering and against
-// the fallback order flipping, which would change which key file wins.
-#[test]
-fn find_gemini_env_file_reads_home_directory_env_files() {
-    home_fixture::run(
-        "tests::acp_gemini::find_gemini_env_file_reads_home_directory_env_files",
-        |home_dir| {
-            let gemini_dir = home_dir.join(".gemini");
-            fs::create_dir_all(&gemini_dir).expect("Gemini home directory should be created");
-
-            {
-                assert_eq!(find_gemini_env_file(), None);
-                let gemini_env = gemini_dir.join(".env");
-                fs::write(&gemini_env, "GEMINI_API_KEY=home-gemini-key\n")
-                    .expect("Gemini home env should be written");
-                assert_eq!(find_gemini_env_file(), Some(gemini_env.clone()));
-
-                fs::remove_file(&gemini_env).expect("Gemini home env should be removed");
-                let fallback_env = home_dir.join(".env");
-                fs::write(&fallback_env, "GEMINI_API_KEY=home-fallback-key\n")
-                    .expect("home fallback env should be written");
-                assert_eq!(find_gemini_env_file(), Some(fallback_env));
-            }
-        },
-    );
-}
-
-// Pins `select_acp_auth_method` returning `None` for Gemini when the only
-// source of a `GEMINI_API_KEY` is a workspace `.env` (and no home env or
-// selected-auth setting is configured). Guards against auto-selecting
-// `gemini-api-key` from a repo-committed credential file.
-//
-// The exact child isolates HOME plus every Gemini/Google env var that
-// `select_acp_auth_method` reads before process startup. Without
-// isolation, a sibling test setting a synthetic GEMINI_API_KEY could interfere:
-// `env_var_source("GEMINI_API_KEY")` would see the sibling test's process-
-// env value, `gemini_api_key_source()` would return `Some(...)`, and this
-// assertion would flip from `None` to `Some("gemini-api-key")`.
-#[test]
-fn select_acp_auth_method_ignores_workspace_dotenv_credentials() {
-    home_fixture::run(
-        "tests::acp_gemini::select_acp_auth_method_ignores_workspace_dotenv_credentials",
-        |_home| {
-            let temp_root = TestTempRoot::create("termal-gemini-auth-method");
-            let project_root = temp_root.path().join("project");
-            fs::create_dir_all(&project_root).expect("project root should be created");
-            fs::write(
-                project_root.join(".env"),
-                "GEMINI_API_KEY=dotenv-gemini-key\n",
+                &settings,
+                r#"{"security":{"auth":{"selectedType":"oauth-personal"}}}"#,
             )
-            .expect("Gemini dotenv file should be written");
-
-            let initialize_result = json!({
-                "authMethods": [
-                    { "id": "vertex-ai" },
-                    { "id": "gemini-api-key" }
-                ]
-            });
+            .unwrap();
+            fs::write(&dotenv, "GEMINI_API_KEY=fixture-not-a-real-key\n").unwrap();
+            let before = fs::read(&settings).unwrap();
+            let ready = gemini_agent_readiness_with(|| Some(home.join("agy.exe")));
+            assert!(
+                !ready.blocking,
+                "cached login is checked by agy, not legacy file heuristics"
+            );
             assert_eq!(
                 select_acp_auth_method(
-                    &initialize_result,
+                    &json!({"authMethods":[{"id":"gemini-api-key"},{"id":"oauth-personal"}]}),
                     AcpAgent::Gemini,
-                    project_root
-                        .to_str()
-                        .expect("temp path should be valid UTF-8"),
+                    home.to_str().unwrap()
                 ),
                 None
             );
-        },
-    );
-}
-
-// Pins `prepare_termal_gemini_system_settings` (Windows only) writing a settings
-// file whose `/tools/shell/enableInteractiveShell` is `false`. Guards against
-// the override being skipped, written to the wrong path, or emitting content
-// that lets Gemini re-enable the interactive shell during headless ACP runs.
-#[test]
-fn prepare_termal_gemini_system_settings_writes_override_file() {
-    if !cfg!(windows) {
-        return;
-    }
-
-    home_fixture::run(
-        "tests::acp_gemini::prepare_termal_gemini_system_settings_writes_override_file",
-        |_home| {
-            let temp_root = TestTempRoot::create("termal-gemini-system-settings");
-            let project_root = temp_root.path().join("project");
-            fs::create_dir_all(&project_root)
-                .expect("Gemini override project root should be created");
-            let workdir = project_root
-                .to_str()
-                .expect("test workdir should be valid UTF-8");
-
-            let settings_path = prepare_termal_gemini_system_settings(workdir)
-                .expect("Gemini settings override should prepare")
-                .expect("Windows should create a Gemini settings override");
-            let written: Value = serde_json::from_str(
-                &fs::read_to_string(&settings_path)
-                    .expect("Gemini override file should be readable"),
-            )
-            .expect("Gemini override file should parse");
-
-            assert_eq!(
-                written.pointer("/tools/shell/enableInteractiveShell"),
-                Some(&Value::Bool(false))
-            );
-        },
-    );
-}
-
-// Pins `gemini_interactive_shell_warning` (Windows only) producing a TermAl-forces
-// warning that names the offending settings file when the workspace
-// `.gemini/settings.json` enables the interactive shell, and returning `None`
-// once that setting is flipped to `false`. Guards against the warning firing
-// even after the user complied, or going silent when they haven't.
-#[test]
-fn gemini_interactive_shell_warning_respects_workspace_settings() {
-    if !cfg!(windows) {
-        return;
-    }
-
-    home_fixture::run(
-        "tests::acp_gemini::gemini_interactive_shell_warning_respects_workspace_settings",
-        |_home| {
-            let temp_root = TestTempRoot::create("termal-gemini-interactive-shell");
-            let project_root = temp_root.path().join("project");
-            let settings_dir = project_root.join(".gemini");
-            fs::create_dir_all(&settings_dir).expect("Gemini settings directory should be created");
-            let settings_path = settings_dir.join("settings.json");
-            let workdir = project_root
-                .to_str()
-                .expect("test workdir should be valid UTF-8");
-
-            // The child starts with GEMINI_CLI_SYSTEM_SETTINGS_PATH absent so
-            // the real C:\ProgramData\gemini-cli\settings.json (written by TermAl with
-            // enableInteractiveShell=false) does not shadow the project setting we are
-            // testing here.
-            fs::write(
-                &settings_path,
-                r#"{"tools":{"shell":{"enableInteractiveShell":true}}}"#,
-            )
-            .expect("enabled Gemini settings should be written");
-            let enabled_warning = gemini_interactive_shell_warning(workdir)
-                .expect("enabled interactive shell should warn on Windows");
-            assert!(enabled_warning.contains("TermAl forces Gemini"));
-            assert!(enabled_warning.contains(&display_path_for_user(&settings_path)));
-
-            fs::write(
-                &settings_path,
-                r#"{"tools":{"shell":{"enableInteractiveShell":false}}}"#,
-            )
-            .expect("disabled Gemini settings should be written");
-            assert_eq!(gemini_interactive_shell_warning(workdir), None);
+            assert_eq!(fs::read(&settings).unwrap(), before);
         },
     );
 }
