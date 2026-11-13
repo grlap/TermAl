@@ -22,6 +22,9 @@ mod evaluation_replay;
 #[path = "delegation_mcp_test_request_tests.rs"]
 mod test_request;
 
+#[path = "delegation_mcp_mailbox_name_tests.rs"]
+mod mailbox_names;
+
 const TEST_MCP_HTTP_ACCEPT_DEADLINE: Duration = Duration::from_secs(10);
 
 #[test]

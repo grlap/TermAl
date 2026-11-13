@@ -1,6 +1,6 @@
 # Feature Brief: Agent Slash Commands
 
-Backlog source: [`docs/bugs.md`](../bugs.md)
+Backlog source: the Engram work tracker (`docs/bugs.md` is retired)
 
 ## Status
 

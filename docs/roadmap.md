@@ -1,6 +1,6 @@
 # TermAl Roadmaps
 This document tracks product phases. It is intentionally separate from the `P0` / `P1` / `P2`
-implementation backlog in [`bugs.md`](./bugs.md).
+implementation backlog in the Engram work tracker.
 
 For product framing, see [`vision.md`](./vision.md).
 
@@ -259,7 +259,7 @@ agent-native workflow rather than dilute it.
 
 ## Mapping Current Work To Phases
 
-Most current work in [`bugs.md`](./bugs.md) belongs to Phase 1.
+Most current work in the Engram work tracker belongs to Phase 1.
 
 Examples:
 

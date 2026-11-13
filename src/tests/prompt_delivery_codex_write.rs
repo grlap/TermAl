@@ -26,6 +26,17 @@ struct PromotedCodexReceipt {
 
 impl PromotedCodexReceipt {
     fn new(label: &str) -> Self {
+        Self::prepare(label, false).0
+    }
+
+    fn prepare(
+        label: &str,
+        restored_resume: bool,
+    ) -> (
+        Self,
+        Option<QueuedTurnOwner>,
+        mpsc::Receiver<CodexRuntimeCommand>,
+    ) {
         let mut state = test_app_state();
         let writer = DeliveryWriter::attach(&mut state);
         let session = test_session_id(&state, Agent::Codex);
@@ -62,13 +73,75 @@ impl PromotedCodexReceipt {
             let index = inner.find_session_index(&session).unwrap();
             let record = inner.session_mut_by_index(index).unwrap();
             queue_receipted_orchestrator_prompt_on_record(record, prompt, Vec::new());
+            if restored_resume {
+                // The real shutdown/reload witness lives in round_five. Here
+                // retain its promoted, Pending, exact-content-held shape so
+                // the same Resume can reach the actual Codex write boundary.
+                record.set_auto_dispatch_blocked(true);
+                let queued = record.queued_prompts[0].clone();
+                let position = push_message_on_record(
+                    record,
+                    Message::Text {
+                        id: id.clone(),
+                        timestamp: queued.pending_prompt.timestamp.clone(),
+                        author: Author::You,
+                        text: queued.pending_prompt.text.clone(),
+                        expanded_text: None,
+                        source: None,
+                        attachments: Vec::new(),
+                    },
+                );
+                record.queued_prompts[0].promoted_message_index =
+                    Some(global_message_index(record, position));
+                let content = queued_prompt_durability_content(&record.queued_prompts[0]);
+                record
+                    .queued_prompt_durability_holds
+                    .get_mut(&id)
+                    .unwrap()
+                    .content = content;
+            }
             state.commit_locked(&mut inner).unwrap();
             id
         };
         assert!(state.request_queued_prompt_durability(&session, &id));
         writer.take(HeldFence::Durability).finish(Ok(()));
+        if restored_resume {
+            let wait = phase_sync::PollGuard::new();
+            loop {
+                let acknowledged = {
+                    let inner = state.inner.lock().unwrap();
+                    inner.sessions[inner.find_session_index(&session).unwrap()]
+                        .queued_prompt_durability_holds[&id]
+                        .acknowledged
+                };
+                if acknowledged {
+                    break;
+                }
+                wait.wait("the restored prompt's exact content hold is acknowledged");
+            }
+            assert!(matches!(
+                state.resume_local_session_queue(&session, None).unwrap(),
+                Some(TurnDispatchDeliveryOutcome::Scheduled)
+            ));
+        }
         let write_ahead = writer.take(HeldFence::WriteAhead);
         let nonce = Self::receipt_of(&state, &session, &id).write_ahead;
+        let resume_owner = restored_resume.then(|| {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            assert!(record.queued_prompts[0].promoted_message_index.is_some());
+            assert_eq!(
+                record.prompt_deliveries[&id].runtime_write,
+                PromptRuntimeWrite::Untracked
+            );
+            assert!(prompt_delivery_resume_holds(record, &id));
+            assert_eq!(ordinary_queue_position(record), Some(0));
+            record.prompt_deliveries[&id]
+                .resume
+                .as_ref()
+                .unwrap()
+                .owner(&id)
+        });
         // The acknowledgement promotes the head and hands its command to the
         // Codex runtime's writer thread.
         state.settle_prompt_delivery_write_ahead(&session, &id, &nonce, Ok(()));
@@ -84,7 +157,7 @@ impl PromotedCodexReceipt {
             Some(command.active_turn_generation),
             "promoted"
         );
-        Self {
+        let fixture = Self {
             state,
             session,
             runtime,
@@ -93,7 +166,8 @@ impl PromotedCodexReceipt {
             writer: Some(writer),
             _write_ahead: write_ahead,
             _process: process,
-        }
+        };
+        (fixture, resume_owner, input_rx)
     }
 
     fn receipt_of(state: &AppState, session: &str, id: &str) -> PromptDelivery {
@@ -154,6 +228,116 @@ impl PromotedCodexReceipt {
         drop(_process);
         release_state(state);
     }
+}
+
+#[test]
+fn a_restored_promoted_resume_delivers_once_and_cannot_replay_after_its_provider_write() {
+    let (promoted, owner, input) = PromotedCodexReceipt::prepare("restored-resume-write", true);
+    let owner = owner.expect("the restored head was owned by its explicit Resume");
+    let nonce = promoted.receipt().write_ahead;
+    assert!(
+        matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)),
+        "the Untracked continuation promoted exactly one command"
+    );
+    let pending: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let mut wire = Vec::new();
+    handle_shared_codex_start_turn(
+        &mut wire,
+        &pending,
+        &promoted.state,
+        &promoted.runtime.runtime_id,
+        &promoted.runtime.sessions,
+        &promoted.runtime.thread_sessions,
+        None,
+        &promoted.session,
+        "thread-receipted",
+        None,
+        promoted.command.clone(),
+    )
+    .expect("the first prompt-carrying write completes");
+    let writes = String::from_utf8(wire.clone())
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter(|message| message["method"] == "turn/start")
+        .count();
+    assert_eq!(writes, 1);
+    assert_eq!(promoted.receipt().runtime_write, PromptRuntimeWrite::Begun);
+    let written_bytes = wire.len();
+
+    // A late copy of the same write-ahead callback, another Resume and the
+    // already queued provider command all retain the original attempt.
+    // None may turn a completed provider write into another delivery.
+    promoted
+        .state
+        .dispatch_after_write_ahead(&promoted.session, &promoted.id, &nonce, Some(owner));
+    promoted.state.return_unpromoted_write_ahead_to_pending(
+        &promoted.session,
+        &promoted.id,
+        &nonce,
+    );
+    promoted
+        .state
+        .resume_local_session_queue(&promoted.session, None)
+        .unwrap();
+    assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    let _ = handle_shared_codex_start_turn(
+        &mut wire,
+        &pending,
+        &promoted.state,
+        &promoted.runtime.runtime_id,
+        &promoted.runtime.sessions,
+        &promoted.runtime.thread_sessions,
+        None,
+        &promoted.session,
+        "thread-receipted",
+        None,
+        promoted.command.clone(),
+    );
+    assert_eq!(
+        wire.len(),
+        written_bytes,
+        "the completed attempt is never written twice"
+    );
+    assert_eq!(promoted.receipt().runtime_write, PromptRuntimeWrite::Begun);
+    promoted
+        .state
+        .fail_turn_if_runtime_matches(
+            &promoted.session,
+            &RuntimeToken::Codex(promoted.runtime.runtime_id.clone()),
+            "the provider write completed without an acceptance reply",
+        )
+        .unwrap();
+    assert_eq!(
+        promoted.receipt().disposition,
+        PromptDeliveryDisposition::Ambiguous
+    );
+    promoted
+        .state
+        .resume_local_session_queue(&promoted.session, None)
+        .unwrap();
+    assert!(
+        !input
+            .try_iter()
+            .any(|command| matches!(command, CodexRuntimeCommand::Prompt { .. })),
+        "an idle Resume cannot replay the completed, unacknowledged write"
+    );
+    assert!(
+        promoted
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .sessions
+            .iter()
+            .find(|record| record.session.id == promoted.session)
+            .unwrap()
+            .queued_prompts
+            .is_empty()
+    );
+    refuse_turn_start(&pending);
+    drop(input);
+    promoted.finish();
 }
 
 /// Drops `state` and waits for its temp root's removal receipt, which comes

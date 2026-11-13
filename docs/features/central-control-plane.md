@@ -88,6 +88,13 @@ session join. A UI proxy cannot initiate a new remote send. Native ids require
 the host UUID, not a host label. Other principal/reference namespaces remain
 reserved inside aliases. Bare native ids remain local-only.
 
+At the MCP send boundary (`termal_send_to_session`, also used by the
+coordination CLI), unprefixed display names that select domain participants
+are refused before saving. The remedy uses the role-aware listed native
+address when available, or names intentional domain delivery without promising
+a native wake; see [the mailbox delivery contract](agent-mailboxes.md#delivery-contract).
+The backend domain routes retain the alias selection rules below.
+
 A legacy bare name containing `::` remains a literal alias only when the
 central directory is complete, exactly one current literal name matches, and
 no known domain host label or UUID followed by `::` prefixes the reference.

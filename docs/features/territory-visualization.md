@@ -1,6 +1,6 @@
 ﻿# Feature Brief: Territory Visualization
 
-Backlog source: [`docs/bugs.md`](../bugs.md)
+Backlog source: the Engram work tracker (`docs/bugs.md` is retired)
 
 The backlog context and implementation plan below were moved out of `docs/bugs.md`.
 

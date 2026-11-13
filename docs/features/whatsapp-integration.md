@@ -3,7 +3,7 @@
 This document describes a transport-agnostic mobile notification and steering
 layer for TermAl, replacing the earlier WhatsApp-only proposal.
 
-Backlog source: [`docs/bugs.md`](../bugs.md)
+Backlog source: the Engram work tracker (`docs/bugs.md` is retired)
 
 Related briefs:
 - [`telegram-ui-integration.md`](./telegram-ui-integration.md) — Phase 1

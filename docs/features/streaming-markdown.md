@@ -199,6 +199,6 @@ streaming placeholders during the next turn.
   renderable previews. The rendered diff view passes
   `isStreaming={false}` (regions are settled by the time the diff
   reaches the viewer).
-- [`../bugs.md`](../bugs.md) — active follow-ups, including the
+- The Engram work tracker — active follow-ups, including the
   MessageCard gate limitation and the CommonMark closing-fence-rule
   strictness.

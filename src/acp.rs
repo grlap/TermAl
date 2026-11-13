@@ -103,16 +103,6 @@ fn spawn_acp_runtime_with_environment(
     let mut command = dedicated_provider_command(|| agent.command(AcpLaunchOptions {
         gemini_approval_mode,
     }))?;
-    if agent == AcpAgent::Gemini {
-        if let Some(settings_path) = prepare_termal_gemini_system_settings(&cwd)? {
-            command.env("GEMINI_CLI_SYSTEM_SETTINGS_PATH", settings_path);
-        }
-        for (key, value) in gemini_dotenv_env_pairs() {
-            if !env_var_present(&key) {
-                command.env(key, value);
-            }
-        }
-    }
     let termal_env = termal_agent_process_env(&session_id, &state.local_http_base_url())?;
     apply_agent_process_env(&mut command, Some(&termal_env), engram_mcp)?;
     project_environment.apply(&mut command);
@@ -529,7 +519,7 @@ fn acp_supports_session_resume(initialize_result: &Value) -> Option<bool> {
 fn select_acp_auth_method(
     initialize_result: &Value,
     agent: AcpAgent,
-    workdir: &str,
+    _workdir: &str,
 ) -> Option<String> {
     let methods = initialize_result
         .get("authMethods")
@@ -547,15 +537,7 @@ fn select_acp_auth_method(
 
     match agent {
         AcpAgent::Cursor => has_method("cursor_login").then_some("cursor_login".to_owned()),
-        AcpAgent::Gemini => {
-            if gemini_api_key_source().is_some() && has_method("gemini-api-key") {
-                Some("gemini-api-key".to_owned())
-            } else if gemini_vertex_auth_source(workdir).is_some() && has_method("vertex-ai") {
-                Some("vertex-ai".to_owned())
-            } else {
-                None
-            }
-        }
+        AcpAgent::Gemini => agy_auth_method(initialize_result),
         // Kimi's terminal login is operator-owned; ACP authenticate only checks
         // existing credentials. Never execute advertised auth commands here.
         AcpAgent::Kimi => has_method("login").then_some("login".to_owned()),

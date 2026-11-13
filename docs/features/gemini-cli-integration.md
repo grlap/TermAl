@@ -1,399 +1,99 @@
-# Feature Reference: Gemini CLI Integration
+# Gemini harness: Antigravity CLI
 
-This document tracks Gemini as a first-class TermAl agent.
+TermAl's Gemini harness runs **Antigravity CLI** as `agy acp` through the
+shared ACP runtime. The saved agent type and Gemini approval settings remain
+compatible with existing TermAl sessions.
 
-Reference: [`agent-integration-comparison.md`](./agent-integration-comparison.md)
+Google's [transition announcement](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/)
+ended consumer Gemini CLI service on June 18, 2026. Gemini Code Assist
+Standard/Enterprise and paid Gemini or Gemini Enterprise Agent Platform API
+access remain supported by Google. Those are upstream legacy Gemini CLI
+environments; TermAl's Gemini harness launches Antigravity, without silently
+falling back to the old `gemini --acp` executable.
 
-Supported baseline and continuation-error/permission rules:
+See [Google's ACP guide](https://antigravity.google/docs/ide/extensions/acp),
+[Antigravity's ACP reference](https://antigravity.google/docs/cli/acp/), and
 [Current Agent Integration Contracts](current-agent-contracts.md#acp-advertised-capabilities-and-typed-permissions).
+The shared design is described in [Architecture](../architecture.md).
 
-## Status
+## Executable and readiness
 
-Implemented in TermAl via the shared ACP adapter.
+Install native `agy` and make it available on the host's PATH. On Windows,
+TermAl also checks `%LOCALAPPDATA%/agy/bin/agy.exe`, because the installer's
+PATH update might postdate the host process. Discovery pins the absolute native
+executable before changing the child working directory. Windows shell shims
+are not launched.
 
-TermAl currently uses Gemini's ACP mode rather than the older one-shot
-`stream-json` path. The option comparison below is kept as protocol reference,
-but the shipped integration is the bidirectional ACP session model.
+Readiness confirms executable availability. Authentication is checked by the
+ACP runtime using Antigravity's existing cached sign-in. TermAl does not read
+or rewrite Antigravity credentials, settings or configuration, and does not
+run `agy --login` or `agy acp --login`. Authentication failures require
+operator action and are never presented as a successful readiness/auth probe.
 
-## Problem
+The old Gemini dotenv-file discovery, Windows interactive-shell settings
+override and legacy credential-file heuristics do not apply to Antigravity.
+Operator-provided process/project environment continues to reach the child
+through the ordinary runtime environment path.
 
-Gemini CLI is now wired through session creation, runtime spawning, message
-dispatch, approval handling, and frontend rendering. The remaining questions are
-about protocol hardening and UX polish, not whether Gemini belongs in TermAl.
+## Approval modes
 
-## Integration options
+| TermAl setting | Launch |
+| --- | --- |
+| Default (or unspecified) | `agy acp` |
+| Yolo | `agy acp --dangerously-skip-permissions` |
+| AutoEdit | `agy acp --mode accept-edits` |
+| Plan | `agy acp --mode plan` |
 
-Gemini CLI offers **two** integration paths. The recommended path depends on how
-mature ACP support is at the time of implementation.
+The runtime continues handling permission requests through advertised ACP
+options. It does not invent option ids or automatically execute a login
+command. Cached sign-in normally needs no `authenticate` request. If an
+explicit process environment provides a Gemini API key, the runtime may select
+`gemini-api-key`; a Google Cloud project and location may select
+`agent-platform`. Either method must be present in the server's advertised
+`authMethods`. Browser and terminal login methods remain operator-owned.
 
-### Option A — `stream-json` headless mode (simpler, unidirectional)
+## Protocol and continuation
 
-Spawn the CLI in non-interactive mode and parse its JSONL stdout. This is the
-simplest path and works today.
+Transport remains ACP v1 JSON-RPC over stdio: `initialize`,
+`session/new`, `session/prompt`, `session/update`,
+`session/request_permission` and `session/cancel`.
 
-```bash
-gemini -p "<prompt>" --output-format stream-json \
-  --approval-mode yolo \
-  --model auto \
-  --sandbox
+Saved conversations use `session/resume` or `session/load` only when the
+server's initialize capabilities explicitly advertise support. An omitted
+capability is unsupported. A failed continuation preserves the saved id
+instead of creating a replacement conversation.
+
+## Verification
+
+The Rust ACP tests cover executable discovery, missing/native/shim cases,
+each approval-mode launch, noninteractive advertised auth selection, and
+legacy-file isolation. Existing shared ACP tests continue covering permission,
+cancel and capability-driven continuation behavior.
+
+The live contract probe is **opt-in**, outside the default full gate. Run it
+only in an assigned test slot on a host whose operator already signed in.
+Set `TERMAL_AGY_CONTRACT_SMOKE=1` and `TERMAL_AGY_SMOKE_BINARY` to the
+absolute native executable, then run from the candidate worktree:
+
+```text
+node scripts/test-launcher.mjs focused --input commit -- node --test scripts/agy-acp-contract.test.mjs
 ```
 
-**Pros:** Simple to implement, stable API, no experimental flags.
-**Cons:** Unidirectional (stdout only), no mid-turn approval, no session resume
-within a single process, must re-spawn per turn.
-
-### Option B — `--experimental-acp` mode (richer, bidirectional)
-
-> Source: https://geminicli.com/docs/cli/cli-reference/
-
-Run Gemini as a full ACP (Agent Client Protocol) server over stdio. This gives
-the same JSON-RPC 2.0 bidirectional protocol that Cursor uses, making it
-structurally identical to the Cursor adapter.
-
-```bash
-gemini --experimental-acp
-```
-
-**Pros:** Bidirectional JSON-RPC, permission handling, session management,
-same protocol as Cursor (shared adapter logic possible).
-**Cons:** Experimental flag — may change. Requires more upfront protocol work.
-
-### Recommendation
-
-TermAl now uses **Option B** (`--experimental-acp`) so Gemini can share the ACP
-runtime path with Cursor and expose session-scoped model refresh, approval-mode
-controls, and live permission handling.
-
----
-
-## Option A — stream-json protocol
-
-### Transport
-
-| Property | Value |
-|----------|-------|
-| Transport | Spawned child process per turn |
-| Output | stdout, newline-delimited JSON (JSONL) |
-| Input | Single prompt via `-p` flag (no stdin interaction) |
-| Direction | Unidirectional (server → client only) |
-
-### Launch command
-
-```bash
-gemini -p "<prompt>" \
-  --output-format stream-json \
-  --approval-mode <yolo|auto_edit|default> \
-  --model <auto|pro|flash|flash-lite> \
-  -r <session-index-or-"latest">     # optional: resume session
-```
-
-### CLI flags reference
-
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--prompt` | `-p` | Prompt text; forces non-interactive mode |
-| `--output-format` | `-o` | `text`, `json`, or `stream-json` |
-| `--model` | `-m` | `auto`, `pro`, `flash`, `flash-lite` |
-| `--approval-mode` | | `default`, `auto_edit`, `yolo` |
-| `--sandbox` | `-s` | Run in sandboxed environment |
-| `--resume` | `-r` | Resume session by index or `"latest"` |
-| `--extensions` | `-e` | Comma-separated list of enabled extensions |
-| `--allowed-mcp-server-names` | | Filter allowed MCP servers |
-| `--include-directories` | | Extra workspace directories |
-| `--debug` | `-d` | Verbose logging |
-
-### Event types
-
-Each line of stdout is a JSON object with a `type` field:
-
-#### `init`
-
-Emitted once at the start.
-
-```json
-{
-  "type": "init",
-  "timestamp": "2025-10-10T12:00:00.000Z",
-  "session_id": "abc123",
-  "model": "gemini-2.0-flash-exp"
-}
-```
-
-#### `message`
-
-User echo and assistant response chunks.
-
-```json
-{
-  "type": "message",
-  "role": "assistant",
-  "content": "I'll investigate the auth middleware...",
-  "delta": true,
-  "timestamp": "2025-10-10T12:00:04.000Z"
-}
-```
-
-When `delta` is `true`, the content is an incremental chunk (map to
-`TextDeltaEvent`). When `false` or absent, it is a complete message.
-
-#### `tool_use`
-
-Tool invocation request.
-
-```json
-{
-  "type": "tool_use",
-  "tool_name": "Bash",
-  "tool_id": "bash-123",
-  "parameters": { "command": "npm test" },
-  "timestamp": "2025-10-10T12:00:02.000Z"
-}
-```
-
-#### `tool_result`
-
-Output from an executed tool.
-
-```json
-{
-  "type": "tool_result",
-  "tool_id": "bash-123",
-  "status": "success",
-  "output": "Tests passing: 12/12\n",
-  "timestamp": "2025-10-10T12:00:03.000Z"
-}
-```
-
-#### `error`
-
-Non-fatal warnings and system errors.
-
-```json
-{
-  "type": "error",
-  "message": "Rate limit exceeded, retrying...",
-  "timestamp": "2025-10-10T12:00:06.000Z"
-}
-```
-
-#### `result`
-
-Final event — marks end of the turn.
-
-```json
-{
-  "type": "result",
-  "status": "success",
-  "stats": {
-    "total_tokens": 250,
-    "input_tokens": 50,
-    "output_tokens": 200,
-    "duration_ms": 3000,
-    "tool_calls": 1
-  },
-  "timestamp": "2025-10-10T12:00:05.000Z"
-}
-```
-
-### Exit codes
-
-| Code | Meaning |
-|------|---------|
-| `0` | Success |
-| `1` | General error or API failure |
-| `42` | Input error (invalid prompt or arguments) |
-| `53` | Turn limit exceeded |
-
-### Session persistence
-
-| Property | Value |
-|----------|-------|
-| Storage format | Single `.json` per session |
-| Location | `~/.gemini/tmp/<project>/chats/session-{ts}-{id}.json` |
-| Resume mechanism | `--resume <index>` or `--resume latest` |
-| Session discovery | Scan `chats/` directory |
-| Cross-session memory | `GEMINI.md` project instructions and `~/.gemini/memory.md` |
-| Ignore file | `.geminiignore` |
-
----
-
-## Option B — ACP mode (experimental)
-
-### Transport
-
-| Property | Value |
-|----------|-------|
-| Transport | `stdio` (stdin/stdout) |
-| Envelope | JSON-RPC 2.0 |
-| Framing | Newline-delimited JSON |
-| Direction | Bidirectional |
-
-### Launch command
-
-```bash
-gemini --experimental-acp
-```
-
-### Protocol
-
-Gemini's ACP mode implements the same Agent Client Protocol used by Cursor CLI.
-The core methods are identical:
-
-- `initialize` — handshake with protocol version and client capabilities
-- `session/new` — create a new session
-- `session/load` — resume an existing session
-- `session/prompt` — send a user prompt
-- `session/cancel` — cancel the current turn
-- `session/update` — streaming notifications (server → client)
-- `session/request_permission` — tool approval requests (server → client)
-
-This means a **shared ACP adapter** could serve both Cursor and Gemini, with
-agent-specific differences isolated to:
-- Executable resolution (`cursor` vs `gemini`)
-- Launch arguments (`agent acp` vs `--experimental-acp`)
-- Authentication flow
-- Extended notification methods (Cursor has `cursor/*`, Gemini may differ)
-
-### Authentication
-
-```bash
-# OAuth (interactive browser flow)
-gemini --experimental-acp   # prompts for login on first use
-
-# API key
-GEMINI_API_KEY=... gemini --experimental-acp
-
-# Vertex AI
-# Configured via gcloud credentials
-```
-
----
-
-## Mapping to TermAl concepts
-
-### Option A mapping (stream-json)
-
-| Gemini event | TermAl equivalent | Notes |
-|--------------|-------------------|-------|
-| `init` | Session metadata | Extract `session_id`, `model` |
-| `message` (delta) | `TextDeltaEvent` | Streaming text into chat bubble |
-| `message` (complete) | `TextMessage` | Full assistant response |
-| `tool_use` | `CommandMessage` (status: running) | Show tool invocation |
-| `tool_result` | `CommandMessage` (status: success/error) | Show tool output |
-| `error` | Error card or inline warning | Surface in chat |
-| `result` | Turn completion | End turn, update session status |
-
-### Option B mapping (ACP)
-
-Same as the Cursor ACP mapping — see
-[`cursor-cli-integration.md`](./cursor-cli-integration.md#mapping-to-termal-concepts).
-
-## Approval model
-
-### Stream-json mode
-
-Gemini's non-interactive mode has a **known limitation**: it cannot prompt for
-tool approval mid-turn. The workarounds are:
-
-| `--approval-mode` | Behavior |
-|-------------------|----------|
-| `yolo` | Auto-approve everything (no approval cards in TermAl) |
-| `auto_edit` | Auto-approve file edits, prompt for dangerous commands |
-| `default` | Prompt for approval — **hangs in non-interactive mode** |
-
-For stream-json integration, TermAl should default to `auto_edit` or `yolo` and
-surface the choice in session settings. True interactive approval requires
-ACP mode (Option B).
-
-### ACP mode
-
-Full bidirectional approval via `session/request_permission`, identical to the
-Cursor flow. TermAl can intercept and surface approval cards.
-
-## Backend tasks
-
-### Enum extensions
-
-Add a `Gemini` variant to each of these enums in `src/main.rs`:
-
-- `Agent` — `Gemini` (with `name()` → `"Gemini"`, `avatar()` → `"GM"`)
-- `SessionRuntime` — `Gemini(GeminiRuntimeHandle)`
-- `RuntimeToken` — `Gemini(String)`
-- `KillableRuntime` — `Gemini(GeminiRuntimeHandle)`
-- `TurnDispatch` — `PersistentGemini { command, sender, session_id }`
-
-### New types
-
-- `GeminiRuntimeHandle` — `runtime_id`, `input_tx`, `process`
-- `GeminiRuntimeCommand` — `Prompt(GeminiPromptCommand)` | (ACP: `ApprovalResponse(…)`)
-- `GeminiPromptCommand` — `prompt`, `approval_mode`, `model`, `session_index`
-- `GeminiApprovalMode` — `Default` | `AutoEdit` | `Yolo`
-
-### New functions
-
-- `resolve_gemini_executable()` — `find_command_on_path("gemini")`
-- `spawn_gemini_runtime()` — spawn CLI with appropriate flags; for stream-json
-  mode, spawn per-turn; for ACP mode, spawn once as a long-lived process
-- `handle_gemini_stream_event()` — parse JSONL events (`init`, `message`,
-  `tool_use`, `tool_result`, `error`, `result`), map to TermAl message types
-- (ACP mode) `handle_gemini_acp_message()` — reuse or share with Cursor ACP
-  adapter
-
-### Existing function changes
-
-- `deliver_turn_dispatch()` — add `PersistentGemini` arm
-- `dispatch_turn()` / `start_turn_on_record()` — handle `Agent::Gemini`
-- `update_session_settings()` — handle Gemini approval mode and model selection
-- Agent CLI arg parsing — accept `"gemini"` in `Agent::from_str`
-
-### Process model considerations
-
-Unlike Claude and Codex which are long-lived processes, the **stream-json** path
-spawns a new process per turn. This means:
-
-- No `SessionRuntime` handle between turns (or use a lightweight "idle" state)
-- Session resume via `--resume latest` on each new turn
-- Consider caching the `session_id` from the `init` event for resume tracking
-
-The **ACP** path avoids this — a single long-lived process like Claude/Codex.
-
-## Frontend tasks
-
-- Update `AgentType` in `types.ts`: `"Claude" | "Codex" | "Gemini"`
-- Add Gemini to the agent selector dropdown in session creation
-- Add settings for Gemini sessions:
-  - Model selector (`auto`, `pro`, `flash`, `flash-lite`)
-  - Approval mode selector (`default`, `auto_edit`, `yolo`)
-- Render Gemini sessions with agent-colored badge and avatar
-- Map `tool_use` / `tool_result` events to command cards with streaming output
-- (ACP mode) Reuse the approval card UI with the same flow as Cursor
-
-## Testing
-
-- Add unit tests for JSONL event parsing (`init`, `message`, `tool_use`,
-  `tool_result`, `error`, `result`)
-- Test turn lifecycle: spawn → parse init → stream messages → tool calls →
-  result → turn complete
-- Test session resume via `--resume`
-- Test approval mode settings (verify correct CLI flags are passed)
-- Test error handling: non-zero exit codes, malformed JSON lines, stderr output
-- (ACP mode) Reuse ACP adapter tests with Gemini-specific setup
-
-## Open questions
-
-1. **ACP stability** — `--experimental-acp` may change or break across Gemini CLI
-   releases. Should we gate ACP mode behind a TermAl feature flag?
-2. **Per-turn vs long-lived** — For stream-json mode, is spawning per turn
-   acceptable for UX, or is the startup latency too high?
-3. **Shared ACP adapter** — Can we build a single generic ACP adapter that both
-   Cursor and Gemini use, parameterized by executable + launch args + auth flow?
-4. **File diff rendering** — Does Gemini's `tool_use`/`tool_result` provide enough
-   structure to render diff cards, or do we need to parse patch content from
-   tool output?
-5. **Sandbox mode** — Gemini's `--sandbox` flag enables a container sandbox. Should
-   TermAl surface this as a session setting alongside approval mode?
-6. **Authentication flow** — Gemini supports OAuth, API key, and Vertex AI auth.
-   How should TermAl handle the initial auth setup? Should it detect missing
-   credentials and prompt?
-7. **Extension system** — Gemini has a plugin/extension model. Should TermAl allow
-   configuring which extensions are enabled per session?
+The probe launches one ACP server in an empty repository-owned scratch
+workspace, negotiates initialize, records the binary hash, server version,
+protocol version, advertised auth methods and load/resume capabilities, then
+creates one session and sends **one harmless prompt** requesting permission
+for `echo TERMAL_ACP_SMOKE`. It rejects the tool request (or cancels the
+permission if no reject-once option is offered), sends `session/cancel`,
+waits for the prompt to settle and reaps the child. It does not grant tool
+execution. Byte and time limits bound the probe; no retry spends more quota.
+
+No login or credential/configuration inspection is performed. An authentication
+requirement is reported as **blocked-on-auth** and fails the test. If account
+permission rules prevent a permission request from appearing, the test reports
+**permission response not observed**; do not claim coverage or repeat the
+paid prompt without approval. Load/resume is reported from actual advertised
+capabilities, without a second prompt or an extra session.
+
+The deterministic probe-controller test uses a fake stdio peer and consumes
+no provider quota. With the opt-in environment absent, the live test is skipped.

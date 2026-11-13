@@ -172,12 +172,33 @@ async fn federation_mailbox_alias_grammar_real_directory_rpc_and_mcp_retain_inve
             .session_id,
             target.session_id
         );
-        assert_eq!(
-            bridge_resolve(api.port, central_caller, &target.name)
-                .await
-                .unwrap(),
-            target.session_id
+        let message_count = || -> u64 {
+            pair.central
+                .mailbox_store
+                .connection()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM mailbox_messages", [], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        };
+        let before_refusal = message_count();
+        let friendly_name = target.name.clone();
+        let error = bridge_call(api.port, central_caller, move |bridge| {
+            bridge.tool_send_to_session(json!({
+                "sessionId":friendly_name, "message":"friendly name must not append",
+                "idempotencyKey":format!("friendly-{}", Uuid::new_v4()),
+            }))
+        })
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("display-name send refused before saving"),
+            "{error}"
         );
+        assert!(error.contains(&format!("`{listed_name}`")), "{error}");
+        assert_eq!(message_count(), before_refusal);
         assert_eq!(
             bridge_resolve(api.port, central_caller, &format!("name:{}", target.name))
                 .await

@@ -3,7 +3,7 @@
 This is a product vision draft, not a delivery checklist.
 
 For phased rollout, see [`roadmap.md`](./roadmap.md).
-For implementation backlog, see [`bugs.md`](./bugs.md).
+For the implementation backlog, see the Engram work tracker.
 
 ## Framing
 

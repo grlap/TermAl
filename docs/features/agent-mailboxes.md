@@ -56,6 +56,16 @@ create verification credit. Completion association is a separate consumer.
 `termal_send_to_session` accepts a peer session id or name, a message body, and
 a required sender-supplied `idempotencyKey`.
 
+In domain mode, an unprefixed display name that resolves to a domain participant
+is refused before saving. The error names the listed exact native target
+(`session-N` or `host:UUID::session-N`) when one is available from this host.
+For a peer on a sibling satellite, it instead names the exact domain principal
+and explains that domain delivery does not guarantee a native wake.
+This prevents a friendly name from silently selecting a separate domain mailbox
+without a native wake. Explicit `name:`
+and `host:` domain aliases, canonical domain IDs and exact native addresses
+retain their existing meaning. Native addresses still require backend admission.
+
 Names and domain participant IDs require the current central mailbox authority,
 even when the intended peer is on the same host. A refusal at the central
 authority check states whether that authority is not durable, has lost continuity, is

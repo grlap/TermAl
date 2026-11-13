@@ -86,6 +86,7 @@ export const helperTestFiles = Object.freeze([
   "scripts/test-launcher-commit-input.test.mjs",
   "scripts/test-temp-root.test.mjs",
   "scripts/vitest-resource-preflight.test.mjs",
+  "scripts/check-doc-links.test.mjs",
 ]);
 // The helper tests' one liveness guard: the runner's per-test timeout. The
 // tests wait for their processes by events (exit, close, readiness, a barrier
@@ -134,6 +135,7 @@ export const helperSupportFiles = Object.freeze([
   "scripts/test-ui-bootstrap-fixtures.mjs",
   "scripts/test-temp-root.mjs",
   "scripts/vitest-resource-preflight.mjs",
+  "scripts/check-doc-links.mjs",
 ]);
 
 // On Windows, renaming a file over another fails while any other handle on

@@ -1,6 +1,6 @@
 # Feature Brief: Orchestration
 
-Backlog source: [`docs/bugs.md`](../bugs.md)
+Backlog source: the Engram work tracker (`docs/bugs.md` is retired)
 
 Related:
 - [Agent Delegation Sessions](./agent-delegation-sessions.md) - ad hoc

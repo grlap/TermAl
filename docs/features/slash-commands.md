@@ -3,7 +3,7 @@
 This document describes the slash-command behavior that TermAl currently ships
 in the composer.
 
-Backlog source: [`docs/bugs.md`](../bugs.md)
+Backlog source: the Engram work tracker (`docs/bugs.md` is retired)
 
 ## Status
 

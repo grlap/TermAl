@@ -1,6 +1,6 @@
 ﻿# Feature Brief: Diff Review Workflow
 
-Backlog source: [`docs/bugs.md`](../bugs.md)
+Backlog source: the Engram work tracker (`docs/bugs.md` is retired)
 
 The detailed diff-preview and review-plan content below was moved out of `docs/bugs.md`.
 
