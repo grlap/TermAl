@@ -330,14 +330,12 @@ fn real_builder_quiet_changed_turns_and_spillover_checks_preserve_custody() {
         },
     };
     for source in [legacy(), owner()] {
-        let source_basis: EngramExecutionSourceBasis = serde_json::from_value(source).unwrap();
-        let is_owner = source_basis.source_id.is_some();
+        let is_owner = source.get("source_id").is_some();
+        // New requests use only SourceId. Below, legacy persisted specimens
+        // are reconstructed directly for the read-only census controls.
+        let source_basis: EngramExecutionSourceBasis = serde_json::from_value(owner()).unwrap();
         let mut changed_basis = source_basis.clone();
-        if let Some(source) = &mut changed_basis.source_id {
-            source.tree = "e".repeat(40);
-        } else {
-            changed_basis.source_revision = "content-v1:changed-revision".into();
-        }
+        changed_basis.source_id.as_mut().unwrap().tree = "e".repeat(40);
         let change = EngramObservedSourceChange::ContentComparison {
             workspace_id: source_basis.workspace_id.clone(),
             baseline: EngramMeasuredBaseline {
@@ -394,13 +392,29 @@ fn real_builder_quiet_changed_turns_and_spillover_checks_preserve_custody() {
             )
             .unwrap(),
         ];
-        let envelopes: Vec<_> = requests
+        let mut envelopes: Vec<_> = requests
             .into_iter()
             .map(|request| EngramRuntimeObservationEnvelope {
                 request: serde_json::to_value(request).unwrap(),
                 delivery: pending(),
             })
             .collect();
+        if !is_owner {
+            for (index, path, revision) in [
+                (1, "/occurrence/source_basis", "content-v1:private-revision"),
+                (3, "/occurrence/source_change/baseline", "content-v1:private-revision"),
+                (3, "/occurrence/source_change/sighting/source_basis", "content-v1:changed-revision"),
+            ] {
+                let basis = envelopes[index].request.pointer_mut(path).unwrap().as_object_mut().unwrap();
+                basis.remove("source_id");
+                basis.insert("source_revision".into(), json!(revision));
+            }
+            for envelope in &envelopes {
+                let decoded: EngramControlRequest = serde_json::from_value(envelope.request.clone()).unwrap();
+                assert_eq!(serde_json::to_value(decoded).unwrap(), envelope.request,
+                    "historical revision-form requests remain readable without changing their stored wire");
+            }
+        }
         for reversed in [false, true] {
             let mut retained = report(envelopes.clone());
             if reversed {

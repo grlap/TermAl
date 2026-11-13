@@ -131,12 +131,22 @@ fn registered_endpoints_compare_whole_objects_and_keep_the_middle_of_x_y_x() {
 
 #[test]
 fn historical_text_requests_round_trip_unchanged_and_are_not_new_comparison_baselines() {
-    let old = prepare_runtime_observations(
+    let mut old = prepare_runtime_observations(
         &observation_trace(),
         observation_capture(),
         chrono::Utc::now(),
     )
     .unwrap();
+    // A saved predecessor specimen is decoded directly, never rebuilt through
+    // today's outbound validator. Both historical source locations stay intact.
+    for (wire, path) in old.iter_mut().zip([
+        "/occurrence/source_change/sighting/source_basis",
+        "/occurrence/source_basis",
+    ]) {
+        let basis = wire.pointer_mut(path).unwrap().as_object_mut().unwrap();
+        basis.remove("source_id");
+        basis.insert("source_revision".into(), json!("content-v1:closing"));
+    }
     for wire in old {
         let bytes = serde_json::to_vec(&wire).unwrap();
         let decoded: EngramControlRequest = serde_json::from_slice(&bytes).unwrap();
@@ -148,6 +158,62 @@ fn historical_text_requests_round_trip_unchanged_and_are_not_new_comparison_base
         capture.source_change(),
         Some(EngramObservedSourceChange::AssumedMissingBaseline { .. })
     ));
+}
+
+#[test]
+fn new_observations_refuse_revision_only_sightings_checks_and_baselines() {
+    for revision in ["content-v1:old", "git-commit:old", "opaque-stored-revision"] {
+        for location in ["sighting", "baseline", "check"] {
+            let mut capture = capture_with(identity());
+            let mut trace = observation_trace();
+            let legacy = EngramExecutionSourceBasis {
+                source_id: None,
+                source_revision: revision.into(),
+                ..owner_basis(identity())
+            };
+            match location {
+                "sighting" => {
+                    capture.source = EngramRuntimeClosingSource::Measured(EngramMeasuredSighting {
+                        source_basis: legacy,
+                        observed_at: observation_at(50),
+                    })
+                }
+                "baseline" => {
+                    // A current-format object with leftover legacy text is also
+                    // inadmissible as a new outbound comparison endpoint.
+                    let mut baseline = EngramRuntimeCheckpointBasis::of_sighting(
+                        observation_binding(),
+                        &owner_basis(identity()),
+                        &observation_at(5),
+                    );
+                    baseline.endpoint.source_revision = revision.into();
+                    capture.baseline = Some(baseline);
+                }
+                _ => {
+                    let mut command = observation_command("legacy-check");
+                    command.check.source_basis = Some(legacy);
+                    trace.commands.push(command);
+                }
+            }
+            assert!(
+                prepare_runtime_observations(&trace, capture, chrono::Utc::now()).is_err(),
+                "new {location} must refuse {revision}"
+            );
+        }
+    }
+    let mut capture = capture_with(identity());
+    capture.baseline = Some(historical_observation_endpoint());
+    let requests =
+        prepare_runtime_observations(&observation_trace(), capture, chrono::Utc::now()).unwrap();
+    assert_eq!(
+        requests[0]["occurrence"]["source_change"]["detection"],
+        "assumed_missing_baseline"
+    );
+    assert!(
+        requests[0]["occurrence"]["source_change"]
+            .get("baseline")
+            .is_none()
+    );
 }
 
 #[test]

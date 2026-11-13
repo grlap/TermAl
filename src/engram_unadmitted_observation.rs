@@ -165,7 +165,7 @@ fn engram_observation_within(
 fn engram_observation_source_basis(basis: &EngramExecutionSourceBasis, label: &str) -> Result<(), String> {
     engram_observation_text(&basis.workspace_id, ENGRAM_OBSERVATION_MAX_SOURCE_BYTES, &format!("{label}.workspace_id"))?;
     if !engram_observation_identity_valid(&basis.source_revision, basis.source_id.as_ref()) {
-        return Err(format!("{label}.source_revision must be trimmed legacy text, or one complete bounded source_id"));
+        return Err(format!("{label} needs one complete bounded source_id and no source_revision"));
     }
     if !matches!(
         (basis.source_root_generation, basis.source_root_state),
@@ -402,11 +402,14 @@ mod unadmitted_observation_tests {
         engram_observation_instant(&at(59), "built_at").unwrap()
     }
 
-    fn source(revision: &str) -> EngramExecutionSourceBasis {
+    fn source(seed: &str) -> EngramExecutionSourceBasis {
         EngramExecutionSourceBasis {
-            source_id: None,
+            source_id: Some(serde_json::from_value(json!({
+                "commit": "a".repeat(40), "tree": &sha256_hex(seed.as_bytes())[..40],
+                "submodules": [], "changes": []
+            })).unwrap()),
             workspace_id: "workspace-unadmitted".into(),
-            source_revision: revision.into(),
+            source_revision: String::new(),
             source_root_generation: Some(2),
             source_root_state: Some(EngramSourceRootState::Named),
         }
@@ -437,12 +440,12 @@ mod unadmitted_observation_tests {
         EngramObservedSourceChange::ContentComparison {
             workspace_id: "workspace-unadmitted".into(),
             baseline: EngramMeasuredBaseline {
-                source_id: None,
+                source_id: source("before").source_id,
                 workspace_id: "workspace-unadmitted".into(),
-                source_revision: "content-v1:before".into(),
+                source_revision: String::new(),
                 observed_at: at(10),
             },
-            sighting: EngramMeasuredSighting { source_basis: source("content-v1:after"), observed_at: at(50) },
+            sighting: EngramMeasuredSighting { source_basis: source("after"), observed_at: at(50) },
         }
     }
 
@@ -454,7 +457,7 @@ mod unadmitted_observation_tests {
             started_at: Some(at(20)),
             finished_at: Some(at(30)),
             observed_at: at(30),
-            source_basis: Some(source("content-v1:after")),
+            source_basis: None,
             host_evidence_ref: Some("termal-run:abc".into()),
         }
     }
@@ -503,7 +506,6 @@ mod unadmitted_observation_tests {
         assert_eq!(occurrence["observed_checks"][0], json!({
             "host_check_id": "check-1", "check_kind": "test", "observed_result": "passed",
             "started_at": at(20), "finished_at": at(30), "observed_at": at(30),
-            "source_basis": serde_json::to_value(source("content-v1:after")).unwrap(),
             "host_evidence_ref": "termal-run:abc",
         }));
         let replay: EngramControlRequest = serde_json::from_value(wire.clone()).unwrap();
@@ -514,7 +516,7 @@ mod unadmitted_observation_tests {
         assert_eq!(unreported["occurrence"]["observed_checks"], json!([]));
         let missing = EngramObservedSourceChange::AssumedMissingBaseline {
             workspace_id: "workspace-unadmitted".into(),
-            sighting: EngramMeasuredSighting { source_basis: source("content-v1:after"), observed_at: at(50) },
+            sighting: EngramMeasuredSighting { source_basis: source("after"), observed_at: at(50) },
         };
         let assumed = serde_json::to_value(turn(Some(missing), Vec::new()).unwrap()).unwrap();
         assert_eq!(assumed["occurrence"]["source_change"]["detection"], "assumed_missing_baseline");
@@ -591,9 +593,8 @@ mod unadmitted_observation_tests {
         let mut padded = check("check-1");
         padded.host_check_id = " check-1".into();
         refused(turn(None, vec![padded]), "host_check_id must be trimmed");
-        let mut half_root = check("check-1");
-        half_root.source_basis.as_mut().unwrap().source_root_state = None;
-        refused(turn(None, vec![half_root]), "root generation and state only together");
+        refused(with_change(|_, sighting| sighting.source_basis.source_root_state = None),
+            "root generation and state only together");
 
         refused(
             engram_unadmitted_turn_request(basis(), "t".repeat(129), None, Vec::new(), built_at()),
@@ -618,12 +619,18 @@ mod unadmitted_observation_tests {
             "from is after observed_interval.through",
         );
 
-        refused(with_change(|baseline, sighting| baseline.source_revision = sighting.source_basis.source_revision.clone()), "two different revisions");
+        refused(with_change(|baseline, sighting| baseline.source_id = sighting.source_basis.source_id.clone()), "two different revisions");
+        refused(with_change(|baseline, _| {
+            baseline.source_id = None;
+            baseline.source_revision = "content-v1:saved-baseline".into();
+        }), "baseline needs one complete bounded source identity");
         refused(with_change(|baseline, _| baseline.workspace_id = "another-workspace".into()), "one workspace throughout");
         refused(with_change(|baseline, sighting| { baseline.observed_at = at(45); sighting.observed_at = at(40); }), "observed after its sighting");
         refused(with_change(|baseline, _| baseline.observed_at = at(5)), "source_change.baseline lies outside");
         refused(with_change(|_, sighting| sighting.observed_at = at(55)), "source_change.sighting lies outside");
-        let mut long_revision = source("r".repeat(513).as_str());
+        let mut long_revision = source("legacy");
+        long_revision.source_id = None;
+        long_revision.source_revision = "r".repeat(513);
         long_revision.source_root_generation = None;
         long_revision.source_root_state = None;
         refused(
@@ -631,7 +638,7 @@ mod unadmitted_observation_tests {
                 workspace_id: "workspace-unadmitted".into(),
                 sighting: EngramMeasuredSighting { source_basis: long_revision, observed_at: at(50) },
             }), Vec::new()),
-            "source_revision must be trimmed",
+            "needs one complete bounded source_id",
         );
         // Escaped check metadata used to exceed the old 64 KiB frame. It now
         // fits the observation frame, and every check must survive intact.

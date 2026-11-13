@@ -1030,108 +1030,139 @@ fn the_record_matches_the_producers_own_request_fixture() {
 
 #[test]
 fn the_producers_quiet_sighting_is_neither_a_turn_nor_verification_credit() {
-    let frame = producer_frame("execution_observe");
-    let mut body = frame["request"].as_object().unwrap().clone();
-    body.remove("operation");
-    let observation: EngramInterTurnObservation =
-        serde_json::from_value(Value::Object(body)).unwrap();
-    let sighting = EngramMeasuredSighting {
-        source_basis: serde_json::from_value(
-            frame["request"]["occurrence"]["source_basis"].clone(),
-        )
-        .unwrap(),
-        observed_at: frame["request"]["occurrence"]["observed_at"]
-            .as_str()
+    let archived_frame = producer_frame("execution_observe");
+    // Keep the mailed revision-only frame as historical receipt evidence.
+    // Port only the in-memory source identity for the current builder control.
+    for current_source_id in [false, true] {
+        let mut frame = archived_frame.clone();
+        if current_source_id {
+            let source_basis = frame["request"]["occurrence"]["source_basis"]
+                .as_object_mut()
+                .unwrap();
+            assert!(source_basis.remove("source_revision").is_some());
+            assert!(
+                source_basis
+                    .insert("source_id".into(), commit_source())
+                    .is_none()
+            );
+        }
+        let mut body = frame["request"].as_object().unwrap().clone();
+        body.remove("operation");
+        let observation: EngramInterTurnObservation =
+            serde_json::from_value(Value::Object(body)).unwrap();
+        let sighting = EngramMeasuredSighting {
+            source_basis: serde_json::from_value(
+                frame["request"]["occurrence"]["source_basis"].clone(),
+            )
+            .unwrap(),
+            observed_at: frame["request"]["occurrence"]["observed_at"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+        };
+        let built_at = chrono::DateTime::parse_from_rfc3339(&sighting.observed_at)
             .unwrap()
-            .to_owned(),
-    };
-    let built_at = chrono::DateTime::parse_from_rfc3339(&sighting.observed_at)
-        .unwrap()
-        .with_timezone(&chrono::Utc);
-    let request = engram_source_sighting_request(
-        EngramUnadmittedObservationBasis {
-            idempotency_key: observation.idempotency_key.clone(),
-            binding: observation.binding.clone(),
-            root_basis: observation.root_basis.clone(),
-            observed_interval: observation.observed_interval.clone(),
-            policy_basis: observation.policy_basis.clone(),
-        },
-        sighting,
-        built_at,
-    )
-    .unwrap();
-    assert!(
-        serde_json::to_value(&request).unwrap() == frame["request"],
-        "the complete source observation request matches"
-    );
-    assert!(frame["request"].get("routing_token").is_none());
-    assert!(
-        frame["request"]["occurrence"]
-            .get("host_turn_ref")
-            .is_none()
-    );
-    let session = frame["response"]["result"]["observing_session"]
-        .as_str()
-        .unwrap();
-    let check = |receipt| {
-        EngramSourceObservationReceipt::from_sighting_result(receipt, &observation, session)
-    };
-    let receipt = frame["response"]["result"].clone();
-    assert_eq!(receipt["accounting"], json!({"kind": "sighting"}));
-    assert_eq!(receipt["observed_checks"], json!([]));
-    assert_eq!(receipt["opened_obligations"], json!([]));
-    assert!(check(receipt.clone()).is_ok());
-    for accounting in [
-        json!({"kind": "source_change", "source_change": receipt["observation"]}),
-        json!({"kind": "no_source_change"}),
-    ] {
-        let mut wrong = receipt.clone();
-        wrong["accounting"] = accounting;
-        assert!(
-            check(wrong).is_err(),
-            "a sighting cannot become source-change accounting"
+            .with_timezone(&chrono::Utc);
+        let built = engram_source_sighting_request(
+            EngramUnadmittedObservationBasis {
+                idempotency_key: observation.idempotency_key.clone(),
+                binding: observation.binding.clone(),
+                root_basis: observation.root_basis.clone(),
+                observed_interval: observation.observed_interval.clone(),
+                policy_basis: observation.policy_basis.clone(),
+            },
+            sighting,
+            built_at,
         );
-    }
+        let request = if current_source_id {
+            built.expect("a complete SourceId remains a valid new sighting")
+        } else {
+            assert!(
+                built.is_err(),
+                "a retained revision-only sighting is not new-send authority"
+            );
+            // Reconstruct the stored request without granting it builder authority.
+            EngramControlRequest::ExecutionObserve {
+                observation: observation.clone(),
+            }
+        };
+        assert!(
+            serde_json::to_value(&request).unwrap() == frame["request"],
+            "the complete source observation request matches"
+        );
+        assert!(frame["request"].get("routing_token").is_none());
+        assert!(
+            frame["request"]["occurrence"]
+                .get("host_turn_ref")
+                .is_none()
+        );
+        let session = frame["response"]["result"]["observing_session"]
+            .as_str()
+            .unwrap();
+        let check = |receipt| {
+            EngramSourceObservationReceipt::from_sighting_result(receipt, &observation, session)
+        };
+        let receipt = frame["response"]["result"].clone();
+        assert_eq!(receipt["accounting"], json!({"kind": "sighting"}));
+        assert_eq!(receipt["observed_checks"], json!([]));
+        assert_eq!(receipt["opened_obligations"], json!([]));
+        assert!(check(receipt.clone()).is_ok());
+        for accounting in [
+            json!({"kind": "source_change", "source_change": receipt["observation"]}),
+            json!({"kind": "no_source_change"}),
+        ] {
+            let mut wrong = receipt.clone();
+            wrong["accounting"] = accounting;
+            assert!(
+                check(wrong).is_err(),
+                "a sighting cannot become source-change accounting"
+            );
+        }
 
-    // The shared scripted producer must make the same distinction and replay
-    // the exact saved receipt, rather than treating an unknown occurrence as
-    // an inter-turn source change.
-    let wire: Value = serde_json::from_str(PRODUCER_WIRE).unwrap();
-    let root_read = wire["frames"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|frame| {
-            frame["request"]["operation"] == "named_root_read"
-                && frame["response"]["result"]["named_root"]["state"] == "bound"
-        })
-        .unwrap()["response"]["result"]
-        .clone();
-    let mut model = TestEngramNamedRoots::default();
-    model.register(&observation.binding);
-    model
-        .bindings
-        .insert(session.to_owned(), observation.binding.claim_id.clone());
-    model
-        .root_reads
-        .insert(observation.binding.claim_id.clone(), root_read);
-    model.run_cuts.insert(observation.binding.run_id.clone(), 3);
-    let modeled = model.request(session, &request).unwrap().unwrap();
-    assert_eq!(modeled["accounting"], receipt["accounting"]);
-    assert_eq!(modeled["observed_checks"], json!([]));
-    assert!(check(modeled.clone()).is_ok());
-    assert_eq!(model.request(session, &request).unwrap().unwrap(), modeled);
-    let mut changed = request.clone();
-    let EngramControlRequest::ExecutionObserve { observation, .. } = &mut changed else {
-        unreachable!()
-    };
-    let EngramInterTurnOccurrence::SourceSighting { source_basis, .. } =
-        &mut observation.occurrence
-    else {
-        unreachable!()
-    };
-    source_basis.source_revision.push_str("-changed");
-    assert!(model.request(session, &changed).unwrap().is_err());
+        // The shared scripted producer must make the same distinction and replay
+        // the exact saved receipt, rather than treating an unknown occurrence as
+        // an inter-turn source change.
+        let wire: Value = serde_json::from_str(PRODUCER_WIRE).unwrap();
+        let root_read = wire["frames"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|frame| {
+                frame["request"]["operation"] == "named_root_read"
+                    && frame["response"]["result"]["named_root"]["state"] == "bound"
+            })
+            .unwrap()["response"]["result"]
+            .clone();
+        let mut model = TestEngramNamedRoots::default();
+        model.register(&observation.binding);
+        model
+            .bindings
+            .insert(session.to_owned(), observation.binding.claim_id.clone());
+        model
+            .root_reads
+            .insert(observation.binding.claim_id.clone(), root_read);
+        model.run_cuts.insert(observation.binding.run_id.clone(), 3);
+        let modeled = model.request(session, &request).unwrap().unwrap();
+        assert_eq!(modeled["accounting"], receipt["accounting"]);
+        assert_eq!(modeled["observed_checks"], json!([]));
+        assert!(check(modeled.clone()).is_ok());
+        assert_eq!(model.request(session, &request).unwrap().unwrap(), modeled);
+        let mut changed = request.clone();
+        let EngramControlRequest::ExecutionObserve { observation, .. } = &mut changed else {
+            unreachable!()
+        };
+        let EngramInterTurnOccurrence::SourceSighting { source_basis, .. } =
+            &mut observation.occurrence
+        else {
+            unreachable!()
+        };
+        if let Some(source_id) = &mut source_basis.source_id {
+            source_id.commit = "c".repeat(40);
+        } else {
+            source_basis.source_revision.push_str("-changed");
+        }
+        assert!(model.request(session, &changed).unwrap().is_err());
+    }
 }
 
 #[test]

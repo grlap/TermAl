@@ -30,11 +30,17 @@ fn observation_binding() -> EngramControlWorkBinding {
     }
 }
 
-fn observation_source(revision: &str) -> EngramExecutionSourceBasis {
+fn observation_source(seed: &str) -> EngramExecutionSourceBasis {
     EngramExecutionSourceBasis {
-        source_id: None,
+        source_id: Some(
+            serde_json::from_value(json!({
+                "commit": "a".repeat(40), "tree": &sha256_hex(seed.as_bytes())[..40],
+                "submodules": [], "changes": []
+            }))
+            .unwrap(),
+        ),
         workspace_id: "observation-workspace".into(),
-        source_revision: revision.into(),
+        source_revision: String::new(),
         source_root_generation: Some(2),
         source_root_state: Some(EngramSourceRootState::Named),
     }
@@ -58,7 +64,7 @@ fn observation_capture() -> EngramRuntimeClosingCapture {
         }))
         .unwrap(),
         source: EngramRuntimeClosingSource::Measured(EngramMeasuredSighting {
-            source_basis: observation_source("content-v1:closing"),
+            source_basis: observation_source("closing"),
             observed_at: observation_at(50),
         }),
         baseline: None,
@@ -83,6 +89,14 @@ fn historical_observation_endpoint() -> EngramRuntimeCheckpointBasis {
     }
 }
 
+fn observation_endpoint() -> EngramRuntimeCheckpointBasis {
+    EngramRuntimeCheckpointBasis::of_sighting(
+        observation_binding(),
+        &observation_source("opening"),
+        &observation_at(5),
+    )
+}
+
 fn observation_check(id: &str) -> EngramObservedCheck {
     EngramObservedCheck {
         host_check_id: id.into(),
@@ -91,7 +105,7 @@ fn observation_check(id: &str) -> EngramObservedCheck {
         started_at: Some(observation_at(20)),
         finished_at: Some(observation_at(30)),
         observed_at: observation_at(30),
-        source_basis: Some(observation_source("content-v1:closing")),
+        source_basis: None,
         host_evidence_ref: Some("synthetic-check-fixture".into()),
     }
 }
@@ -192,6 +206,7 @@ struct ObservationReplies {
     sent: Mutex<Vec<(EngramConnectionConfig, Value)>>,
     replies: Mutex<VecDeque<Result<Value, EngramTransportError>>>,
     policy_error: Mutex<Option<EngramTransportError>>,
+    policy_calls: std::sync::atomic::AtomicUsize,
     durable_scope: Mutex<Option<(PathBuf, String)>>,
 }
 
@@ -244,6 +259,8 @@ impl EngramControlTransport for ObservationReplies {
         _timeout: Duration,
         _host_workdir: &FsPath,
     ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
+        self.policy_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if let Some(error) = self.policy_error.lock().unwrap().take() {
             return Err(error);
         }
@@ -355,7 +372,7 @@ fn ordinary_observation_missing_baseline_stays_missing_after_preparation() {
 fn ordinary_observation_imported_endpoint_requires_exact_claim_and_workspace() {
     for incompatible in ["claim", "workspace"] {
         let mut capture = observation_capture();
-        let mut imported = historical_observation_endpoint();
+        let mut imported = observation_endpoint();
         if incompatible == "claim" {
             imported.binding.claim_fence += 1;
         } else {
@@ -368,7 +385,7 @@ fn ordinary_observation_imported_endpoint_requires_exact_claim_and_workspace() {
         ));
     }
     let mut capture = observation_capture();
-    let imported = historical_observation_endpoint();
+    let imported = observation_endpoint();
     capture.baseline = Some(imported.clone());
     assert!(
         matches!(capture.source_change(), Some(EngramObservedSourceChange::ContentComparison { baseline, .. })
@@ -377,14 +394,14 @@ fn ordinary_observation_imported_endpoint_requires_exact_claim_and_workspace() {
     let EngramRuntimeClosingSource::Measured(sighting) = &mut capture.source else {
         panic!()
     };
-    sighting.source_basis.source_revision = imported.endpoint.source_revision;
+    sighting.source_basis.source_id = imported.endpoint.source_id;
     assert!(capture.source_change().is_none());
 }
 
 #[test]
 fn ordinary_observation_imported_endpoint_keeps_its_original_timestamp() {
     let mut capture = observation_capture();
-    capture.baseline = Some(historical_observation_endpoint());
+    capture.baseline = Some(observation_endpoint());
     let requests =
         prepare_runtime_observations(&observation_trace(), capture, chrono::Utc::now()).unwrap();
     let request: EngramControlRequest = serde_json::from_value(requests[0].clone()).unwrap();
@@ -534,6 +551,12 @@ fn ordinary_observation_uncertain_reply_replays_exact_original_request_and_conne
     assert_eq!(sent.len(), 2);
     assert_eq!(sent[0], sent[1]);
     assert_eq!(sent[0].0, report.connection);
+    assert_eq!(
+        transport
+            .policy_calls
+            .load(std::sync::atomic::Ordering::SeqCst),
+        2
+    );
 }
 
 #[test]

@@ -212,6 +212,34 @@ fn engram_runtime_observation_failure_delivery(
     }
 }
 
+// Only inspect typed source-bearing fields. Historical values in arbitrary
+// evidence text are not source identities and must not suppress delivery.
+fn runtime_observation_has_legacy_source(occurrence: &EngramInterTurnOccurrence) -> bool {
+    let legacy = |revision: &str, source_id: Option<&EngramSourceId>| {
+        source_id.is_none() && !revision.is_empty()
+    };
+    let source_basis = |basis: &EngramExecutionSourceBasis| {
+        legacy(&basis.source_revision, basis.source_id.as_ref())
+    };
+    let change = |change: &EngramObservedSourceChange| match change {
+        EngramObservedSourceChange::ContentComparison { baseline, sighting, .. } =>
+            legacy(&baseline.source_revision, baseline.source_id.as_ref())
+                || source_basis(&sighting.source_basis),
+        EngramObservedSourceChange::AssumedMissingBaseline { sighting, .. } =>
+            source_basis(&sighting.source_basis),
+    };
+    let check = |check: &EngramObservedCheck| {
+        check.source_basis.as_ref().is_some_and(source_basis)
+    };
+    match occurrence {
+        EngramInterTurnOccurrence::SourceSighting { source_basis: basis, .. } => source_basis(basis),
+        EngramInterTurnOccurrence::InterTurnChange { source_change } => change(source_change),
+        EngramInterTurnOccurrence::UnadmittedTurn { source_change, observed_checks, .. } =>
+            source_change.as_ref().is_some_and(change) || observed_checks.iter().any(check),
+        EngramInterTurnOccurrence::ObservedCheck { check: observed, .. } => check(observed),
+    }
+}
+
 // Return a new immutable version to install by CAS. Transport ambiguity keeps
 // the original request pending. A documented record-nothing refusal settles
 // that envelope with its code; it never pauses a queue or retries as if
@@ -247,6 +275,19 @@ fn deliver_runtime_observation_envelope(
             "retained runtime report may send only execution_observe",
         ));
     };
+    if runtime_observation_has_legacy_source(&observation.occurrence) {
+        let mut next = report.next_version();
+        let earlier_error = match &envelope.delivery {
+            EngramRuntimeObservationDelivery::Pending { last_error: Some(error) } =>
+                format!("; earlier delivery diagnostic: {error}"),
+            _ => String::new(),
+        };
+        next.envelopes[index].delivery = EngramRuntimeObservationDelivery::LocalFailure {
+            code: "legacy_source_input_retired".to_owned(),
+            message: format!("retained revision-only source input is retired locally and not sent; any earlier producer outcome is unchanged{earlier_error}"),
+        };
+        return Ok(next);
+    }
     if !matches!(
         observation.occurrence,
         EngramInterTurnOccurrence::UnadmittedTurn { .. }

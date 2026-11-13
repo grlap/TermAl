@@ -67,13 +67,13 @@ fn a_recorded_closing_sighting_becomes_the_exact_next_baseline() {
     let next = with_delivery(&report, index, recorded_sighting(&report, index));
     let baseline =
         promoted(&session, &report, &next, index).expect("the recorded sighting is the baseline");
-    let source = observation_source("content-v1:closing");
+    let source = observation_source("closing");
     assert_eq!(
         baseline,
         EngramRuntimeCheckpointBasis {
             binding: observation_binding(),
             endpoint: EngramMeasuredBaseline {
-                source_id: None,
+                source_id: source.source_id,
                 workspace_id: source.workspace_id,
                 source_revision: source.source_revision,
                 observed_at: observation_at(50),

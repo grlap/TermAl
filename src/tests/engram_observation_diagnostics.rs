@@ -48,6 +48,199 @@ fn notices(fixture: &ObservationSession) -> String {
 }
 
 #[test]
+fn retained_revision_only_observations_retire_before_policy_or_send_and_keep_custody() {
+    for revision in [
+        "content-v1:private-old",
+        "git-commit:private-old",
+        "opaque-private-old",
+    ] {
+        for location in [
+            "baseline",
+            "comparison-sighting",
+            "missing-baseline-sighting",
+            "turn-check",
+            "standalone-check",
+            "sighting",
+        ] {
+            let fixture = ObservationSession::new();
+            let mut trace = observation_trace();
+            trace.commands.push(observation_command("check-one"));
+            let mut capture = observation_capture();
+            if location != "missing-baseline-sighting" {
+                capture.baseline = Some(observation_endpoint());
+            }
+            let mut report = EngramRuntimeObservationReport::prepare(
+                &trace,
+                capture,
+                observation_connection(FsPath::new(&fixture.state.default_workdir)),
+                observation_store(FsPath::new(&fixture.state.default_workdir)),
+                "fixture-observer".into(),
+                Duration::from_secs(1),
+            )
+            .unwrap();
+            let mut wire = report.envelopes[usize::from(location == "sighting")]
+                .request
+                .clone();
+            if location == "standalone-check" {
+                let check = wire["occurrence"]["observed_checks"][0].clone();
+                wire["occurrence"] = json!({"kind":"observed_check", "host_turn_ref":trace.host_turn_ref, "check":check});
+            }
+            let path = match location {
+                "baseline" => "/occurrence/source_change/baseline",
+                "comparison-sighting" | "missing-baseline-sighting" => {
+                    "/occurrence/source_change/sighting/source_basis"
+                }
+                "turn-check" => "/occurrence/observed_checks/0/source_basis",
+                "standalone-check" => "/occurrence/check/source_basis",
+                _ => "/occurrence/source_basis",
+            };
+            if matches!(location, "turn-check" | "standalone-check") {
+                let check_path = if location == "turn-check" {
+                    "/occurrence/observed_checks/0"
+                } else {
+                    "/occurrence/check"
+                };
+                wire.pointer_mut(check_path)
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .insert(
+                        "source_basis".into(),
+                        serde_json::to_value(observation_source("closing")).unwrap(),
+                    );
+            }
+            let basis = wire.pointer_mut(path).unwrap().as_object_mut().unwrap();
+            basis.remove("source_id");
+            basis.insert("source_revision".into(), json!(revision));
+            report.envelopes = vec![EngramRuntimeObservationEnvelope {
+                request: wire.clone(),
+                delivery: EngramRuntimeObservationDelivery::Pending {
+                    last_error: Some("earlier reply lost after possible recording".into()),
+                },
+            }];
+            // The saved predecessor image remains readable before retirement.
+            let raw = serde_json::to_vec(&report).unwrap();
+            let report: EngramRuntimeObservationReport = serde_json::from_slice(&raw).unwrap();
+            assert_eq!(serde_json::to_vec(&report).unwrap(), raw);
+            fixture.retain(report.clone());
+            fixture.persist();
+            let transport = Arc::new(ObservationReplies::default());
+            *transport.policy_error.lock().unwrap() =
+                Some(EngramTransportError::protocol("must not read policy"));
+            let adapter = observation_adapter(
+                transport.clone(),
+                FsPath::new(&fixture.state.default_workdir),
+            );
+            let mut next =
+                deliver_runtime_observation_envelope(&adapter, &report, 0, Duration::from_secs(1))
+                    .unwrap();
+            assert!(matches!(&next.envelopes[0].delivery,
+                EngramRuntimeObservationDelivery::LocalFailure { code, message }
+                if code == "legacy_source_input_retired"
+                    && message.contains("earlier reply lost after possible recording")));
+            assert_eq!(next.envelopes[0].request, wire);
+            assert!(next.is_settled());
+            assert!(
+                !next.is_discharged(),
+                "local retirement cannot certify an earlier remote outcome"
+            );
+            finish_runtime_observation_delivery_attempt(&mut next, &fixture.id, 0);
+            assert_eq!(
+                deliver_runtime_observation_envelope(&adapter, &next, 0, Duration::from_secs(1))
+                    .unwrap(),
+                next
+            );
+            assert_eq!(
+                transport
+                    .policy_calls
+                    .load(std::sync::atomic::Ordering::SeqCst),
+                0
+            );
+            assert!(transport.sent.lock().unwrap().is_empty());
+            fixture
+                .state
+                .install_runtime_observation_result(&fixture.id, &report, next.clone(), 0)
+                .unwrap();
+            let diagnostic = notices(&fixture);
+            assert!(diagnostic.contains("legacy_source_input_retired"));
+            assert!(diagnostic.contains("retired locally"));
+            assert!(diagnostic.contains("may be unknown"));
+            assert!(!diagnostic.contains(revision));
+            assert!(!diagnostic.contains("earlier reply lost"));
+            assert!(
+                runtime_observation_report_is_durable(
+                    &fixture.state.persistence_path,
+                    &fixture.id,
+                    &next
+                )
+                .unwrap()
+            );
+            let restored = load_state(fixture.state.persistence_path.as_ref())
+                .unwrap()
+                .unwrap();
+            let record = &restored.sessions[restored.find_session_index(&fixture.id).unwrap()];
+            assert_eq!(record.engram.unadmitted_reports, vec![next]);
+        }
+    }
+}
+
+#[test]
+fn source_id_observations_still_read_policy_and_deliver_with_legacy_words_in_evidence() {
+    let fixture = ObservationSession::new();
+    let mut trace = observation_trace();
+    let mut command = observation_command("source-id-check");
+    command.check.host_evidence_ref = Some("source_revision content-v1:historical-note".into());
+    trace.commands.push(command);
+    let mut report = EngramRuntimeObservationReport::prepare(
+        &trace,
+        observation_capture(),
+        observation_connection(FsPath::new(&fixture.state.default_workdir)),
+        observation_store(FsPath::new(&fixture.state.default_workdir)),
+        "fixture-observer".into(),
+        Duration::from_secs(1),
+    )
+    .unwrap();
+    let transport = Arc::new(ObservationReplies::default());
+    let originals = report.envelopes.clone();
+    for index in 0..report.envelopes.len() {
+        transport
+            .replies
+            .lock()
+            .unwrap()
+            .push_back(Ok(observation_receipt(
+                &report_observation(&report, index),
+                &report.observing_session,
+            )));
+    }
+    let adapter = observation_adapter(
+        transport.clone(),
+        FsPath::new(&fixture.state.default_workdir),
+    );
+    for index in 0..report.envelopes.len() {
+        report =
+            deliver_runtime_observation_envelope(&adapter, &report, index, Duration::from_secs(1))
+                .unwrap();
+    }
+    assert!(report.is_discharged());
+    assert_eq!(
+        transport
+            .policy_calls
+            .load(std::sync::atomic::Ordering::SeqCst),
+        originals.len()
+    );
+    let sent = transport.sent.lock().unwrap();
+    assert_eq!(sent.len(), originals.len());
+    for (index, envelope) in report.envelopes.iter().enumerate() {
+        assert!(matches!(
+            envelope.delivery,
+            EngramRuntimeObservationDelivery::Recorded { .. }
+        ));
+        assert_eq!(envelope.request, originals[index].request);
+        assert_eq!(sent[index].1, originals[index].request);
+    }
+}
+
+#[test]
 fn ordinary_observation_remote_echo_is_retained_without_entering_transcript_or_delta() {
     for (code, policy_failure, expected_notice) in [
         (
