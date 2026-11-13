@@ -129,7 +129,7 @@ visible and earns no credit.
 ### Canonical source_id and EO credit
 
 The shared source contract is quoted below. See also the
-[source-identity reference](source-identity.md#canonical-native-source-id-and-credit).
+[source-identity reference](source-identity.md#canonical-native-source_id-and-credit).
 
 > source_id = ONE object describing the source state, produced only by `engram source` (Engram owns it):
 > - root: commit (HEAD) and tree;
@@ -163,6 +163,52 @@ registration. Native records use the `source_id` input and post-run branch of
 and ordinary content identity retain their existing form. The source transport
 must be installed before this native producer is enabled. An old server's
 unknown-kind refusal is retained; it never triggers a commit-only fallback.
+
+## One rule for a registered committed-input check
+
+Engram owns this rule (Engram's acceptance evaluation docs, "Registered
+Git-input evidence"). A registered
+committed-input check is a launcher run in the claim's named root that selected
+committed input, automatically or with `--input commit`
+([committed-input runs](../test.md#ordinary-committed-input-runs---input-commit)).
+A criterion resting on it counts only while that root is clean at exactly the
+checked commit. Engram reads this from Git itself, not from TermAl's reports.
+
+- **When Git is read.** A new passing evaluation of a claim with such a run
+  reads it, including a judgment that cites only notes, and so does the
+  `done` that consumes the evaluation. With evaluations off, Git is still read
+  for a test-bound criterion, and for a `done` that cites registered evidence,
+  directly or through a satisfied acceptance result. A `done` with no
+  evaluation, no test-bound criterion and no such citation reads nothing.
+- **What refuses.** Among other things: a dirty root, a different commit (even
+  with an identical tree), a missing or unreachable root, and a newer failed
+  run of the required check. Engram's bounded Git reader also refuses a root it
+  can't judge, such as one with configured filter drivers, an uninitialized,
+  off-pin or conflicted submodule, or a SHA-256 repository, and reports a read
+  past its time or output bound as unavailable, never clean. Uncommitted work
+  earns no committed credit: commit it and run again on that commit. Complete
+  the item before removing its worktree.
+- **What carries over.** Recovering a lapsed claim on the same run and root
+  generation keeps the check. A new root generation needs a check there.
+- **Limits.** Git is read at the decision, not continuously, so an edit
+  reverted to the checked commit before then passes. Ignored files, edits
+  hidden by assume-unchanged or skip-worktree flags, what Git's file-mode,
+  line-ending and stat-cache rules hide, and edits outside the named root are
+  not seen.
+- **Turn reports are history.** Their source changes, baselines and arrival
+  order don't decide whether the check still counts, and a report that names
+  no source location doesn't refuse it. A located change in another root keeps
+  its own guard.
+
+Native declared credit is outside this rule. It compares the full
+`source_id` instead, at its two endpoints and again when Engram evaluates and
+completes, and a different state refuses
+([above](#canonical-source_id-and-eo-credit)). Equal local changes at the two
+endpoints still record the verification, but TermAl's acceptance admission
+requires the owner's clean committed source: a native record with local
+changes is refused there, so commit the changes and run the declared test again
+([native verification](declared-test-commands.md#native-verification)).
+Staged-tree inputs and earlier records keep the rules they were recorded under.
 
 ## Delivery and context preparation
 
@@ -248,12 +294,10 @@ path grants turn admission or test credit. See the host adapter's
   A turn with uncertain source attribution reports no source change and leaves
   no baseline.
 - If a turn checks revision A, changes source, then checks revision B, its
-  closing comparison still includes A. An evaluation can therefore refuse the
-  later check with `source_moved_after_check`, even when that check passed.
-  The work and recorded checks remain available. In a later ordinary work turn,
-  run a clean registered check on the intended committed revision and evaluate
-  again with its new record and fresh evidence basis. That later check follows
-  the previously recorded change; the closing comparison must also stay clean.
+  closing comparison still includes A. That report is history. For a
+  registered committed-input check, Engram decides from Git's read of the
+  named root, so the passing check on B counts while the root stays clean at B
+  ([one rule](#one-rule-for-a-registered-committed-input-check)).
 - It does not promise that a turn in which the agent takes or changes a claim
   is reported or credited under it. A turn is traced only if its project has a
   verified store or its session already has a work binding when it starts. The

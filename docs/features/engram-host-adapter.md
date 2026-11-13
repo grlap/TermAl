@@ -2238,6 +2238,11 @@ on or off. The delegation side is
 described under
 [evaluator delegations](agent-delegation-sessions.md#evaluator-delegations).
 
+For a claim with a registered committed-input check, Engram reads the named
+root from Git at a passing evaluation and at `done`, and TermAl's turn reports
+don't decide it
+([one rule for a registered committed-input check](execution-observability.md#one-rule-for-a-registered-committed-input-check)).
+
 **Request, submission and retained-write recovery.** These routes have distinct
 callers and bodies:
 

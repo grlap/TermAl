@@ -123,6 +123,11 @@ credit; an explicit committed-input refusal never falls back to a historical
 revision. Automatic launcher selection may instead choose its existing plain
 run before registration, which earns no committed verification credit.
 
+Whether a registered check on this lane still counts at evaluation and at
+`done` is decided by Engram's Git read of the named root: clean at exactly the
+checked commit. TermAl's turn reports don't decide it
+([one rule for a registered committed-input check](execution-observability.md#one-rule-for-a-registered-committed-input-check)).
+
 Engram's registered Commit lane remains SHA-1 only: a full 40-digit lowercase
 object id. A SHA-256 root is refused with a named unsupported-format reason,
 never truncated or rehashed. This does not widen that wire domain.
@@ -142,7 +147,7 @@ reviving a historical content-revision producer.
 
 The shared source contract is quoted below. Its rollout wording records the
 historical transition; it does not mean that a legacy producer remains active.
-See also the [native verification contract](execution-observability.md#canonical-source-id-and-eo-credit).
+See also the [native verification contract](execution-observability.md#canonical-source_id-and-eo-credit).
 
 > source_id = ONE object describing the source state, produced only by `engram source` (Engram owns it):
 > - root: commit (HEAD) and tree;
