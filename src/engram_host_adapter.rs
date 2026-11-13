@@ -686,6 +686,12 @@ enum EngramControlRequest {
         #[serde(flatten)]
         record: Value,
     },
+    /// Closed SourceId-only bridge. Delivery/recovery owns the frozen key,
+    /// native provenance and destination; Engram alone decides credit.
+    RemoteVerificationRecord {
+        #[serde(flatten)]
+        record: engram_remote_verification::Request,
+    },
 }
 
 impl EngramControlRequest {
@@ -700,6 +706,7 @@ impl EngramControlRequest {
             Self::NamedRootBind { .. } => "named_root_bind",
             Self::VerificationBind { .. } => "verification_bind",
             Self::VerificationRecord { .. } => "verification_record",
+            Self::RemoteVerificationRecord { .. } => "remote_verification_record",
         }
     }
 }
@@ -1974,6 +1981,15 @@ impl EngramHostAdapter {
         &self, connection: &EngramConnectionConfig,
     ) -> EngramVerificationRecordSupport {
         self.capabilities.work_session_verification_record(
+            connection, self.transport.connection_generation(&connection.session_id),
+        )
+    }
+
+    #[allow(dead_code)] // Capability read alone never activates delivery.
+    fn remote_verification_record_route_support(
+        &self, connection: &EngramConnectionConfig,
+    ) -> EngramVerificationRecordSupport {
+        self.capabilities.work_session_remote_verification_record(
             connection, self.transport.connection_generation(&connection.session_id),
         )
     }

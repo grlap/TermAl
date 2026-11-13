@@ -812,6 +812,7 @@ fn encode_engram_control_request(
     let framed_len = encoded.len().saturating_add(usize::from(matches!(
         request,
         EngramControlRequest::VerificationRecord { .. }
+            | EngramControlRequest::RemoteVerificationRecord { .. }
     )));
     if framed_len > engram_control_request_frame_limit(request) {
         return Err(EngramTransportError::protocol(

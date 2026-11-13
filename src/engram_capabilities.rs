@@ -5,6 +5,7 @@
 /// The capability name a connected Engram lists when it accepts the
 /// `verification_record` operation.
 const ENGRAM_VERIFICATION_RECORD_CAPABILITY: &str = "verification_record_v1";
+const ENGRAM_REMOTE_VERIFICATION_RECORD_CAPABILITY: &str = "remote_verification_record_v1";
 
 fn engram_reply_supports_host_work(result: &Value) -> bool {
     result.get("capabilities").and_then(Value::as_array).is_some_and(|entries| {
@@ -40,6 +41,10 @@ impl EngramVerificationRecordSupport {
 /// explicit null reads as a missing field; any entry that is not a string
 /// makes the whole list unreadable, so a malformed list never supports it.
 fn engram_reply_verification_record_support(result: &Value) -> EngramVerificationRecordSupport {
+    engram_reply_record_support(result, ENGRAM_VERIFICATION_RECORD_CAPABILITY)
+}
+
+fn engram_reply_record_support(result: &Value, capability: &str) -> EngramVerificationRecordSupport {
     let capabilities = match result.get("capabilities") {
         None | Some(Value::Null) => return EngramVerificationRecordSupport::FieldMissing,
         Some(capabilities) => capabilities,
@@ -50,7 +55,7 @@ fn engram_reply_verification_record_support(result: &Value) -> EngramVerificatio
     let mut listed = false;
     for entry in entries {
         match entry.as_str() {
-            Some(name) => listed |= name == ENGRAM_VERIFICATION_RECORD_CAPABILITY,
+            Some(name) => listed |= name == capability,
             None => return EngramVerificationRecordSupport::Unparseable,
         }
     }
@@ -69,6 +74,7 @@ struct EngramConnectionCapabilityRead {
     work_session: bool,
     evidence_git_tree_applicability: bool,
     support: EngramVerificationRecordSupport,
+    remote_support: EngramVerificationRecordSupport,
 }
 
 /// The per-connection answers, by the connection's session. An entry counts
@@ -102,6 +108,11 @@ impl EngramConnectionCapabilities {
             Ok(result) if work_session => engram_reply_verification_record_support(result),
             _ => EngramVerificationRecordSupport::NotRead,
         };
+        let remote_support = match reply {
+            Ok(result) if work_session =>
+                engram_reply_record_support(result, ENGRAM_REMOTE_VERIFICATION_RECORD_CAPABILITY),
+            _ => EngramVerificationRecordSupport::NotRead,
+        };
         let evidence_git_tree_applicability = reply.as_ref().is_ok_and(|result| {
             work_session
                 && result.get("verification_evidence_git_tree_applicability_v1")
@@ -118,6 +129,7 @@ impl EngramConnectionCapabilities {
                     work_session,
                     evidence_git_tree_applicability,
                     support,
+                    remote_support,
                 },
             );
     }
@@ -152,6 +164,14 @@ impl EngramConnectionCapabilities {
     ) -> EngramVerificationRecordSupport {
         self.current(connection, generation).filter(|read| read.work_session)
             .map_or(EngramVerificationRecordSupport::NotRead, |read| read.support)
+    }
+
+    #[allow(dead_code)] // Used when the remote delivery sender is activated.
+    fn work_session_remote_verification_record(
+        &self, connection: &EngramConnectionConfig, generation: Option<u64>,
+    ) -> EngramVerificationRecordSupport {
+        self.current(connection, generation).filter(|read| read.work_session)
+            .map_or(EngramVerificationRecordSupport::NotRead, |read| read.remote_support)
     }
 
     // Restricted-record producers must check this separately from ordinary
