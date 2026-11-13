@@ -334,6 +334,11 @@ impl StateInner {
 
     fn sync_running_read_only_delegation_index(&mut self, delegation_index: usize) {
         if let Some(delegation) = self.delegations.get(delegation_index) {
+            if !matches!(delegation.status, DelegationStatus::Queued | DelegationStatus::Running) {
+                if let Some(target) = &delegation.acceptance_evaluation {
+                    self.acceptance_evidence_recovery.remove(&target.attempt_key);
+                }
+            }
             if running_read_only_delegation_index_entry(delegation, delegation_index).is_some() {
                 self.running_read_only_delegations.insert(delegation_index);
             } else {
@@ -688,13 +693,14 @@ impl AppState {
         }
         let prompt = evaluation
             .as_ref()
-            .filter(|s| {
-                s.mode == AcceptanceEvaluationMode::IndependentSession && s.reuse_identity.is_some()
-            })
+            .filter(|s| s.reuse_identity.is_some())
             .map(|seed| {
+                let key = if seed.mode == AcceptanceEvaluationMode::IndependentSession {
+                    acceptance_evaluation_ordinal_key(&delegation_id, 1)
+                } else { delegation_id.clone() };
                 acceptance_evaluation_attempt_prompt(
                     prompt,
-                    &acceptance_evaluation_ordinal_key(&delegation_id, 1),
+                    &key,
                     1,
                     None,
                     seed,
@@ -734,11 +740,11 @@ impl AppState {
         // Identity is captured under the same lock that creates the actual
         // child and its delegation. It is not part of the request seed.
         let acceptance_evaluation = evaluation.map(|seed| {
-            let identity = (seed.mode == AcceptanceEvaluationMode::IndependentSession)
-                .then(|| seed.reuse_identity.clone())
-                .flatten();
+            let identity = seed.reuse_identity.clone();
+            let recovery = seed.evidence_recovery.clone();
+            let ordinal_key = seed.mode == AcceptanceEvaluationMode::IndependentSession && identity.is_some();
             let mut target = seed.into_target(
-                if identity.is_some() {
+                if ordinal_key {
                     acceptance_evaluation_ordinal_key(&delegation_id, 1)
                 } else {
                     delegation_id.clone()
@@ -752,6 +758,9 @@ impl AppState {
                 cwd: cwd.clone(),
                 identity,
                 ordinal: 1,
+                attempt_sequence: next_acceptance_attempt_sequence(&inner),
+                evidence_recovery_enabled: recovery.is_some(),
+                unfinished_evidence: None,
                 requester_text_tainted: false,
                 identity_refused: false,
                 previous: Vec::new(),
@@ -760,6 +769,10 @@ impl AppState {
                 citation_retry: None,
                 refused_submissions: Vec::new(),
             });
+            if let Some(manifest) = recovery {
+                inner.acceptance_evidence_recovery.insert(target.attempt_key.clone(),
+                    Arc::new(Mutex::new(AcceptanceEvidenceRecovery::new(manifest, target.clone()))));
+            }
             target
         });
         let record = DelegationRecord {
@@ -2903,6 +2916,11 @@ fn delegation_control_plane_capability_allowed_locked(
         }
         DelegationControlPlaneCapability::SubmitAcceptanceEvaluation => {
             acceptance_evaluation_submit_authority_locked(inner, child_session_id).is_ok()
+        }
+        DelegationControlPlaneCapability::ReadAcceptanceEvidence => {
+            acceptance_evaluation_submit_authority_locked(inner, child_session_id)
+                .is_ok_and(|a| matches!(a.target.submission, AcceptanceEvaluationSubmission::None)
+                    && a.target.attempt_history.as_ref().is_some_and(|h| h.evidence_recovery_enabled))
         }
         DelegationControlPlaneCapability::SubmitReviewResult => {
             delegation.child_session_id == child_session_id

@@ -2726,12 +2726,55 @@ evaluation; after a planner's revision the `same_session` brief asks the
 session to name it.
 
 The evaluator must distinguish evidence **not shown** from proof absent on
-the item. If its verdict depends on omitted evidence, it keeps the existing
-`insufficient-evidence` verdict but says "not shown" in its rationale, naming
-the known locator. It names unread evidence by its read cut and paging reason
-where the brief shows them and never copies the continuation, which can be
-longer than the rationale limit allows. It may not infer the missing proof or
-treat a visibility limit as a failed criterion.
+the item. An evaluator child whose judgment needs omitted evidence first uses
+`termal_read_acceptance_evidence`
+(`POST /api/sessions/{childId}/acceptance-evidence`). It supplies the current
+host-issued `attemptKey` and a `readKey` for one logical read. `action: catalog`
+continues the original captured catalog (no cursor on the first call, then only
+the opaque cursor returned by this route). `action: records` takes `locators`
+already named by the brief or recovered catalog and returns whole records.
+The caller cannot supply a store, work, run, project cut or raw tracker cursor.
+The authenticated evaluator and its saved attempt determine those values.
+
+Recovery is enabled only when preparation captured the canonical catalog and
+its continuation state. That choice stays with the attempt across persistence.
+A compatible request without a notes-window manifest keeps the ordinary
+insufficient-evidence and "not shown" instructions; an unsupported recovery
+call cannot retire it. Admission still requires canonical work/run identity.
+Parent-selected records and original closure records are readable immediately
+and may later reappear while paging the catalog; knowing a locator is not
+evidence that the catalog has already visited its row.
+
+Recovery reuses the canonical catalog and exact-record checks, with a core
+work/run identity bracket and a current local authority recheck before exposing
+data. A changed task/run, expired producer cursor, partial body or exhausted
+allowance ends that attempt as **unfinished**, with `recorded: false` and a
+reason in the delegation's attempt history. No verdict or fake Engram evaluation
+row is created. Its old child cannot submit a judgment; the parent can request
+a fresh evaluation, whose brief also names the unfinished predecessor. Wrong
+caller keys and invented cursor/record handles refuse only that call.
+
+All recovery calls of one attempt share the existing acceptance evidence
+allowance (two minimum operation windows) of actual tracker I/O. Before every
+issued read, a full 60-second window must remain; an issued operation retains
+that window, including the existing ten-second warning and lock-retry clock.
+There is no new setting and no change to the request's independently funded
+discovery or mandatory phases. Repeating a `readKey` with identical arguments
+returns the first success or unfinished response without I/O or another charge;
+different arguments conflict. Concurrent identical reads share that result.
+The host bounds logical reads by the existing brief-entry limit. Restart loses
+the private recovery cache and ends old recovery instead of resetting its quota.
+Terminal delegation cleanup releases the runtime cache. A requester cannot rearm
+that same attempt after its recovery state was released; it requests a fresh
+evaluation. A newer evaluator supersedes the unfinished predecessor notice.
+
+After reading the relevant evidence, a criterion still lacking proof receives
+`insufficient-evidence`. The child does not record that verdict solely because
+discovery stopped before older proof was read. An unfinished recovery is
+reported to the parent instead. The child never infers missing proof or treats
+a visibility limit as a failed criterion. The same-session brief still names
+unread evidence by its read cut and paging reason; it grants no child read
+capability or generic tracker access.
 Only when the complete criteria do not fit with no context left is the request
 refused, with `409` "the acceptance contract is too large to brief an
 evaluator", which states the bytes the criteria take and the limit. Non-ASCII

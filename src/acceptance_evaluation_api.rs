@@ -637,7 +637,8 @@ fn refuse_second_active_acceptance_evaluator_locked(
             && delegation
                 .acceptance_evaluation
                 .as_ref()
-                .is_some_and(|target| target.judges(store, work_ref))
+                .is_some_and(|target| target.judges(store, work_ref)
+                    && !acceptance_evidence_unfinished(target).is_some_and(|r| r.persistence_confirmed))
     });
     let Some(active) = active else {
         return Ok(());
@@ -669,6 +670,10 @@ fn acceptance_evaluation_followup_admission_with_origin_locked(
     if delegation.mode != DelegationMode::Evaluator {
         return Ok(());
     }
+    if delegation.acceptance_evaluation.as_ref().is_some_and(|target|
+        acceptance_evidence_unfinished(target).is_some()) {
+        return Err(ApiError::conflict("this evaluator ended its evidence read unfinished; request a fresh evaluation instead of rearming it"));
+    }
     let Some((target, store)) = delegation
         .acceptance_evaluation
         .as_ref()
@@ -676,6 +681,12 @@ fn acceptance_evaluation_followup_admission_with_origin_locked(
     else {
         return Ok(());
     };
+    if !host && target.attempt_history.as_ref().is_some_and(|h| h.evidence_recovery_enabled)
+        && !inner.acceptance_evidence_recovery.contains_key(&target.attempt_key)
+        && matches!(target.submission, AcceptanceEvaluationSubmission::None)
+    {
+        return Err(ApiError::conflict("this evaluator no longer has retained evidence recovery state; request a fresh evaluation instead of rearming the same attempt"));
+    }
     if !host && target.attempt_history.as_ref().and_then(|h| h.prepared_brief.as_ref()).is_some() {
         return Err(ApiError::conflict("a host-authored evaluator brief remains unsettled; requester follow-up cannot replace it"));
     }
@@ -1245,7 +1256,16 @@ impl AppState {
                 ));
             }
         }
+        let recovery_manifest = match (discovery.identity.as_ref(), initial_basis.as_ref(), canonical_window) {
+            (Some(identity), Some(basis), Some(window)) => Some(AcceptanceEvidenceRecoveryManifest {
+                identity: identity.clone(), basis: basis.clone(), window,
+                seen: notes_cursors, catalog: show["notes"].as_array().cloned().unwrap_or_default(),
+                indexed: BTreeSet::new(),
+            }),
+            _ => None,
+        };
         let mut task = parse_acceptance_evaluation_task(show, full)?;
+        task.evidence_recovery = recovery_manifest;
         task.canonical_identity = discovery.identity.clone();
         task.current_claim = current_claim;
         // Preserve the acknowledged naming version captured before any tracker
@@ -1655,11 +1675,7 @@ impl AppState {
                 // evidence context, so complete criteria still fit in the final
                 // prompt. Fresh delegation IDs have this UUID-shaped length.
                 let fresh_key = acceptance_evaluation_ordinal_key(&format!("delegation-{}", Uuid::nil()), 1);
-                let mut header_bytes = if mode == AcceptanceEvaluationMode::IndependentSession {
-                    acceptance_evaluation_attempt_prompt("", &fresh_key, 1, None, &seed).len()
-                } else {
-                    0
-                };
+                let mut header_bytes = acceptance_evaluation_attempt_prompt("", &fresh_key, 1, None, &seed).len();
                 if let Some(previous) = reuse.as_ref()
                     .filter(|_| mode == AcceptanceEvaluationMode::IndependentSession)
                     .map(|r| &r.previous) {
@@ -1669,7 +1685,11 @@ impl AppState {
                             &acceptance_evaluation_ordinal_key(&previous.id, ordinal), ordinal, Some(old), &seed).len());
                     }
                 }
-                let brief_bytes = MAX_ACCEPTANCE_BRIEF_BYTES.saturating_sub(header_bytes + selection_notice.len());
+                let unfinished = {
+                    let inner = self.inner.lock().expect("state mutex poisoned");
+                    acceptance_unfinished_evidence_notice_locked(&inner, &target.store, &task.work_ref)
+                };
+                let brief_bytes = MAX_ACCEPTANCE_BRIEF_BYTES.saturating_sub(header_bytes + selection_notice.len() + unfinished.len());
                 let base = build_acceptance_evaluator_brief_for_agent(
                     &task, &evaluator_dir, agent, brief_bytes)?;
                 // Assessments take only the room the finished brief leaves, or
@@ -1678,7 +1698,7 @@ impl AppState {
                     acceptance_independent_brief_with_obligations(&task, &evaluator_dir,
                         acceptance_evaluator_command_form(agent), base,
                         &mut obligation_assessments, brief_bytes);
-                let prompt = format!("{selection_notice}{prompt}");
+                let prompt = format!("{selection_notice}{unfinished}{prompt}");
                 let mut reuse_notice = None;
                 if let Some(reservation) = reuse.as_ref() {
                     let reason = self.acceptance_evaluation_reuse_reason(reservation, &seed,
@@ -1880,6 +1900,9 @@ impl AppState {
             return Err(in_progress());
         }
         let authority = acceptance_evaluation_submit_authority_locked(&inner, child)?;
+        if acceptance_evidence_unfinished(&authority.target).is_some() {
+            return Err(ApiError::conflict("this evidence recovery attempt ended without a verdict; finish and report it, then the parent may request a fresh evaluation"));
+        }
         let requires_attempt_key = authority.target.attempt_history.as_ref()
             .is_some_and(|history| history.schema_version == 1);
         if request.attempt_key.as_deref()

@@ -34,6 +34,15 @@ struct AcceptanceEvaluationAttemptHistory {
     cwd: String,
     identity: AcceptanceEvidenceIdentity,
     ordinal: u8,
+    /// Host order across delegation reuse; zero denotes a pre-sequence attempt.
+    #[serde(default)]
+    attempt_sequence: u64,
+    /// Captured for this key, so a restart cannot turn absence into a new quota.
+    #[serde(default, skip_serializing_if = "is_false")]
+    evidence_recovery_enabled: bool,
+    /// A host read failure ends this attempt without a submitted judgment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unfinished_evidence: Option<AcceptanceUnfinishedEvidenceRead>,
     #[serde(default)]
     requester_text_tainted: bool,
     #[serde(default)]
@@ -166,4 +175,10 @@ fn acceptance_evaluation_attempt_prompt(
         }
     }
     format!("{header}\n{prompt}")
+}
+
+fn next_acceptance_attempt_sequence(inner: &StateInner) -> u64 {
+    inner.delegations.iter().filter_map(|d| d.acceptance_evaluation.as_ref())
+        .filter_map(|t| t.attempt_history.as_ref()).map(|h| h.attempt_sequence)
+        .max().unwrap_or(0).saturating_add(1)
 }

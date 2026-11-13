@@ -102,6 +102,9 @@ impl AppState {
         if history.identity_refused {
             return Some("Engram refused this evaluator's independence".to_owned());
         }
+        if history.unfinished_evidence.is_some() {
+            return Some("the preceding evidence read ended unfinished; select a fresh evaluator".to_owned());
+        }
         if !policy_known || seed.mode != AcceptanceEvaluationMode::IndependentSession {
             return Some(
                 "current policy or task pin does not establish independent_session admission"
@@ -189,6 +192,8 @@ impl AppState {
         // A new key is a new attempt, with its own one re-submission.
         history.citation_retry = None;
         history.ordinal += 1;
+        history.evidence_recovery_enabled = seed.evidence_recovery.is_some();
+        history.unfinished_evidence = None;
         let key = acceptance_evaluation_ordinal_key(&previous.id, history.ordinal);
         let prompt =
             acceptance_evaluation_attempt_prompt(&prompt, &key, history.ordinal, Some(old), &seed);
@@ -234,8 +239,15 @@ impl AppState {
                 &seed,
                 Some(&previous.id),
             )?;
+            history.attempt_sequence = next_acceptance_attempt_sequence(&inner);
+            let recovery = seed.evidence_recovery.clone();
             let mut target = seed.into_target(key, &previous.parent_session_id);
             target.attempt_history = Some(history);
+            inner.acceptance_evidence_recovery.remove(&old.attempt_key);
+            if let Some(manifest) = recovery {
+                inner.acceptance_evidence_recovery.insert(target.attempt_key.clone(),
+                    Arc::new(Mutex::new(AcceptanceEvidenceRecovery::new(manifest, target.clone()))));
+            }
             inner.delegations[index].acceptance_evaluation = Some(target);
             inner.mark_delegation_mutated(index);
             let (_, dispatch) = self.commit_locked_with_persist_dispatch(&mut inner)

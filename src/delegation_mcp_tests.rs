@@ -464,6 +464,7 @@ fn delegation_mcp_base_tools_list_includes_role_scoped_tools() {
             "termal_review_identity",
             "termal_submit_review_result",
             "termal_submit_acceptance_evaluation",
+            "termal_read_acceptance_evidence",
             "termal_send_to_session",
             "termal_list_sessions",
             "termal_federation_status",

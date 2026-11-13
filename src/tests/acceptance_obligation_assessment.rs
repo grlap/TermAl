@@ -342,7 +342,16 @@ fn an_assessment_whose_continuation_is_missing_is_incomplete_never_presented_who
         prompt.contains("INCOMPLETE: 24 of 49 rows read (missing_continuation)."),
         "{prompt}"
     );
-    assert!(!prompt.contains("read whole"), "{prompt}");
+    // Recovery instructions can ask for whole bodies; the assessment itself
+    // must never claim that its partial rows were read whole.
+    let assessment = prompt
+        .split_once("Obligation assessments of the cited verification records")
+        .unwrap()
+        .1
+        .split_once("Evidence recorded on the task")
+        .unwrap()
+        .0;
+    assert!(!assessment.contains("read whole"), "{assessment}");
     let summary = &wire["obligationAssessments"][0];
     assert_eq!(summary["complete"], json!(false));
     assert_eq!(summary["rowsRead"], json!(24));

@@ -1162,6 +1162,7 @@ fn assert_retired_write_projections(
     retired: &DelegationAcceptanceEvaluation,
 ) {
     let seed = AcceptanceEvaluationTargetSeed {
+        evidence_recovery: None,
         work_ref: retired.work_ref.clone(),
         mode: retired.mode,
         acceptance_basis: retired.acceptance_basis,
@@ -1704,6 +1705,7 @@ fn acceptance_evaluator_creation_refuses_a_root_that_changed_during_the_request_
     };
     let seed =
         |source_root: Option<AcceptanceEvaluationSourceRoot>| AcceptanceEvaluationTargetSeed {
+            evidence_recovery: None,
             source_id: None,
             reuse_identity: None,
             selected_evidence: Vec::new(),
@@ -1786,6 +1788,7 @@ fn acceptance_evaluator_creation_refuses_a_root_that_changed_during_the_request_
     // first root while the parent binds another claim, or none: the claim
     // recorded at the request decides, as it does at the first submission.
     let on_claim = AcceptanceEvaluationTargetSeed {
+        evidence_recovery: None,
         naming_history: Some(EngramWorkNamingToken {
             epoch: ENGRAM_NAMING_HISTORY_EPOCH,
             work_id: "01a0b6c5-4b4f-7b41-9e32-edc597077acf".to_owned(),
@@ -2116,6 +2119,7 @@ fn acceptance_old_workdir_claim_is_refused_after_a_new_claim_names_and_clears() 
         );
         let target = &authority.target;
         let seed = AcceptanceEvaluationTargetSeed {
+            evidence_recovery: None,
             source_id: None,
             reuse_identity: None,
             selected_evidence: Vec::new(),

@@ -62,6 +62,8 @@ delegation_long_calls! {
     EvaluationRequest,
     /// May run the tracker twice, and waits for the writer before and after.
     EvaluationSubmit,
+    /// All recovered pages/records share this attempt's existing IO quota.
+    EvidenceRead,
     /// Bounded by the naming budget. An enqueued durability deadline remains
     /// pending: a name may still commit after the reply.
     SourceRootNaming,
@@ -89,6 +91,7 @@ impl DelegationLongCall {
                     + turn_delivery
             }
             Self::EvaluationSubmit => acceptance_evaluation_submit_budget(),
+            Self::EvidenceRead => acceptance_evaluation_evidence_budget() + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT,
             // A call admitted just before a shared phase expires retains its
             // full minimum window. Keep the client alive for that overrun.
             Self::SourceRootNaming => ENGRAM_SOURCE_ROOT_NAMING_BUDGET + ENGRAM_MIN_CALL_TIMEOUT,

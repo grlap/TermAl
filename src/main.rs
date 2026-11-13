@@ -727,6 +727,10 @@ fn app_router_with_acceptance_policy_limiter(
             post(submit_session_acceptance_evaluation),
         )
         .route(
+            "/api/sessions/{id}/acceptance-evidence",
+            post(read_session_acceptance_evidence),
+        )
+        .route(
             "/api/sessions/{id}/acceptance-evaluation-replay",
             post(replay_session_acceptance_evaluation),
         )
@@ -1220,6 +1224,7 @@ include!("acceptance_evaluation_citation_retry.rs");
 include!("acceptance_evaluation_reuse.rs");
 include!("acceptance_evaluation_brief_delivery.rs");
 include!("acceptance_evaluation_api.rs");
+include!("acceptance_evidence_recovery.rs");
 include!("acceptance_evaluation_replay.rs");
 include!("acceptance_named_root_sighting.rs");
 include!("acceptance_committed_input.rs");

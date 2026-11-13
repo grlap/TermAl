@@ -25,6 +25,9 @@ fn rejected_evaluation_key_has_no_effect(schema_one: bool) {
         update_evaluation_target(&state, &delegation, |target| {
             target.attempt_key = acceptance_evaluation_ordinal_key(&delegation, 1);
             target.attempt_history = Some(AcceptanceEvaluationAttemptHistory {
+                attempt_sequence: 0,
+                evidence_recovery_enabled: false,
+                unfinished_evidence: None,
                 schema_version: 1,
                 parent_session_id: parent,
                 child_session_id: child.clone(),

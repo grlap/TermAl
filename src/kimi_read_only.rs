@@ -393,6 +393,7 @@ fn kimi_read_only_permission_decision(
                 })
             }
             DelegationControlPlaneCapability::SubmitAcceptanceEvaluation => false,
+            DelegationControlPlaneCapability::ReadAcceptanceEvidence => false,
         };
         if !shape_ok {
             return kimi_read_only_reject(title, "its arguments are not a valid request");

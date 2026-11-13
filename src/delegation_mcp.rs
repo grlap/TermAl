@@ -67,6 +67,7 @@ enum DelegationControlPlaneCapability {
     ReviewFreeze,
     ReviewIdentity,
     SubmitAcceptanceEvaluation,
+    ReadAcceptanceEvidence,
 }
 
 fn delegation_control_plane_capability_for_claude_tool_name(
@@ -91,6 +92,9 @@ fn delegation_control_plane_capability_for_claude_tool_name(
         }
         TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME => {
             Some(DelegationControlPlaneCapability::SubmitAcceptanceEvaluation)
+        }
+        TERMAL_READ_ACCEPTANCE_EVIDENCE_QUALIFIED_TOOL_NAME => {
+            Some(DelegationControlPlaneCapability::ReadAcceptanceEvidence)
         }
         _ => None,
     }
@@ -139,6 +143,15 @@ fn delegation_control_plane_capability_for_codex_elicitation(
         })
     {
         return Some(DelegationControlPlaneCapability::SubmitAcceptanceEvaluation);
+    }
+    if metadata.get("codex_approval_kind").and_then(Value::as_str) == Some("mcp_tool_call")
+        && metadata.get("tool_description").and_then(Value::as_str)
+            == Some(TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_DESCRIPTION)
+        && metadata.get("tool_params").is_some_and(|value|
+            serde_json::from_value::<ReadAcceptanceEvidenceRequest>(value.clone())
+                .is_ok_and(|request| request.validate().is_ok()))
+    {
+        return Some(DelegationControlPlaneCapability::ReadAcceptanceEvidence);
     }
     (metadata.get("codex_approval_kind").and_then(Value::as_str) == Some("mcp_tool_call")
         && metadata.get("tool_description").and_then(Value::as_str)
@@ -1034,7 +1047,7 @@ impl TermalDelegationMcpBridge {
         if name == TERMAL_REVIEW_FREEZE_TOOL_NAME && !self.caller_allows_review_freeze() {
             bail!("`{name}` is available only to a read-only reviewer child");
         }
-        if name == TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME
+        if matches!(name.as_str(), TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME | TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_NAME)
             && !self.caller_allows_acceptance_evaluation()
         {
             bail!("`{name}` is available only to an acceptance evaluator child");
@@ -1057,6 +1070,7 @@ impl TermalDelegationMcpBridge {
             "termal_submit_acceptance_evaluation" => {
                 self.tool_submit_acceptance_evaluation(arguments)
             }
+            "termal_read_acceptance_evidence" => self.tool_read_acceptance_evidence(arguments),
             "termal_send_to_session" => self.tool_send_to_session(arguments),
             "termal_list_sessions" => self.tool_list_sessions(arguments),
             "termal_federation_status" => self.tool_federation_status(arguments),
@@ -1182,6 +1196,13 @@ impl TermalDelegationMcpBridge {
             }
             err
         })
+    }
+
+    fn tool_read_acceptance_evidence(&self, arguments: Value) -> Result<Value> {
+        let path = format!("/api/sessions/{}/acceptance-evidence", self.serving_session_id);
+        // The host's logical read key coalesces retries; this bridge never
+        // substitutes another key or restarts the evidence scan.
+        self.post_long_call(DelegationLongCall::EvidenceRead, &path, &arguments)
     }
 
     fn tool_submit_acceptance_evaluation(&self, arguments: Value) -> Result<Value> {
@@ -2123,7 +2144,7 @@ impl TermalDelegationMcpBridge {
                 if name == TERMAL_REVIEW_IDENTITY_TOOL_NAME {
                     return !caller_is_child || self.caller_allows_review_identity();
                 }
-                if name == TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME {
+                if matches!(name, TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME | TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_NAME) {
                     return caller_is_child && self.caller_allows_acceptance_evaluation();
                 }
                 if caller_is_child {
@@ -2975,6 +2996,11 @@ fn mcp_tools_list_result() -> Value {
         &mut result,
         TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME,
         acceptance_evaluation_submit_tool_definition(),
+    );
+    insert_mcp_tool_after(
+        &mut result,
+        TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME,
+        acceptance_evidence_read_tool_definition(),
     );
     insert_mcp_tool_after(
         &mut result,

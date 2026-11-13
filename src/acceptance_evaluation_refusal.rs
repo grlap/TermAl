@@ -243,6 +243,8 @@ impl AppState {
                 target
                     .attempt_history
                     .get_or_insert_with(|| AcceptanceEvaluationAttemptHistory {
+                        unfinished_evidence: None,
+                        evidence_recovery_enabled: false,
                         // No legacy record becomes eligible merely because it refused.
                         schema_version: 0,
                         parent_session_id: String::new(),
@@ -250,6 +252,7 @@ impl AppState {
                         cwd: String::new(),
                         identity: AcceptanceEvidenceIdentity::default(),
                         ordinal: 0,
+                        attempt_sequence: 0,
                         requester_text_tainted: true,
                         identity_refused: false,
                         previous: Vec::new(),

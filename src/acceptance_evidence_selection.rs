@@ -128,7 +128,7 @@ fn validate_acceptance_projection_identity(
 
 /// Agent receipts have operation-specific headers. Their scalar task/run
 /// basis is separate from the project catalog cut used by notes cursors.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct AcceptanceAgentEvidenceBasis {
     acceptance_basis: i64,
     evidence_basis: i64,
@@ -156,7 +156,7 @@ fn acceptance_full_contract_identity(
     validate_acceptance_projection_identity(&full["work"], identity)
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct AcceptanceNotesWindow {
     selection: String,
     order: String,
@@ -169,7 +169,7 @@ struct AcceptanceNotesWindow {
     read_cut: AcceptanceNotesCatalogCut,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct AcceptanceNotesCatalogCut {
     project_position: i64,
     observed_at: String,

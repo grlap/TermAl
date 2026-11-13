@@ -720,6 +720,9 @@ fn enable_attempt_history(state: &AppState, id: &str, parent: &str, child: &str)
         .unwrap();
     target.attempt_key = acceptance_evaluation_ordinal_key(id, 1);
     target.attempt_history = Some(AcceptanceEvaluationAttemptHistory {
+        attempt_sequence: 0,
+        evidence_recovery_enabled: false,
+        unfinished_evidence: None,
         schema_version: 1,
         parent_session_id: parent.to_owned(),
         child_session_id: child.to_owned(),
@@ -1178,8 +1181,23 @@ fn acceptance_refresh_sub_agent_pin_selects_fresh_attested_child() {
         Some(record.id.as_str())
     );
     assert_eq!(target.attempt_key, record.id);
-    assert!(target.attempt_history.is_none());
-    assert!(!record.prompt.contains("Host-authored acceptance attempt"));
+    let history = target.attempt_history.as_ref().unwrap();
+    assert_eq!(history.ordinal, 1);
+    assert_eq!(history.parent_session_id, parent);
+    assert_eq!(history.child_session_id, record.child_session_id);
+    assert!(history.previous.is_empty());
+    assert!(history.refusal.is_none());
+    assert!(history.unfinished_evidence.is_none());
+    assert!(
+        record
+            .prompt
+            .starts_with("Host-authored acceptance attempt 1.\n")
+    );
+    assert!(
+        record
+            .prompt
+            .contains(&format!("Attempt key: {}\n", record.id))
+    );
     assert_eq!(
         current_target(&state, &old_id)
             .attempt_history
@@ -1191,10 +1209,12 @@ fn acceptance_refresh_sub_agent_pin_selects_fresh_attested_child() {
     // has no bind retry to park before this injected write.
     let mut receipt: Value = serde_json::from_str(&evaluate_receipt(false)).unwrap();
     receipt["evaluation"]["mode"] = json!("sub_agent");
+    let mut submit = two_verdicts();
+    submit.attempt_key = Some(target.attempt_key.clone());
     state
         .submit_acceptance_evaluation_with_runner(
             &record.child_session_id,
-            two_verdicts(),
+            submit,
             |connection, args, _| {
                 let flag = |name| args.windows(2).find(|pair| pair[0] == name).unwrap()[1].clone();
                 assert_eq!(connection.session_id, record.child_session_id);
@@ -1225,6 +1245,7 @@ fn acceptance_refresh_eligibility_uses_persisted_history_and_current_policy() {
         .unwrap();
     let old = reservation.previous.acceptance_evaluation.as_ref().unwrap();
     let seed = AcceptanceEvaluationTargetSeed {
+        evidence_recovery: None,
         source_id: None,
         work_ref: old.work_ref.clone(),
         mode: old.mode,

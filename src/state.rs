@@ -1889,6 +1889,9 @@ struct StateInner {
     // The value coalesces a child completion observed before this submission
     // owner's final durability acknowledgement; no separate refresh queue.
     acceptance_evaluation_submissions_in_flight: HashMap<String, bool>,
+    /// Attempt-scoped read cursors, replay cache and actual-I/O allowance.
+    /// A restart loses these capabilities; it never resets an old allowance.
+    acceptance_evidence_recovery: HashMap<String, Arc<Mutex<AcceptanceEvidenceRecovery>>>,
     /// Threads taking an acceptance evaluation's source revision that are
     /// still alive, abandoned ones included (`bounded_source_capture`).
     /// Memory only, one count for the host.
@@ -2033,6 +2036,7 @@ impl StateInner {
             delegations: Vec::new(),
             delegation_followup_admissions: HashMap::new(),
             acceptance_evaluation_submissions_in_flight: HashMap::new(),
+            acceptance_evidence_recovery: HashMap::new(),
             acceptance_source_captures_live: Arc::default(),
             engram_turn_basis_captures_live: Arc::default(),
             #[cfg(test)]

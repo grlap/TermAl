@@ -175,6 +175,7 @@ fn acceptance_card_detail(
         )
     } else if matches!(evaluation.submission, AcceptanceEvaluationSubmission::None)
         && !terminal
+        && acceptance_evidence_unfinished(evaluation).is_none()
         && !acceptance_evaluation_current_write_retired(evaluation)
         && evaluation
             .attempt_history

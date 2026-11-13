@@ -83,6 +83,9 @@ mod spawn_ack;
 #[path = "durability_pending_evaluation.rs"]
 mod durability_pending;
 
+#[path = "acceptance_evaluation_evidence_recovery.rs"]
+mod evidence_recovery;
+
 type RecordedEngramCalls = Arc<Mutex<Vec<(EngramConnectionConfig, Vec<String>)>>>;
 
 /// These request/submission fixtures begin after a canonical no-event read
@@ -1021,17 +1024,6 @@ fn acceptance_evaluator_brief_clips_the_oldest_entries_first_and_says_so() {
         .prompt
         .len()
             > MAX_ACCEPTANCE_BRIEF_BYTES
-    );
-    // The evaluator is told what a marked entry means for a verdict.
-    assert!(
-        brief.prompt.contains(
-            "- An entry marked as clipped or as not shown in full is incomplete, and an\n  \
-             entry counted as not shown was not given to you: you have not read the rest.\n  \
-             Where a verdict depends on it, give insufficient-evidence and name that\n  \
-             locator in the rationale; never infer what the missing part says.\n"
-        ),
-        "{}",
-        brief.prompt
     );
     // The requester is told which entries its judge did not get whole.
     let notice = acceptance_brief_cut_notice("w-task", &brief.cuts).expect("a cut is reported");
