@@ -239,11 +239,32 @@ impl AppState {
             .engram
             .unadmitted_active_turn
             .as_ref()
-            .filter(|trace| trace.generation == record.active_turn_generation)
             .cloned()
         else {
             return;
         };
+        if trace.generation != record.active_turn_generation {
+            // This terminal path owns the current runtime/generation, so it
+            // cannot close the predecessor as though it were this turn.
+            // Preserve its facts without a fabricated measurement or report,
+            // and release stale custody so the next opening can be observed.
+            inner.sessions[index].engram.unadmitted_active_turn = None;
+            let message = Message::Text {
+                attachments: Vec::new(),
+                id: inner.next_message_id(),
+                timestamp: stamp_now(),
+                author: Author::System,
+                text: format!(
+                    "Retained observation {} belongs to an earlier turn and was not captured at this turn's end. Its facts are preserved in this notice without new credit. The next ordinary turn can capture the current source root.",
+                    trace.host_turn_ref
+                ),
+                expanded_text: Some(serde_json::to_string_pretty(&trace)
+                    .unwrap_or_else(|_| format!("{trace:#?}"))),
+                source: None,
+            };
+            push_message_on_record(&mut inner.sessions[index], message);
+            return;
+        }
         trace.observed_outcome = Some(outcome);
         let session_id = record.session.id.clone();
         // Consume both endpoints. An evaluation-request measurement can

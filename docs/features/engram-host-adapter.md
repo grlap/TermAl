@@ -1516,6 +1516,21 @@ happens elsewhere. The agent therefore names the item's worktree once with
   requires settled authority and the same acknowledged named root and
   generation. A lower revision or a changed identity cannot use it, and the
   mismatched closing turn keeps its original refusal.
+- **Recovery from an older turn's retained observation.** If an active
+  observation still belongs to an earlier runtime generation, it cannot be
+  reported as the current turn. At the current turn's terminal transition,
+  the host preserves the earlier observation's complete facts in an expanded
+  system notice and releases its stale active custody in the same persistence
+  commit. It creates no closing report or source measurement for the turn
+  whose opening was hidden by that custody. A matching current-generation
+  observation continues through normal closing unchanged.
+  After this transition, another ordinary host-delivered turn can measure
+  the current HEAD and tree of the same acknowledged named root. No new
+  naming generation is needed. Wait for that sighting to be recorded before
+  requesting a later independent evaluation of that revision; this recovery
+  does not rewrite or credit the missed turns. An unavailable source owner,
+  changed claim or root, or overlapping writer can still withhold a sighting
+  under the usual attribution rules.
 - **How long naming takes.** One budget of 310 seconds on the server covers
   two source captures, the commit reserve, and one shared 60-second control
   allowance across held-claim read, initial status, binding event and any
