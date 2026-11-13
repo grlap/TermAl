@@ -2997,6 +2997,37 @@ async fn full_state_request_shares_the_event_stream_access_policy() {
     assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
 }
 
+// A quiet `/api/events` stream carries a named `heartbeat` event at its
+// interval. Unlike the SSE keep-alive comment, a browser's EventSource sees it,
+// so a client can replace a stream that stopped delivering. The interval is
+// shortened here through the stream builder's parameter only; the route itself
+// uses STATE_EVENTS_HEARTBEAT_INTERVAL. Nothing here asserts a duration: the
+// test only waits for two heartbeats, bounded by the shared deadlock guard.
+#[tokio::test]
+async fn state_events_stream_sends_named_heartbeats_on_a_quiet_stream() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let response = state_events_stream(state.clone(), true, Duration::from_millis(50))
+        .await
+        .into_response();
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = Box::pin(response.into_body().into_data_stream());
+    assert_eq!(parse_sse_event(&next_sse_event(&mut body).await).0, "state");
+
+    let mut heartbeats = 0;
+    for _ in 0..20 {
+        let (name, data) = parse_sse_event(&next_sse_event_including_heartbeats(&mut body).await);
+        if name == "heartbeat" {
+            assert_eq!(data, "1", "a heartbeat carries non-empty data");
+            heartbeats += 1;
+            if heartbeats == 2 {
+                break;
+            }
+        }
+    }
+    assert_eq!(heartbeats, 2, "heartbeats repeat on a quiet stream");
+}
+
 // Pins `GET /api/events` + `PUT/DELETE /api/workspaces/{id}` — asserts
 // every workspace-layout mutation (create, update, delete) republishes
 // a fresh `state` SSE frame whose `workspaces` summaries reflect the

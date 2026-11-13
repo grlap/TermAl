@@ -4,6 +4,7 @@ import react from "@vitejs/plugin-react";
 import { configDefaults } from "vitest/config";
 import { assertVitestResourceBudget } from "../scripts/vitest-resource-preflight.mjs";
 import { CATEGORY_PROJECTS } from "./test-categories";
+import { configureBackendUnavailableProxy } from "./dev-proxy";
 
 function monacoEsmCssStub() {
   return {
@@ -17,49 +18,6 @@ function monacoEsmCssStub() {
       return null;
     },
   };
-}
-
-function configureBackendUnavailableProxy(proxy: {
-  on(
-    event: "error",
-    listener: (
-      error: Error,
-      req: unknown,
-      res:
-        | {
-            headersSent?: boolean;
-            writableEnded?: boolean;
-            writeHead(
-              statusCode: number,
-              headers?: Record<string, string>,
-            ): void;
-            end(body?: string): void;
-          }
-        | unknown,
-    ) => void,
-  ): void;
-}) {
-  proxy.on("error", (_error, _req, res) => {
-    if (
-      !res ||
-      typeof res !== "object" ||
-      !("writeHead" in res) ||
-      typeof res.writeHead !== "function" ||
-      !("end" in res) ||
-      typeof res.end !== "function"
-    ) {
-      return;
-    }
-
-    if (res.headersSent || res.writableEnded) {
-      return;
-    }
-
-    res.writeHead(502, { "Content-Type": "text/plain" });
-    res.end(
-      "The TermAl backend is unavailable. Start it again and wait for reconnect.",
-    );
-  });
 }
 
 if (process.env.VITEST === "true") {

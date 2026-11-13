@@ -3,7 +3,7 @@ import { createLiveEventSource, SharedLiveEventSource } from "./live-event-sourc
 import { TestPort, TestSource } from "./shared-live-events.test-support";
 import {
   createSharedLiveEventHub, LIVE_EVENT_TYPES, LIVE_EVENTS_URL, SHARED_LIVE_LEASE_MS,
-  SHARED_LIVE_CONNECTING_STALE_MS,
+  SHARED_LIVE_CONNECTING_STALE_MS, SHARED_LIVE_HEARTBEAT_MS, LIVE_STREAM_SILENCE_RESTART_MS,
 } from "./shared-live-events";
 
 const clients: SharedLiveEventSource[] = [];
@@ -469,6 +469,51 @@ describe("shared stream lifecycle", () => {
   it("opts every browser connection into state diffs", () => {
     // Without the query the server keeps the legacy full-state stream.
     expect(LIVE_EVENTS_URL).toBe("/api/events?stateDiff=1");
+  });
+
+  it("replaces an OPEN upstream that sent heartbeats and then fell silent", async () => {
+    // A proxy can keep a dead stream OPEN; only missing data reveals it.
+    const { sources, connect } = setup();
+    connect();
+    await flushMessages();
+    sources[0].open();
+    sources[0].emit("heartbeat", "1");
+    await flushMessages();
+
+    await vi.advanceTimersByTimeAsync(LIVE_STREAM_SILENCE_RESTART_MS + SHARED_LIVE_HEARTBEAT_MS);
+
+    expect(sources).toHaveLength(2);
+    expect(sources[0].close).toHaveBeenCalled();
+  });
+
+  it("keeps an OPEN upstream whose heartbeats keep arriving", async () => {
+    const { sources, connect } = setup();
+    connect();
+    await flushMessages();
+    sources[0].open();
+    for (let elapsed = 0; elapsed < LIVE_STREAM_SILENCE_RESTART_MS * 3; elapsed += 15_000) {
+      sources[0].emit("heartbeat", "1");
+      await flushMessages();
+      await vi.advanceTimersByTimeAsync(15_000);
+    }
+
+    expect(sources).toHaveLength(1);
+    expect(sources[0].close).not.toHaveBeenCalled();
+  });
+
+  it("keeps a quiet upstream from a server that never sent a heartbeat", async () => {
+    // An older backend sends no heartbeats; quiet is not proof of a dead stream.
+    const { sources, connect } = setup();
+    connect();
+    await flushMessages();
+    sources[0].open();
+    sources[0].emit("state", '{"revision":1}');
+    await flushMessages();
+
+    await vi.advanceTimersByTimeAsync(LIVE_STREAM_SILENCE_RESTART_MS * 3);
+
+    expect(sources).toHaveLength(1);
+    expect(sources[0].close).not.toHaveBeenCalled();
   });
 
   it("acknowledges a joining tab during CONNECTING without replacing the fresh stream", async () => {

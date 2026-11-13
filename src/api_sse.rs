@@ -21,7 +21,11 @@
 //    same route with `mode: "cut"` publishes the current cut unmarked, so a
 //    client keeps its diff baseline and receives the cut as a `stateDiff`.
 // 4. Configures keep-alive pings so the connection stays live
-//    through idle periods and aggressive HTTP proxies.
+//    through idle periods and aggressive HTTP proxies, and sends a named
+//    `heartbeat` event every 15 s (STATE_EVENTS_HEARTBEAT_INTERVAL). The
+//    keep-alive comment never reaches a browser's EventSource; the
+//    heartbeat does, so the client can detect a stream that stopped
+//    delivering and replace it.
 //
 // `state_snapshot_payload_for_sse` builds the initial snapshot by
 // calling `AppState::snapshot` (see `state_accessors.rs`) and
@@ -34,6 +38,13 @@
 // client can ack + wait. `stable_text_hash` is a tiny FNV-1a hash used to
 // tag fallback payloads so clients can dedup retransmits.
 // `empty_state_events_response` is the minimal skeleton.
+
+/// How often `/api/events` sends a named `heartbeat` event. Unlike the SSE
+/// keep-alive comment, a named event reaches the browser's EventSource, so a
+/// client can tell a live but quiet stream from one that silently stopped
+/// delivering (for example a proxy that keeps a dead stream open) and restart
+/// it after a few missed beats.
+const STATE_EVENTS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 
 fn stable_text_hash(value: &str) -> String {
     let mut hash = 0xcbf29ce484222325_u64;
@@ -328,7 +339,21 @@ async fn state_events(
     State(state): State<AppState>,
     query: Result<Query<StateEventsQuery>, QueryRejection>,
 ) -> Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>> {
-    let state_diffs = state_events_query_opts_into_diffs(&query);
+    state_events_stream(
+        state,
+        state_events_query_opts_into_diffs(&query),
+        STATE_EVENTS_HEARTBEAT_INTERVAL,
+    )
+    .await
+}
+
+/// The `/api/events` stream itself. The heartbeat interval is a parameter so a
+/// test can observe heartbeats without waiting the production interval.
+async fn state_events_stream(
+    state: AppState,
+    state_diffs: bool,
+    heartbeat_interval: Duration,
+) -> Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>> {
     // Counted before subscribing and before the initial capture: a diff this
     // connection can receive is then always paired with a full snapshot. The
     // guard moves into the stream, so every exit, including a dropped request
@@ -375,6 +400,12 @@ async fn state_events(
         if *shutdown_rx.borrow_and_update() {
             return;
         }
+
+        let mut heartbeat = tokio::time::interval_at(
+            tokio::time::Instant::now() + heartbeat_interval,
+            heartbeat_interval,
+        );
+        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
             tokio::select! {
@@ -449,6 +480,13 @@ async fn state_events(
                         }
                         Err(broadcast::error::RecvError::Closed) => break,
                     }
+                }
+
+                // Lowest priority: only an otherwise quiet stream needs it.
+                // The `"1"` payload follows the `lagged` marker's reason: a
+                // browser may skip an event with empty data.
+                _ = heartbeat.tick() => {
+                    yield Ok(Event::default().event("heartbeat").data("1"));
                 }
             }
         }

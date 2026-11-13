@@ -2041,6 +2041,26 @@ async fn next_sse_event_with_timeout<S>(
 where
     S: futures_core::Stream<Item = Result<axum::body::Bytes, axum::Error>>,
 {
+    read_sse_event(stream, limit, true).await
+}
+
+/// Like `next_sse_event`, but returns `/api/events` heartbeat frames instead of
+/// skipping them, for tests of the heartbeat itself.
+async fn next_sse_event_including_heartbeats<S>(stream: &mut std::pin::Pin<Box<S>>) -> String
+where
+    S: futures_core::Stream<Item = Result<axum::body::Bytes, axum::Error>>,
+{
+    read_sse_event(stream, crate::TEST_PHASE_DEADLOCK_GUARD, false).await
+}
+
+async fn read_sse_event<S>(
+    stream: &mut std::pin::Pin<Box<S>>,
+    limit: Duration,
+    skip_heartbeats: bool,
+) -> String
+where
+    S: futures_core::Stream<Item = Result<axum::body::Bytes, axum::Error>>,
+{
     tokio::time::timeout(limit, async {
         let mut event = String::new();
         loop {
@@ -2062,6 +2082,18 @@ where
                 if event[..boundary].lines().all(|line| line.starts_with(':')) {
                     // A legal keep-alive is not an application event. Remove
                     // only this complete frame, retaining any following bytes.
+                    event.drain(..frame_end);
+                    continue;
+                }
+                if skip_heartbeats
+                    && event[..boundary]
+                        .lines()
+                        .any(|line| line.trim_end_matches('\r') == "event: heartbeat")
+                {
+                    // A liveness heartbeat can arrive between any two
+                    // application events when a test stalls past its
+                    // interval; it carries no state, so skip it like a
+                    // keep-alive.
                     event.drain(..frame_end);
                     continue;
                 }

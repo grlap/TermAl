@@ -25,6 +25,7 @@ import {
 } from "./api";
 import { isBackendUnavailableError } from "./api-request";
 import { createLiveEventSource } from "./live-event-source";
+import { LiveStreamLiveness } from "./live-stream-liveness";
 import {
   LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS,
   LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS,
@@ -137,6 +138,11 @@ type UseAppLiveStateTransportParams = {
   sseRecoveryTimerRef: MutableRefObject<ReturnType<
     typeof window.setTimeout
   > | null>;
+  /**
+   * The /api/state reconnect-fallback backoff. Outlives EventSource
+   * recreation; reset only by a confirmed recovery or a new outage cycle.
+   */
+  reconnectStateResyncBackoffRef: MutableRefObject<ReconnectStateResyncBackoff>;
   startSessionHydration: (
     sessionId: string,
     options?: SessionHydrationOptions,
@@ -148,6 +154,20 @@ type UseAppLiveStateTransportParams = {
     (sessions: readonly Session[], now?: number) => void
   >;
   workspaceFilesChangedEventGateRefs: WorkspaceFilesChangedEventGateRefs;
+};
+
+/**
+ * The reconnect-fallback backoff, owned by useAppLiveState so it survives the
+ * transport effect re-running when the EventSource is recreated.
+ */
+export type ReconnectStateResyncBackoff = {
+  /** The delay the next newly scheduled fallback waits. */
+  delayMs: number;
+  /**
+   * When the currently scheduled fallback is due, or null when none is.
+   * A recreated transport resumes this deadline instead of dropping it.
+   */
+  dueAt: number | null;
 };
 
 type AuthoritativeSnapshotReconnectRecoveryDeps = {
@@ -204,6 +224,7 @@ export function useAppLiveStateTransport(
     sseEpoch,
     sseRecoveryAttemptRef,
     sseRecoveryTimerRef,
+    reconnectStateResyncBackoffRef,
     startSessionHydration,
     stateResyncInFlightRef,
     stateResyncPendingRef,
@@ -221,7 +242,11 @@ export function useAppLiveStateTransport(
     > | null = null;
     let observedEventSourceOpen = false;
     const reconnectState = new ReconnectStateMachine();
-    let nextReconnectStateResyncDelayMs = RECONNECT_STATE_RESYNC_DELAY_MS;
+    // A fallback a previous run of this effect scheduled but did not get to
+    // fire before the EventSource was recreated. The first fallback this run
+    // schedules resumes that deadline instead of consuming a new delay.
+    let inheritedReconnectStateResyncDueAt =
+      reconnectStateResyncBackoffRef.current.dueAt;
     let liveSessionResumeWatchdogIntervalId: ReturnType<
       typeof window.setInterval
     > | null = null;
@@ -282,6 +307,8 @@ export function useAppLiveStateTransport(
       }, INITIAL_STATE_RESYNC_DELAY_MS);
     }
 
+    // Disarms the fallback: its deadline is no longer owed. Effect cleanup
+    // instead cancels only the timer, so a recreated transport resumes it.
     function clearReconnectStateResyncTimeout() {
       if (reconnectStateResyncTimeoutId === null) {
         return;
@@ -289,10 +316,13 @@ export function useAppLiveStateTransport(
 
       window.clearTimeout(reconnectStateResyncTimeoutId);
       reconnectStateResyncTimeoutId = null;
+      reconnectStateResyncBackoffRef.current.dueAt = null;
     }
 
     function resetReconnectStateResyncBackoff() {
-      nextReconnectStateResyncDelayMs = RECONNECT_STATE_RESYNC_DELAY_MS;
+      reconnectStateResyncBackoffRef.current.delayMs = RECONNECT_STATE_RESYNC_DELAY_MS;
+      reconnectStateResyncBackoffRef.current.dueAt = null;
+      inheritedReconnectStateResyncDueAt = null;
     }
 
     /**
@@ -308,7 +338,10 @@ export function useAppLiveStateTransport(
      * so a healthy connection always starts the next failure cycle at the
      * lowest backoff.
      */
-    function scheduleSseEventSourceRecovery() {
+    // `stillNeeded`, when given, is checked again when the timer fires: a
+    // recovery scheduled for a condition that has since cleared (a silent
+    // stream that delivered again) must not close the now-healthy stream.
+    function scheduleSseEventSourceRecovery(stillNeeded?: () => boolean) {
       if (sseRecoveryTimerRef.current !== null) {
         return;
       }
@@ -320,17 +353,36 @@ export function useAppLiveStateTransport(
         if (cancelled) {
           return;
         }
+        if (stillNeeded && !stillNeeded()) {
+          sseRecoveryAttemptRef.current = attempt;
+          return;
+        }
         setSseEpoch((current) => current + 1);
       }, delayMs);
     }
 
+    // The backoff lives in a ref owned by useAppLiveState, not in this effect:
+    // recreating the EventSource re-runs the effect, and a stream that never
+    // opens would otherwise restart the /api/state fallback at its fastest
+    // delay on every recreation instead of settling at the cap.
     function consumeReconnectStateResyncDelayMs() {
-      const delayMs = nextReconnectStateResyncDelayMs;
-      nextReconnectStateResyncDelayMs = Math.min(
-        nextReconnectStateResyncDelayMs * 2,
-        RECONNECT_STATE_RESYNC_MAX_DELAY_MS,
-      );
+      const backoff = reconnectStateResyncBackoffRef.current;
+      const delayMs = backoff.delayMs;
+      backoff.delayMs = Math.min(delayMs * 2, RECONNECT_STATE_RESYNC_MAX_DELAY_MS);
       return delayMs;
+    }
+
+    // Recreation cancels this effect's timers, and the cap equals the
+    // recreation backoff's cap. Resuming the inherited deadline keeps a
+    // pending fallback from being dropped on every recreation.
+    // Clamped to the cap as well: the deadline is wall-clock time, and a clock
+    // that steps backwards must not stretch a resumed wait past one cap.
+    function takeInheritedReconnectStateResyncDelayMs() {
+      const dueAt = inheritedReconnectStateResyncDueAt;
+      inheritedReconnectStateResyncDueAt = null;
+      return dueAt === null
+        ? null
+        : Math.min(RECONNECT_STATE_RESYNC_MAX_DELAY_MS, Math.max(0, dueAt - Date.now()));
     }
 
     function scheduleFallbackStateResyncRetry(
@@ -481,9 +533,13 @@ export function useAppLiveStateTransport(
       // and strand the client in "reconnecting" even when later events on the
       // same socket are healthy.
       clearReconnectStateResyncTimeout();
-      const delayMs = consumeReconnectStateResyncDelayMs();
+      const delayMs =
+        takeInheritedReconnectStateResyncDelayMs() ??
+        consumeReconnectStateResyncDelayMs();
+      reconnectStateResyncBackoffRef.current.dueAt = Date.now() + delayMs;
       reconnectStateResyncTimeoutId = window.setTimeout(() => {
         reconnectStateResyncTimeoutId = null;
+        reconnectStateResyncBackoffRef.current.dueAt = null;
         if (
           cancelled ||
           !readNavigatorOnline() ||
@@ -1312,6 +1368,10 @@ export function useAppLiveStateTransport(
       });
     }
 
+    // An OPEN stream that stops delivering (behind a proxy that kept it open)
+    // is replaced once it has proved it sends heartbeats and then falls silent.
+    const streamLiveness = new LiveStreamLiveness();
+    const detachStreamLiveness = streamLiveness.attach(eventSource);
     eventSource.addEventListener("snapshotRequired", handleSharedSnapshotRequired);
     eventSource.addEventListener("state", handleStateEvent as EventListener);
     eventSource.addEventListener("stateDiff", handleStateDiffEvent as EventListener);
@@ -1323,6 +1383,7 @@ export function useAppLiveStateTransport(
     );
     eventSource.onopen = () => {
       if (!cancelled) {
+        streamLiveness.markOpen();
         resetStateDiffContinuity();
         markEventSourceOpen();
       }
@@ -1393,6 +1454,10 @@ export function useAppLiveStateTransport(
       }
     };
     scheduleInitialStateFallbackResync();
+    // A fallback the previous transport left pending is still owed. Resume it
+    // now: a replacement stream that stays CONNECTING may never deliver the
+    // error that would otherwise re-arm it. Confirmed recovery still clears it.
+    if (inheritedReconnectStateResyncDueAt !== null) scheduleReconnectStateResync();
     liveSessionResumeWatchdogIntervalId = window.setInterval(
       () => {
         if (cancelled) return;
@@ -1430,6 +1495,15 @@ export function useAppLiveStateTransport(
       const readyState = readEventSourceReadyState();
       if (eventSourceReadyStateIsOpen(readyState)) {
         sseStaleSinceMs = null;
+        if (streamLiveness.isSilent()) {
+          // OPEN but past three missed heartbeats: nothing is arriving.
+          // Still restart if the stream closed meanwhile: its own CLOSED
+          // recovery was absorbed by this pending timer.
+          scheduleSseEventSourceRecovery(
+            () => streamLiveness.isSilent() || readEventSourceReadyState() === 2,
+          );
+          return;
+        }
         if (
           !observedEventSourceOpen &&
           !reconnectState.pendingBadLiveEventRecovery
@@ -1499,8 +1573,14 @@ export function useAppLiveStateTransport(
       requestActionRecoveryResyncRef.current = () => {};
       syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current = () => {};
       clearInitialStateResyncRetryTimeout();
-      clearReconnectStateResyncTimeout();
+      // Cancel the timer but keep its deadline in the backoff ref: the
+      // recreated transport resumes it (takeInheritedReconnectStateResyncDelayMs).
+      if (reconnectStateResyncTimeoutId !== null) {
+        window.clearTimeout(reconnectStateResyncTimeoutId);
+        reconnectStateResyncTimeoutId = null;
+      }
       clearForceAdoptNextStateEvent();
+      detachStreamLiveness();
       clearWorkspaceFilesChangedEventBuffer(workspaceFilesChangedEventGateRefs);
       if (liveSessionResumeWatchdogIntervalId !== null) {
         window.clearInterval(liveSessionResumeWatchdogIntervalId);

@@ -153,6 +153,7 @@ import {
 import type { WorkspaceLayoutSummary } from "./api";
 import type { BackendConnectionState } from "./backend-connection";
 import {
+  RECONNECT_STATE_RESYNC_DELAY_MS,
   type PendingSessionRename,
   type SessionErrorMap,
   type SessionNoticeMap,
@@ -184,7 +185,10 @@ import {
   type WorkspaceFilesChangedEventGateRefs,
 } from "./app-live-state-workspace-events";
 import { useAppLiveStateRenderSchedulers } from "./app-live-state-render-schedulers";
-import { useAppLiveStateTransport } from "./app-live-state-transport";
+import {
+  useAppLiveStateTransport,
+  type ReconnectStateResyncBackoff,
+} from "./app-live-state-transport";
 import { reconcileAdoptedSessionsWorkspace } from "./app-live-state-workspace-reconciliation";
 import { WaitDeltaWatermark } from "./wait-delta-watermark";
 import { TailReadBackstopSchedule } from "./tail-read-backstop-schedule";
@@ -381,6 +385,16 @@ export function useAppLiveState(
   const sseRecoveryTimerRef = useRef<ReturnType<
     typeof window.setTimeout
   > | null>(null);
+  // The /api/state reconnect-fallback backoff and its pending deadline. Held
+  // here, not in the transport effect, so recreating the EventSource (an
+  // `sseEpoch` bump) neither restarts the backoff at its fastest delay nor
+  // drops a scheduled fallback. It resets on a confirmed recovery and on a
+  // deliberate new cycle: an error after a reopen, going offline, or a manual
+  // retry.
+  const reconnectStateResyncBackoffRef = useRef<ReconnectStateResyncBackoff>({
+    delayMs: RECONNECT_STATE_RESYNC_DELAY_MS,
+    dueAt: null,
+  });
   // Set by `forceSseReconnect` (e.g. from `handleSend` after detecting a
   // server-restart mid-request). Any later `adoptState` call that observes a
   // `fullStateServerInstanceChanged` flip consumes it and recreates SSE. The
@@ -1928,6 +1942,7 @@ export function useAppLiveState(
     sseEpoch,
     sseRecoveryAttemptRef,
     sseRecoveryTimerRef,
+    reconnectStateResyncBackoffRef,
     startSessionHydration,
     stateDiffBaselineRevisionRef,
     stateResyncInFlightRef,

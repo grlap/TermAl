@@ -1,6 +1,7 @@
 // Worker-owned SSE: one upstream per origin, ordered fan-out, no cached state.
 // Late subscribers request a fresh HTTP snapshot through the app's revision
-// guards. Only this hub decides whether an upstream is stale enough to replace.
+// guards. Only this hub decides whether its upstream is stale enough to replace;
+// each tab's transport separately judges its own client of the hub.
 // Keep this allowlist in parity with src/api_sse.rs (covered by a wire test).
 export const LIVE_EVENT_TYPES = [
   "state",
@@ -8,7 +9,15 @@ export const LIVE_EVENT_TYPES = [
   "delta",
   "lagged",
   "workspaceFilesChanged",
+  // Sent every 15 s by the server; carries no state. It lets a client tell a
+  // quiet stream from one that silently stopped delivering.
+  "heartbeat",
 ] as const;
+
+// A stream that has proved it sends heartbeats and then delivers nothing for
+// this long (three missed beats) is replaced. A stream from a server that
+// never sent a heartbeat (an older backend) is never judged silent.
+export const LIVE_STREAM_SILENCE_RESTART_MS = 45_000;
 
 // Every browser connection opts into `stateDiff`; other `/api/events`
 // clients (the remote hub) keep the full-`state` stream.
@@ -42,6 +51,10 @@ export function createSharedLiveEventHub(
   let source: EventSource | null = null;
   let connectingSince: number | null = null;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
+  // Upstream liveness for the current source. An OPEN EventSource behind a
+  // proxy can stay OPEN with nothing arriving; only data tells them apart.
+  let lastUpstreamEventAt = Date.now();
+  let upstreamSendsHeartbeats = false;
 
   function disconnect(port: MessagePort) {
     ports.delete(port);
@@ -79,6 +92,8 @@ export function createSharedLiveEventHub(
     // initial snapshot, so their existing revision recovery rules apply.
     if (previous) broadcast({ type: "error", readyState: 0 });
     connectingSince = Date.now();
+    lastUpstreamEventAt = Date.now();
+    upstreamSendsHeartbeats = false;
     let next: EventSource;
     try {
       next = createSource();
@@ -90,6 +105,7 @@ export function createSharedLiveEventHub(
     next.onopen = () => {
       if (source !== next) return;
       connectingSince = null;
+      lastUpstreamEventAt = Date.now();
       broadcast({ type: "open", readyState: 1 });
     };
     next.onerror = () => {
@@ -101,6 +117,8 @@ export function createSharedLiveEventHub(
     for (const eventType of LIVE_EVENT_TYPES) {
       next.addEventListener(eventType, (event) => {
         if (source !== next) return;
+        lastUpstreamEventAt = Date.now();
+        if (eventType === "heartbeat") upstreamSendsHeartbeats = true;
         broadcast({
           type: "event",
           eventType,
@@ -116,6 +134,16 @@ export function createSharedLiveEventHub(
       // postMessage to a dead peer can silently succeed. Require acknowledgments
       // and bound abandoned subscriptions even when pagehide never ran.
       heartbeat ??= setInterval(() => {
+        if (
+          source?.readyState === 1 &&
+          upstreamSendsHeartbeats &&
+          Date.now() - lastUpstreamEventAt >= LIVE_STREAM_SILENCE_RESTART_MS
+        ) {
+          // OPEN but silent past three missed heartbeats: the upstream is
+          // gone even though the socket says otherwise. Replace it; joined
+          // tabs see the reconnect and resync through their normal rules.
+          startSource();
+        }
         for (const [peerPort, peer] of ports) {
           if (Date.now() - peer.lastSeen >= SHARED_LIVE_LEASE_MS) {
             disconnect(peerPort);
