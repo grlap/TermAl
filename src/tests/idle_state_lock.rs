@@ -189,7 +189,7 @@ fn measure<T>(label: &str, action: impl FnOnce() -> T) -> (T, usize) {
 }
 
 #[test]
-fn terminal_retention_completed_history_has_linear_preparation_and_no_matches() {
+fn terminal_retention_completed_history_needs_no_preparation_or_matches() {
     let visits = |count| {
         let fixture = populated_history(count);
         let mut inner = fixture.state.inner.lock().unwrap();
@@ -201,6 +201,7 @@ fn terminal_retention_completed_history_has_linear_preparation_and_no_matches() 
         let before = inner.test_run_observations.clone();
         TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.set(0));
         TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.set(0));
+        TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.set(0));
         TEST_TEST_RUN_PROJECTION_WORK.with(|count| count.set((0, 0, 0)));
         TEST_TEST_RUN_ASSOCIATION_VISITS.with(|count| count.set(0));
         fixture
@@ -212,15 +213,16 @@ fn terminal_retention_completed_history_has_linear_preparation_and_no_matches() 
         assert_eq!(inner.test_run_observations, before);
         assert_eq!(
             preparation,
-            (1, count, count),
-            "build one linear projection per pass"
+            (0, 0, 0),
+            "completed history must not rebuild a retention projection"
         );
-        assert_eq!(
-            inspected, count,
-            "completed rows must not be scanned once per entry"
-        );
+        assert_eq!(inspected, 0, "completed rows must not be scanned");
         assert_eq!(
             TEST_TEST_RUN_ASSOCIATION_VISITS.with(|count| count.get()),
+            0
+        );
+        assert_eq!(
+            TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.get()),
             0
         );
         eprintln!(
@@ -265,12 +267,27 @@ fn terminal_retention_matches_only_the_unfinished_exact_association() {
             &before[id]
         ));
         TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.set(0));
+        TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.set(0));
+        TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.set(0));
+        TEST_TEST_RUN_PROJECTION_WORK.with(|count| count.set((0, 0, 0)));
         fixture
             .state
             .retain_test_command_artifact_terminals_locked(&mut inner);
         assert_eq!(
             TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.get()),
             1
+        );
+        assert_eq!(
+            TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.get()),
+            1
+        );
+        assert_eq!(
+            TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.get()),
+            1
+        );
+        assert_eq!(
+            TEST_TEST_RUN_PROJECTION_WORK.with(|count| count.get()),
+            (0, 0, 0)
         );
         let after = &inner.test_run_observations[id];
         assert_eq!(after.execution_id, before[id].execution_id);
@@ -310,12 +327,27 @@ fn terminal_retention_matches_only_the_unfinished_exact_association() {
                 .contains_key(id)
         );
         TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.set(0));
+        TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.set(0));
+        TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.set(0));
+        TEST_TEST_RUN_PROJECTION_WORK.with(|count| count.set((0, 0, 0)));
         fixture
             .state
             .retain_test_command_artifact_terminals_locked(&mut inner);
         assert_eq!(
             TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.get()),
             0
+        );
+        assert_eq!(
+            TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.get()),
+            0
+        );
+        assert_eq!(
+            TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.get()),
+            0
+        );
+        assert_eq!(
+            TEST_TEST_RUN_PROJECTION_WORK.with(|count| count.get()),
+            (0, 0, 0)
         );
     }
 }
