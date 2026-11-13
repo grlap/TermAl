@@ -1,6 +1,6 @@
 /* Inline details use the available pane width at every size. */
 .work-panel { display: flex; flex-direction: column; gap: 0.65rem; padding: 0.75rem; min-width: 0; overflow: auto; container-type: inline-size; }
-.message-stack.work-panel-stack { padding: 0; overflow: hidden; }
+.message-stack.work-panel-stack { display: flex; padding: 0; overflow: hidden; }
 .message-stack.work-panel-stack > .work-panel { flex: 1 1 0; min-height: 0; width: 100%; }
 .work-panel p { margin: 0; overflow-wrap: anywhere; }
 .work-results:not([hidden]) { display: contents; }
@@ -33,9 +33,10 @@
 .work-urgent-row .work-row-title { min-width: 0; }
 
 /* The selected item expands vertically in the list, including narrow panes. */
-.work-panel-body { min-width: 0; min-height: 0; flex: 1 1 auto; display: flex; }
+/* Short panes scroll the outer panel to a usable list instead of collapsing it. */
+.work-panel-body { min-width: 0; min-height: 12rem; flex: 1 1 auto; display: flex; }
 .work-item-details { min-width: 0; }
-.work-panel-list { min-width: 0; min-height: 0; flex: 1; max-height: 65vh; overflow: auto; overflow-anchor: none; display: flex; flex-direction: column; gap: 0.5rem; }
+.work-panel-list { min-width: 0; min-height: 0; flex: 1; overflow: auto; overflow-anchor: none; display: flex; flex-direction: column; gap: 0.5rem; }
 .work-panel-list > * { flex: none; }
 .work-paging { flex: none; padding: 0.5rem; color: var(--muted); font-size: 0.85rem; }
 .work-tree ul[role="tree"] > li.work-node { margin-top: 0; }

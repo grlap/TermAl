@@ -24,6 +24,16 @@ export function WorkItemDetails({ projectId, workRef, readerId, onClose, autoFoc
     panel.current?.scrollIntoView?.({ block: "nearest" });
   }, [projectId, workRef, readerId, autoFocus]);
 
+  // The initial scroll only sees the loading header. Reveal the loaded body
+  // if the user is still reading this panel, without stealing focus or
+  // scrolling again when older notes are appended.
+  const hasDetails = data !== null;
+  useEffect(() => {
+    if (hasDetails && document.activeElement === panel.current) {
+      panel.current?.scrollIntoView?.({ block: "nearest" });
+    }
+  }, [hasDetails]);
+
   async function load(controller: AbortController, more: boolean) {
     if (locked.current || controller.signal.aborted) return;
     const previous = latest.current;
