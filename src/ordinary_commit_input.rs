@@ -153,6 +153,7 @@ fn committed_source_submodules(git: &ReviewFreezeGit) -> Result<()> {
             binary: git.binary.clone(),
             deadline: git.deadline,
             timings: git.timings.clone(),
+            warning: git.warning.clone(),
         };
         let filters = child.run(
             &["config", "--null", "--get-regexp", r"^filter\..*\.(clean|smudge|process)$"],

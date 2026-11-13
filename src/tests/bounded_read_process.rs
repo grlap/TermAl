@@ -278,3 +278,122 @@ fn bounded_read_windows_deadline_terminates_launcher_and_ready_descendant() {
     assert!(error.to_string().contains("deadline"), "{error:#}");
     assert_windows_fixture_descendant_exited(&marker);
 }
+
+// A virtual receiver advances only the supplied clock and releases its value
+// at a chosen time. The production wait/deadline loop still decides whether
+// to keep waiting, warn, return the value or report the existing timeout.
+struct ReadWaitClock {
+    started: std::time::Instant,
+    now: std::cell::Cell<std::time::Instant>,
+    warning: Arc<Mutex<BoundedReadWarning>>,
+    notices: std::cell::RefCell<Vec<Duration>>,
+}
+
+impl ReadWaitClock {
+    fn new() -> Self {
+        let started = std::time::Instant::now();
+        Self {
+            started,
+            now: std::cell::Cell::new(started),
+            warning: BoundedReadWarning::shared(started),
+            notices: std::cell::RefCell::new(Vec::new()),
+        }
+    }
+
+    fn receive(
+        &self,
+        deadline: std::time::Instant,
+        available_after: Duration,
+        value: &'static [u8],
+    ) -> Result<&'static [u8]> {
+        let available = self.started + available_after;
+        receive_bounded_read_with(
+            deadline,
+            || {
+                let now = self.now.get();
+                let mut warning = self.warning.lock().unwrap();
+                if let Some(elapsed) = warning.observe(now) {
+                    self.notices.borrow_mut().push(elapsed);
+                }
+                Ok((now, warning.wait(now, deadline)))
+            },
+            |wait| {
+                let now = self.now.get();
+                let until = now + wait;
+                if available <= until {
+                    self.now.set(now.max(available));
+                    Ok(value)
+                } else {
+                    self.now.set(until);
+                    Err(mpsc::RecvTimeoutError::Timeout)
+                }
+            },
+        )
+    }
+
+    fn pipe_deadline(&self, operation_deadline: std::time::Instant) -> std::time::Instant {
+        bounded_read_pipe_deadline(operation_deadline, self.now.get())
+    }
+}
+
+#[test]
+fn bounded_read_slow_output_succeeds_with_one_non_aborting_warning() {
+    let clock = ReadWaitClock::new();
+    let deadline = clock.started + Duration::from_secs(60);
+
+    // An initial command can complete just before the warning boundary.
+    assert_eq!(
+        clock
+            .receive(deadline, Duration::from_millis(9_999), b"header")
+            .unwrap(),
+        b"header",
+    );
+    assert!(clock.notices.borrow().is_empty());
+
+    // Later commands and both pipes share this diagnostic and deadline.
+    let pipe_deadline = clock.pipe_deadline(deadline);
+    assert_eq!(
+        clock
+            .receive(pipe_deadline, Duration::from_secs(50), b"payload")
+            .unwrap(),
+        b"payload",
+    );
+    assert_eq!(&*clock.notices.borrow(), &[Duration::from_secs(10)]);
+    assert_eq!(clock.now.get(), clock.started + Duration::from_secs(50));
+    assert_eq!(
+        clock
+            .receive(pipe_deadline, Duration::from_secs(59), b"diagnostics")
+            .unwrap(),
+        b"diagnostics",
+    );
+    assert_eq!(&*clock.notices.borrow(), &[Duration::from_secs(10)]);
+}
+
+#[test]
+fn bounded_read_late_pipe_keeps_the_original_deadline_and_timeout_category() {
+    let clock = ReadWaitClock::new();
+    let deadline = clock.started + Duration::from_secs(60);
+    assert_eq!(
+        clock
+            .receive(deadline, Duration::from_secs(50), b"stdout")
+            .unwrap(),
+        b"stdout",
+    );
+
+    // Starting stderr collection cannot give a late value a fresh minute.
+    let error = clock
+        .receive(
+            clock.pipe_deadline(deadline),
+            Duration::from_secs(61),
+            b"too late",
+        )
+        .unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<io::Error>().map(io::Error::kind),
+        Some(io::ErrorKind::TimedOut),
+    );
+    assert_eq!(clock.now.get(), deadline);
+    assert_eq!(&*clock.notices.borrow(), &[Duration::from_secs(10)]);
+    let classified = BoundedReadObservation::new().failure(error);
+    assert_eq!(identity_error_code(&classified), "deadline_exceeded");
+}
