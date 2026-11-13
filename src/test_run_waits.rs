@@ -902,7 +902,7 @@ impl AppState {
         let spawned = std::thread::Builder::new()
             .name("termal-test-runs-forced".to_owned())
             .spawn(move || {
-                state.refresh_test_runs();
+                state.refresh_test_runs_from("wait-forced");
                 let _ = done_tx.send(());
             });
         if spawned.is_ok() {

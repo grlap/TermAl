@@ -123,13 +123,32 @@ describes its own phase-point limit. In-flight traces may lack later marks;
 an empty response does not prove that no rescan ran. A host restart changes
 `serverInstanceId` and resets the ring and its monotonic timing epoch.
 
-For a discovered rescan, `reads_done` to `commit_acquired` measures the wait
-to acquire the commit-section StateInner guard. `commit_acquired` to
-`published` measures the instrumented guarded span, not the exact full lock
-hold: the guard is released after that mark. Missing or truncated marks cannot
-establish a duration or prove absence of a long hold. Discovery reads only the
-existing trace ring; it grants no verification and changes no admission,
-state authority, persistence or test execution.
+For a discovered rescan, `commit_requested` to `commit_acquired` covers the
+final StateInner acquisition wait. `commit_acquired` to `commit_released`
+covers the entire final guard, including the `any_running` traversal, local
+destruction and guard release. This is a conservative span: release-side
+diagnostic bookkeeping can finish after the mutex itself is unlocked.
+`published` is an intermediate point, not the end of the guard. Separate marks
+cover validation, optional fallback projection, unresolved identity retention,
+the previous-index copy, diff/alias work, delta publication, terminal retention,
+cards, compaction and the final tail. Root and projection-cut guards have their
+own requested/acquired/released points (`roots_taken` and
+`projection_cut_taken` are their release points).
+
+Held marks use a fixed stack buffer and retain their original monotonic
+timestamps when appended to the existing ring after unlock. An in-flight
+response can therefore lack a whole buffered section. Missing, evicted or
+truncated marks cannot establish a duration or prove absence of a long hold.
+The optional `rescan` object records the actual trigger (`initial`, `active`,
+`idle-backstop`, `directory-change`, `command-artifact`, `wait-forced`, or
+`direct`), available population and change counts, and observed persistence
+dispatches. `publishedEvents` counts the scanner/card publication callback,
+not nested helper or state-snapshot publications. Persistence counters observe
+returned metadata, retained identity/proof and card dispatches; they do not
+infer durability or dispatch from worker liveness. `unobservedHelpers` counts
+other invoked helpers, whose nested persistence outcomes remain unknown.
+Discovery reads only the existing trace ring; it grants no verification and
+changes no admission, state authority, persistence or test execution.
 
 The production launcher requires this versioned ACK and an exact durable run
 query before admitted source capture, preflight, Cargo bootstrap or any stage.

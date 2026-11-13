@@ -4,6 +4,148 @@
 use super::*;
 
 #[test]
+fn buffered_phases_keep_capture_times_without_acquiring_the_ring() {
+    let ring = TestRunPhaseTraces::default();
+    let epoch = std::time::Instant::now() - Duration::from_secs(1);
+    ring.0.lock().unwrap().epoch = epoch;
+    let trace = ring.begin(
+        "rescan",
+        None,
+        "buffered",
+        epoch + Duration::from_micros(10),
+    );
+    let mut buffer = trace.buffer();
+    {
+        // A ring owner can coexist with recording; no ring operation or
+        // allocation is required until the caller explicitly flushes.
+        let held_ring = ring.0.lock().unwrap();
+        buffer.mark_at("acquired", epoch + Duration::from_micros(20));
+        buffer.mark_at("released", epoch + Duration::from_micros(70));
+        assert_eq!(held_ring.entries[0].phases.len(), 1);
+    }
+    trace.flush(&mut buffer, None);
+    let selected = ring.selected(None, Some("buffered"));
+    let times: Vec<_> = selected[0]
+        .phases
+        .iter()
+        .map(|point| point.monotonic_micros)
+        .collect();
+    assert_eq!(times, [10, 20, 70]);
+    assert_eq!(
+        times[2] - times[1],
+        50,
+        "flush time must not replace the held interval"
+    );
+    assert_eq!(buffer.len, 0);
+}
+
+#[test]
+fn buffered_phase_overflow_and_eviction_remain_explicit() {
+    let ring = TestRunPhaseTraces::default();
+    let trace = ring.begin("rescan", None, "overflow", std::time::Instant::now());
+    let mut buffer = trace.buffer();
+    for _ in 0..TEST_RUN_TRACE_PHASES + 1 {
+        buffer.mark("work");
+    }
+    assert!(buffer.truncated);
+    trace.flush(&mut buffer, None);
+    drop(trace);
+    let selected = ring.selected(None, Some("overflow"));
+    assert!(selected[0].completed && selected[0].truncated);
+    assert_eq!(selected[0].phases.len(), TEST_RUN_TRACE_PHASES);
+    assert_eq!(selected[0].phases.last().unwrap().phase, "finished");
+    let evicted = ring.begin("rescan", None, "evicted-buffer", std::time::Instant::now());
+    let mut pending = evicted.buffer();
+    pending.mark("captured_before_eviction");
+    for _ in 0..TEST_RUN_TRACE_CAPACITY {
+        drop(ring.begin(
+            "registration",
+            None,
+            "replacement",
+            std::time::Instant::now(),
+        ));
+    }
+    evicted.flush(&mut pending, Some(&TestRunRescanTrace::default()));
+    drop(evicted);
+    assert!(ring.selected(None, Some("evicted-buffer")).is_empty());
+    assert_eq!(
+        ring.0.lock().unwrap().entries.len(),
+        TEST_RUN_TRACE_CAPACITY
+    );
+}
+
+#[test]
+fn refresh_flushes_every_buffer_after_unlock_and_includes_the_final_tail() {
+    let state = test_app_state();
+    let checks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    TEST_RUN_PHASE_FLUSH_CHECK.with(|slot| {
+        let state = state.clone();
+        let checks = checks.clone();
+        *slot.borrow_mut() = Some(Box::new(move || {
+            assert!(state.inner.is_not_held_by_current_thread_for_test());
+            let _available_to_another_client = state.inner.try_lock_now().unwrap();
+            checks.fetch_add(1, Ordering::Relaxed);
+        }));
+    });
+    assert!(!state.refresh_test_runs_from("command-artifact"));
+    TEST_RUN_PHASE_FLUSH_CHECK.with(|slot| *slot.borrow_mut() = None);
+    assert_eq!(checks.load(Ordering::Relaxed), 3);
+    let (traces, _) = state.test_run_phase_traces.recent_rescans(1);
+    let trace = &traces[0];
+    assert!(trace.completed && !trace.truncated);
+    assert_eq!(trace.rescan.as_ref().unwrap().origin, "command-artifact");
+    let position = |phase| {
+        trace
+            .phases
+            .iter()
+            .position(|point| point.phase == phase)
+            .unwrap()
+    };
+    assert!(position("commit_requested") < position("commit_acquired"));
+    assert!(position("validation_done") < position("fallback_done"));
+    assert!(position("published") < position("tail_done"));
+    assert!(position("tail_done") < position("commit_released"));
+    assert!(position("commit_released") < position("finished"));
+    assert!(
+        trace
+            .phases
+            .windows(2)
+            .all(|points| points[0].monotonic_micros <= points[1].monotonic_micros)
+    );
+}
+
+#[test]
+fn rescan_origin_preserves_the_existing_short_circuit_and_directory_read_count() {
+    for (active, since, changed, expected, reads) in [
+        (true, None, true, Some("active"), 0),
+        (false, None, true, Some("initial"), 0),
+        (
+            false,
+            Some(TEST_RUN_IDLE_RESCAN_INTERVAL),
+            true,
+            Some("idle-backstop"),
+            0,
+        ),
+        (
+            false,
+            Some(Duration::ZERO),
+            true,
+            Some("directory-change"),
+            1,
+        ),
+        (false, Some(Duration::ZERO), false, None, 1),
+    ] {
+        let actual_reads = std::cell::Cell::new(0);
+        let actual = test_run_rescan_origin(active, since, || {
+            actual_reads.set(actual_reads.get() + 1);
+            changed
+        });
+        assert_eq!(actual, expected);
+        assert_eq!(actual_reads.get(), reads);
+    }
+}
+
+#[test]
 fn registration_target_accepts_only_the_exact_canonical_git_parent_chains() {
     let root = TestTempRoot::create("registration-target");
     let common = root.join("git");

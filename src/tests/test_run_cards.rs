@@ -268,6 +268,58 @@ fn an_owned_run_gets_one_card_updated_in_place() {
 }
 
 #[test]
+fn refresh_trace_reports_actual_card_persistence_dispatch_and_failure() {
+    for mode in ["synchronous", "queued", "failed"] {
+        let mut fixture = CardFixture::new(&format!("trace-{mode}"));
+        let (tx, rx) = mpsc::channel();
+        let invalid_path = TestTempRoot::create("trace-persist-failure");
+        if mode == "queued" {
+            fixture.state.persist_tx = tx;
+        } else if mode == "failed" {
+            // A directory cannot be opened as the SQLite state file.
+            fixture.state.persistence_path = Arc::new(invalid_path.to_path_buf());
+        }
+        fixture.write(
+            "test-dispatch",
+            fixture.request(&after_epoch()),
+            Some(running(7, "rust-tests")),
+        );
+        fixture.refresh(&[7]);
+        let (traces, _) = fixture.state.test_run_phase_traces.recent_rescans(1);
+        let work = traces[0].rescan.as_ref().unwrap();
+        assert_eq!(work.roots, 1);
+        assert_eq!(work.scanned, 1);
+        assert_eq!(work.projected, 1);
+        assert!(work.published_events > 0);
+        let persistence = &work.persistence;
+        match mode {
+            "synchronous" => {
+                assert!(persistence.synchronous > 0);
+                assert_eq!(persistence.background_queued, 0);
+                assert_eq!(persistence.failed, 0);
+                assert_eq!(fixture.cards().len(), 1);
+            }
+            "queued" => {
+                assert!(persistence.background_queued > 0);
+                assert_eq!(persistence.synchronous, 0);
+                assert_eq!(persistence.failed, 0);
+                assert!(
+                    rx.try_iter().next().is_some(),
+                    "a persist request really was queued"
+                );
+                assert_eq!(fixture.cards().len(), 1);
+            }
+            "failed" => {
+                assert!(persistence.failed > 0);
+                assert_eq!(persistence.background_queued, 0);
+                assert_eq!(persistence.synchronous, 0);
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[test]
 fn only_an_owned_run_started_after_the_epoch_gets_a_card() {
     let fixture = CardFixture::new("eligibility");
     let before_epoch = iso(chrono::Utc::now() - chrono::TimeDelta::hours(1));

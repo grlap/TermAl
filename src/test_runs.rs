@@ -433,9 +433,25 @@ fn test_run_rescan_due(
     since_last_rescan: Option<Duration>,
     dirs_changed: impl FnOnce() -> bool,
 ) -> bool {
-    active
-        || since_last_rescan.is_none_or(|since| since >= TEST_RUN_IDLE_RESCAN_INTERVAL)
-        || dirs_changed()
+    test_run_rescan_origin(active, since_last_rescan, dirs_changed).is_some()
+}
+
+fn test_run_rescan_origin(
+    active: bool,
+    since_last_rescan: Option<Duration>,
+    dirs_changed: impl FnOnce() -> bool,
+) -> Option<&'static str> {
+    if active {
+        Some("active")
+    } else if since_last_rescan.is_none() {
+        Some("initial")
+    } else if since_last_rescan.is_some_and(|since| since >= TEST_RUN_IDLE_RESCAN_INTERVAL) {
+        Some("idle-backstop")
+    } else if dirs_changed() {
+        Some("directory-change")
+    } else {
+        None
+    }
 }
 
 /// The session id `reference` names: an id of a visible session, or the name
@@ -616,9 +632,16 @@ impl AppState {
     /// changed. Returns whether any indexed run is `running`, which sets the
     /// next rescan's interval.
     fn refresh_test_runs(&self) -> bool {
-        self.refresh_test_runs_with(&test_run_process_writer_may_be_alive, &|inner, event| {
-            self.publish_delta_locked(inner, event.clone())
-        })
+        self.refresh_test_runs_from("direct")
+    }
+
+    fn refresh_test_runs_from(&self, origin: &'static str) -> bool {
+        self.refresh_test_runs_at_from(
+            chrono::Utc::now(),
+            origin,
+            &test_run_process_writer_may_be_alive,
+            &|inner, event| self.publish_delta_locked(inner, event.clone()),
+        )
     }
 
     /// The rescan with process liveness and delta publication injected, so
@@ -642,11 +665,36 @@ impl AppState {
         writer_may_be_alive: &TestRunLiveness,
         publish: &dyn Fn(&StateInner, &DeltaEvent),
     ) -> bool {
-        let trace = self.test_run_phase_traces.begin("rescan", None,
-            &Uuid::new_v4().to_string(), std::time::Instant::now());
+        self.refresh_test_runs_at_from(now, "direct", writer_may_be_alive, publish)
+    }
+
+    fn refresh_test_runs_at_from(
+        &self,
+        now: chrono::DateTime<chrono::Utc>,
+        origin: &'static str,
+        writer_may_be_alive: &TestRunLiveness,
+        publish: &dyn Fn(&StateInner, &DeltaEvent),
+    ) -> bool {
+        let trace = self.test_run_phase_traces.begin(
+            "rescan",
+            None,
+            &Uuid::new_v4().to_string(),
+            std::time::Instant::now(),
+        );
+        let mut points = trace.buffer();
+        let mut work = TestRunRescanTrace {
+            origin,
+            ..Default::default()
+        };
+        let published_events = std::cell::Cell::new(0usize);
+        let publish = &|inner: &StateInner, event: &DeltaEvent| {
+            published_events.set(published_events.get() + 1);
+            publish(inner, event);
+        };
         // One rescan at a time, from its first read to its last commit. A
         // rescan that panicked leaves nothing half-done behind the lock, so a
         // poisoned lock is still taken.
+        points.mark("serialization_requested");
         let rescan = self
             .inner
             .lock()
@@ -657,15 +705,26 @@ impl AppState {
         let _serialized = rescan
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        trace.mark("rescan_acquired");
+        points.mark("rescan_acquired");
         // Project roots and the previous parses, taken under the lock; all
         // disk reads happen without it. The parse cache is moved out, not
         // copied: rescans are serialized, so only this one uses it.
         // The card map and the published detail versions are copied too: they
         // decide the retention exemption and which failure excerpts to read
         // before the lock.
-        let (roots, mut previous, card_refs, _retained_runs, published_versions, reevaluate_cards, compacted_dirs, mut compact_stamps) = {
+        points.mark("roots_requested");
+        let (
+            roots,
+            mut previous,
+            card_refs,
+            _retained_runs,
+            published_versions,
+            reevaluate_cards,
+            compacted_dirs,
+            mut compact_stamps,
+        ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
+            points.mark("roots_acquired");
             let roots: Vec<(String, String)> = inner
                 .projects
                 .iter()
@@ -701,9 +760,19 @@ impl AppState {
                         .flat_map(|wait| wait.run_ids.iter().cloned()),
                 )
                 .chain(inner.test_run_registrations.keys().cloned())
-                .chain(inner.sessions.iter().flat_map(|record| &record.engram.carried_checks)
-                    .filter_map(|carried| carried.run_directory.as_ref())
-                    .filter_map(|directory| directory.file_name().and_then(|name| name.to_str()).map(str::to_owned)))
+                .chain(
+                    inner
+                        .sessions
+                        .iter()
+                        .flat_map(|record| &record.engram.carried_checks)
+                        .filter_map(|carried| carried.run_directory.as_ref())
+                        .filter_map(|directory| {
+                            directory
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .map(str::to_owned)
+                        }),
+                )
                 .collect();
             (
                 roots,
@@ -714,18 +783,25 @@ impl AppState {
                 inner.test_runs.cards_enabled && inner.test_runs.cards_reevaluate,
                 {
                     let indexed = test_run_indexed_ids(&inner.test_runs);
-                    inner.test_run_compacted.values().filter(|row| {
-                        row.compacted
-                            && test_run_compact_is_installed_with(&*inner, row, |id| indexed.contains(id))
-                    })
-                    .filter(|row| !row.summary.run_dir.is_empty())
-                    .map(|row| (test_run_path_key(&row.summary.run_dir), row.clone()))
-                    .collect::<HashMap<_, _>>()
+                    inner
+                        .test_run_compacted
+                        .values()
+                        .filter(|row| {
+                            row.compacted
+                                && test_run_compact_is_installed_with(&*inner, row, |id| {
+                                    indexed.contains(id)
+                                })
+                        })
+                        .filter(|row| !row.summary.run_dir.is_empty())
+                        .map(|row| (test_run_path_key(&row.summary.run_dir), row.clone()))
+                        .collect::<HashMap<_, _>>()
                 },
                 inner.test_runs.compaction_stamps.clone(),
             )
         };
-        trace.mark("roots_taken");
+        points.mark("roots_taken");
+        work.roots = roots.len();
+        trace.flush(&mut points, Some(&work));
         #[cfg(test)]
         if let Some(ready) = TEST_HISTORY_SCAN_READY.with(|slot| slot.borrow_mut().take()) {
             // StateInner is released; no SQLite connection is held here.
@@ -741,9 +817,9 @@ impl AppState {
             // stops supplying the shared repository's scan root.
             let common_key = test_runs_git_common_dir(FsPath::new(&root))
                 .map(|common| fs::canonicalize(&common).unwrap_or(common));
-            let common = common_key.as_ref().map(|canonical| {
-                normalize_user_facing_path(canonical)
-            });
+            let common = common_key
+                .as_ref()
+                .map(|canonical| normalize_user_facing_path(canonical));
             if let (Some(common), Some(key)) = (&common, &common_key) {
                 common_dirs
                     .entry(key.clone())
@@ -757,18 +833,33 @@ impl AppState {
         let mut tracked_dirs = Vec::new();
         for (common_key, common_dir) in &common_dirs {
             for run_dir in test_runs_directories(common_dir, &mut tracked_dirs) {
-                if let Some(compacted) = compacted_dirs.get(&test_run_path_key(&test_run_display_path(&run_dir))) {
+                if let Some(compacted) =
+                    compacted_dirs.get(&test_run_path_key(&test_run_display_path(&run_dir)))
+                {
                     let request_stamp = test_run_file_stamp(&run_dir.join("request.json"));
                     let results_stamp = test_run_file_stamp(&run_dir.join("results.json"));
-                    if compact_stamps.get(&compacted.summary.run_id).is_some_and(|(request, results, _)| *request == request_stamp && *results == results_stamp) {
+                    if compact_stamps.get(&compacted.summary.run_id).is_some_and(
+                        |(request, results, _)| {
+                            *request == request_stamp && *results == results_stamp
+                        },
+                    ) {
                         continue;
                     }
-                    if request_stamp == compacted.request_stamp && results_stamp == compacted.results_stamp {
-                        compact_stamps.insert(compacted.summary.run_id.clone(), (request_stamp, results_stamp, false));
+                    if request_stamp == compacted.request_stamp
+                        && results_stamp == compacted.results_stamp
+                    {
+                        compact_stamps.insert(
+                            compacted.summary.run_id.clone(),
+                            (request_stamp, results_stamp, false),
+                        );
                         continue;
                     }
-                    let conflict = TestRunDisk::read(&run_dir, None).is_none_or(|disk| !test_run_compact_artifact_matches(compacted, &disk));
-                    compact_stamps.insert(compacted.summary.run_id.clone(), (request_stamp, results_stamp, conflict));
+                    let conflict = TestRunDisk::read(&run_dir, None)
+                        .is_none_or(|disk| !test_run_compact_artifact_matches(compacted, &disk));
+                    compact_stamps.insert(
+                        compacted.summary.run_id.clone(),
+                        (request_stamp, results_stamp, conflict),
+                    );
                     // A retained identity never returns as a fresh discovery.
                     // Contradictions surface on its original minimal record.
                     continue;
@@ -857,7 +948,12 @@ impl AppState {
                 let project_id =
                     test_run_project_id(&test_run_path_key(&disk.worktree), &projects, common_key);
                 scanned.push(TestRunScanned {
-                    unknown_reason: test_run_unknown_reason(&disk, state, read_after_check_failed, now),
+                    unknown_reason: test_run_unknown_reason(
+                        &disk,
+                        state,
+                        read_after_check_failed,
+                        now,
+                    ),
                     disk,
                     state,
                     project_id,
@@ -879,7 +975,11 @@ impl AppState {
         let failures: HashMap<String, TestRunCardFailureRead> = scanned
             .iter()
             .filter_map(|run| {
-                if compacted_dirs.contains_key(&test_run_path_key(&test_run_display_path(&run.disk.run_dir))) { return None; }
+                if compacted_dirs.contains_key(&test_run_path_key(&test_run_display_path(
+                    &run.disk.run_dir,
+                ))) {
+                    return None;
+                }
                 let results = run.disk.results.as_ref()?;
                 if results.terminal_state != Some(TestRunState::Failed) {
                     return None;
@@ -896,36 +996,62 @@ impl AppState {
                                     != Some(digest))
                     }
                 };
-                needed.then(|| (run.disk.run_id.clone(), test_run_card_failure(&run.disk.run_dir)))
+                needed.then(|| {
+                    (
+                        run.disk.run_id.clone(),
+                        test_run_card_failure(&run.disk.run_dir),
+                    )
+                })
             })
             .collect();
         // Each delta is published under the lock that allocated its revision,
         // as every commit_delta_locked caller must: published after unlock,
         // another thread's later revision could reach clients first, which
         // they treat as a gap and answer with a full resync.
-        let unavailable: HashSet<_> = compacted_dirs.values().filter(|row| {
-            let path = FsPath::new(&row.summary.run_dir);
-            test_run_file_stamp(&path.join("request.json")).is_none()
-                || test_run_file_stamp(&path.join("results.json")).is_none()
-        }).map(|row| row.summary.run_id.clone()).collect();
-        trace.mark("reads_done");
+        let unavailable: HashSet<_> = compacted_dirs
+            .values()
+            .filter(|row| {
+                let path = FsPath::new(&row.summary.run_dir);
+                test_run_file_stamp(&path.join("request.json")).is_none()
+                    || test_run_file_stamp(&path.join("results.json")).is_none()
+            })
+            .map(|row| row.summary.run_id.clone())
+            .collect();
+        points.mark("reads_done");
+        work.scanned = scanned.len();
         let projection_scope = TestRunProjectionScope::new(&scanned);
+        points.mark("projection_cut_requested");
         let projection_cut = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
+            points.mark("projection_cut_acquired");
             inner.test_runs.compaction_stamps = compact_stamps;
             let mut compact_metadata_changed = false;
-            let compact_updates: HashMap<_, _> = inner.test_runs.compaction_stamps.iter()
-                .map(|(id, (_, _, conflict))| (id.clone(), *conflict)).collect();
+            let compact_updates: HashMap<_, _> = inner
+                .test_runs
+                .compaction_stamps
+                .iter()
+                .map(|(id, (_, _, conflict))| (id.clone(), *conflict))
+                .collect();
             // Only these two flags change here; neither is an index key.
-            let flag_changes: Vec<(String, bool, Option<bool>)> = inner.test_run_compacted.iter()
+            let flag_changes: Vec<(String, bool, Option<bool>)> = inner
+                .test_run_compacted
+                .iter()
                 .filter_map(|(id, compacted)| {
-                    let unavailable_now = (compacted.compacted && !compacted.summary.run_dir.is_empty()
+                    let unavailable_now = (compacted.compacted
+                        && !compacted.summary.run_dir.is_empty()
                         && compacted.artifact_unavailable != unavailable.contains(id))
-                        .then(|| unavailable.contains(id));
-                    let conflict_now = compact_updates.get(id)
-                        .filter(|conflict| compacted.artifact_conflict != **conflict).copied();
-                    (unavailable_now.is_some() || conflict_now.is_some())
-                        .then(|| (id.clone(), unavailable_now.unwrap_or(compacted.artifact_unavailable), conflict_now))
+                    .then(|| unavailable.contains(id));
+                    let conflict_now = compact_updates
+                        .get(id)
+                        .filter(|conflict| compacted.artifact_conflict != **conflict)
+                        .copied();
+                    (unavailable_now.is_some() || conflict_now.is_some()).then(|| {
+                        (
+                            id.clone(),
+                            unavailable_now.unwrap_or(compacted.artifact_unavailable),
+                            conflict_now,
+                        )
+                    })
                 })
                 .collect();
             for (id, artifact_unavailable, conflict) in flag_changes {
@@ -938,218 +1064,290 @@ impl AppState {
                 compact_metadata_changed = true;
             }
             if compact_metadata_changed {
-                let _ = self.commit_locked_with_persist_dispatch(&mut inner);
+                let result = self.commit_locked_with_persist_dispatch(&mut inner);
+                work.persistence
+                    .observe(result.map(|(_, dispatch)| dispatch).map_err(|_| ()));
             }
             inner.test_runs.parsed = parsed;
             inner.test_runs.tracked_dirs = tracked_dirs;
             TestRunProjectionCut::capture(&inner, projection_scope)
         };
-        trace.mark("projection_cut_taken");
+        points.mark("projection_cut_taken");
         let prepared = test_run_project_entries(&projection_cut, &scanned);
-        trace.mark("projection_ready");
+        points.mark("projection_ready");
+        trace.flush(&mut points, Some(&work));
         #[cfg(test)]
         if let Some(ready) = TEST_RUN_PROJECTION_PREPARED.with(|slot| slot.borrow_mut().take()) {
             ready();
         }
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        trace.mark("commit_acquired");
-        // Like the state broadcaster's immutable cut, preparation never owns
-        // publication. Validate actual inputs, including unstamped changes,
-        // at the locked commit. A changed cut uses the existing live projector
-        // once; it neither retries nor publishes stale authority/evidence.
-        let entries = if projection_cut.matches(&inner) {
-            trace.mark("projection_cut_reused");
-            prepared
-        } else {
-            trace.mark("projection_cut_changed");
-            #[cfg(test)]
-            TEST_RUN_PROJECTION_FALLBACKS.with(|count| count.set(count.get() + 1));
-            test_run_project_entries(&inner, &scanned)
-        };
-        for entry in &entries {
-            if entry.summary.registration.restart_would_void_evidence == Some(false)
-                || !entry.summary.registration.superseded_run_ids.is_empty()
-                || inner
-                    .test_run_registrations
-                    .contains_key(&entry.summary.run_id)
-            {
-                continue;
-            }
-            let disk = &entry.disk;
-            let mut retained = TestRunCompacted {
-                compacted: false,
-                request_identity: disk.request_identity.clone(),
-                summary: test_run_minimal_summary(entry.summary.clone()),
-                registration: None,
-                observations: Vec::new(),
-                request_stamp: disk.request_stamp,
-                results_stamp: disk.results_stamp,
-                reason: "Unresolved discovered artifact identity retained across artifact loss."
-                    .to_owned(),
-                artifact_conflict: false,
-                artifact_unavailable: false,
+        points.mark("commit_requested");
+        let running = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            points.mark("commit_acquired");
+            work.indexed_before = inner.test_runs.entries.len();
+            work.sessions = inner.sessions.len();
+            work.registrations = inner.test_run_registrations.len();
+            work.observations = inner.test_run_observations.len();
+            work.compacted = inner.test_run_compacted.len();
+            // Like the state broadcaster's immutable cut, preparation never owns
+            // publication. Validate actual inputs, including unstamped changes,
+            // at the locked commit. A changed cut uses the existing live projector
+            // once; it neither retries nor publishes stale authority/evidence.
+            let matches = projection_cut.matches(&inner);
+            points.mark("validation_done");
+            let entries = if matches {
+                points.mark("projection_cut_reused");
+                prepared
+            } else {
+                points.mark("projection_cut_changed");
+                #[cfg(test)]
+                TEST_RUN_PROJECTION_FALLBACKS.with(|count| count.set(count.get() + 1));
+                test_run_project_entries(&inner, &scanned)
             };
-            let id = retained.summary.run_id.clone();
-            if let Some(old) = inner.test_run_compacted.get(&id) {
-                if old.request_identity != retained.request_identity
-                    || (matches!(
+            points.mark("fallback_done");
+            work.projected = entries.len();
+            for entry in &entries {
+                if entry.summary.registration.restart_would_void_evidence == Some(false)
+                    || !entry.summary.registration.superseded_run_ids.is_empty()
+                    || inner
+                        .test_run_registrations
+                        .contains_key(&entry.summary.run_id)
+                {
+                    continue;
+                }
+                let disk = &entry.disk;
+                let mut retained = TestRunCompacted {
+                    compacted: false,
+                    request_identity: disk.request_identity.clone(),
+                    summary: test_run_minimal_summary(entry.summary.clone()),
+                    registration: None,
+                    observations: Vec::new(),
+                    request_stamp: disk.request_stamp,
+                    results_stamp: disk.results_stamp,
+                    reason:
+                        "Unresolved discovered artifact identity retained across artifact loss."
+                            .to_owned(),
+                    artifact_conflict: false,
+                    artifact_unavailable: false,
+                };
+                let id = retained.summary.run_id.clone();
+                if let Some(old) = inner.test_run_compacted.get(&id) {
+                    if old.request_identity != retained.request_identity
+                        || (matches!(
+                            old.summary.state,
+                            TestRunState::Passed | TestRunState::Failed
+                        ) && old.summary.detail_version != retained.summary.detail_version)
+                    {
+                        retained = old.clone();
+                        retained.artifact_conflict = true;
+                    } else if !matches!(
                         old.summary.state,
                         TestRunState::Passed | TestRunState::Failed
-                    ) && old.summary.detail_version != retained.summary.detail_version)
-                {
-                    retained = old.clone();
-                    retained.artifact_conflict = true;
-                } else if !matches!(
-                    old.summary.state,
-                    TestRunState::Passed | TestRunState::Failed
-                ) && !matches!(
-                    retained.summary.state,
-                    TestRunState::Passed | TestRunState::Failed
-                ) {
-                    // Stage progress belongs to the live artifact index. The
-                    // retained identity changes only at a terminal boundary.
-                    retained = old.clone();
+                    ) && !matches!(
+                        retained.summary.state,
+                        TestRunState::Passed | TestRunState::Failed
+                    ) {
+                        // Stage progress belongs to the live artifact index. The
+                        // retained identity changes only at a terminal boundary.
+                        retained = old.clone();
+                    }
+                }
+                if inner.test_run_compacted.get(&id) != Some(&retained) {
+                    inner
+                        .test_run_compacted
+                        .insert(id.clone(), retained.clone());
+                    let result = self.persist_test_run_compacted_locked(&mut inner, retained);
+                    work.persistence.observe_compaction(&result);
                 }
             }
-            if inner.test_run_compacted.get(&id) != Some(&retained) {
-                inner
-                    .test_run_compacted
-                    .insert(id.clone(), retained.clone());
-                let _ = self.persist_test_run_compacted_locked(&mut inner, retained);
-            }
-        }
-        let before: HashMap<String, TestRunEntry> = inner
-            .test_runs
-            .entries
-            .iter()
-            .map(|entry| (entry.summary.run_id.clone(), entry.clone()))
-            .collect();
-        let removed = test_run_removed_ids(
-            before.keys().map(String::as_str),
-            entries.iter().map(|entry| entry.summary.run_id.as_str()),
-        );
-        let changed: Vec<TestRunSummary> = entries
-            .iter()
-            // The summary carries the detail version, so a changed summary
-            // is exactly what clients need to hear about.
-            .filter(|entry| {
-                before
-                    .get(&entry.summary.run_id)
-                    .is_none_or(|old| old.summary != entry.summary)
-            })
-            .map(|entry| entry.summary.clone())
-            .collect();
-        // An artifact that disappears or loses its exact correlation must
-        // restore its original observation row to SSE clients as well as API
-        // readers. This does not remove or recreate the persisted execution.
-        let merged: HashSet<&str> = entries.iter().flat_map(|entry| &entry.summary.registration.superseded_run_ids)
-            .map(String::as_str).collect();
-        let restored: std::collections::BTreeSet<&str> = before.values()
-            .flat_map(|entry| &entry.summary.registration.superseded_run_ids)
-            .map(String::as_str).filter(|id| !merged.contains(id)).collect();
-        let restored: Vec<TestRunSummary> = restored.into_iter().filter_map(|id| inner.test_run_observations.get(id))
-            .map(|row| test_run_observation_summary(&inner, row)).collect();
-        let mut removed = removed;
-        removed.sort();
-        // Once a commit fails, nothing after it is sent; those runs keep
-        // their previous entries so the next rescan sends them.
-        let mut failed = false;
-        let mut unsent_removed = Vec::new();
-        let mut unsent_changed = HashSet::new();
-        let mut published_changed = HashSet::new();
-        let transport_revision = inner.revision;
-        inner.test_runs.transport_batch_pending = true;
-        // Restore first: a publication failure then retains the old artifact
-        // entry so its alias transition is retried on the next scan.
-        for run in restored {
-            if failed { break; }
-            match self.commit_delta_locked(&mut inner) {
-                Ok(revision) => publish(&inner, &DeltaEvent::TestRunChanged { revision, run }),
-                Err(err) => {
-                    eprintln!("test runs> failed to restore an observed run: {err:#}");
-                    failed = true;
+            points.mark("unresolved_retained");
+            let before: HashMap<String, TestRunEntry> = inner
+                .test_runs
+                .entries
+                .iter()
+                .map(|entry| (entry.summary.run_id.clone(), entry.clone()))
+                .collect();
+            points.mark("before_copied");
+            let removed = test_run_removed_ids(
+                before.keys().map(String::as_str),
+                entries.iter().map(|entry| entry.summary.run_id.as_str()),
+            );
+            let changed: Vec<TestRunSummary> = entries
+                .iter()
+                // The summary carries the detail version, so a changed summary
+                // is exactly what clients need to hear about.
+                .filter(|entry| {
+                    before
+                        .get(&entry.summary.run_id)
+                        .is_none_or(|old| old.summary != entry.summary)
+                })
+                .map(|entry| entry.summary.clone())
+                .collect();
+            // An artifact that disappears or loses its exact correlation must
+            // restore its original observation row to SSE clients as well as API
+            // readers. This does not remove or recreate the persisted execution.
+            let merged: HashSet<&str> = entries
+                .iter()
+                .flat_map(|entry| &entry.summary.registration.superseded_run_ids)
+                .map(String::as_str)
+                .collect();
+            let restored: std::collections::BTreeSet<&str> = before
+                .values()
+                .flat_map(|entry| &entry.summary.registration.superseded_run_ids)
+                .map(String::as_str)
+                .filter(|id| !merged.contains(id))
+                .collect();
+            let restored: Vec<TestRunSummary> = restored
+                .into_iter()
+                .filter_map(|id| inner.test_run_observations.get(id))
+                .map(|row| test_run_observation_summary(&inner, row))
+                .collect();
+            work.removed = removed.len();
+            work.changed = changed.len();
+            work.restored = restored.len();
+            points.mark("diff_alias_done");
+            let mut removed = removed;
+            removed.sort();
+            // Once a commit fails, nothing after it is sent; those runs keep
+            // their previous entries so the next rescan sends them.
+            let mut failed = false;
+            let mut unsent_removed = Vec::new();
+            let mut unsent_changed = HashSet::new();
+            let mut published_changed = HashSet::new();
+            let transport_revision = inner.revision;
+            inner.test_runs.transport_batch_pending = true;
+            // Restore first: a publication failure then retains the old artifact
+            // entry so its alias transition is retried on the next scan.
+            for run in restored {
+                if failed {
+                    break;
+                }
+                work.persistence.unobserved_helpers += 1;
+                match self.commit_delta_locked(&mut inner) {
+                    Ok(revision) => publish(&inner, &DeltaEvent::TestRunChanged { revision, run }),
+                    Err(err) => {
+                        eprintln!("test runs> failed to restore an observed run: {err:#}");
+                        failed = true;
+                    }
                 }
             }
-        }
-        for run_id in removed {
-            if failed {
-                unsent_removed.push(run_id);
-                continue;
-            }
-            let retained = test_run_artifact_fallback(&inner, &run_id).map(|mut run| {
-                test_run_enrich_artifact_summary(&inner, &mut run, None);
-                run
-            });
-            match self.commit_delta_locked(&mut inner) {
-                Ok(revision) => {
-                    let event = match retained {
-                        Some(run) => DeltaEvent::TestRunChanged { revision, run },
-                        None => DeltaEvent::TestRunRemoved { revision, run_id },
-                    };
-                    publish(&inner, &event);
-                }
-                Err(err) => {
-                    eprintln!("test runs> failed to record a removed run: {err:#}");
-                    failed = true;
+            for run_id in removed {
+                if failed {
                     unsent_removed.push(run_id);
+                    continue;
+                }
+                let retained = test_run_artifact_fallback(&inner, &run_id).map(|mut run| {
+                    test_run_enrich_artifact_summary(&inner, &mut run, None);
+                    run
+                });
+                work.persistence.unobserved_helpers += 1;
+                match self.commit_delta_locked(&mut inner) {
+                    Ok(revision) => {
+                        let event = match retained {
+                            Some(run) => DeltaEvent::TestRunChanged { revision, run },
+                            None => DeltaEvent::TestRunRemoved { revision, run_id },
+                        };
+                        publish(&inner, &event);
+                    }
+                    Err(err) => {
+                        eprintln!("test runs> failed to record a removed run: {err:#}");
+                        failed = true;
+                        unsent_removed.push(run_id);
+                    }
                 }
             }
-        }
-        for run in changed {
-            if failed {
-                unsent_changed.insert(run.run_id);
-                continue;
-            }
-            match self.commit_delta_locked(&mut inner) {
-                Ok(revision) => {
-                    published_changed.insert(run.run_id.clone());
-                    publish(&inner, &DeltaEvent::TestRunChanged { revision, run });
-                }
-                Err(err) => {
-                    eprintln!("test runs> failed to record a changed run: {err:#}");
-                    failed = true;
+            for run in changed {
+                if failed {
                     unsent_changed.insert(run.run_id);
+                    continue;
+                }
+                work.persistence.unobserved_helpers += 1;
+                match self.commit_delta_locked(&mut inner) {
+                    Ok(revision) => {
+                        published_changed.insert(run.run_id.clone());
+                        publish(&inner, &DeltaEvent::TestRunChanged { revision, run });
+                    }
+                    Err(err) => {
+                        eprintln!("test runs> failed to record a changed run: {err:#}");
+                        failed = true;
+                        unsent_changed.insert(run.run_id);
+                    }
                 }
             }
-        }
-        let entries = if failed {
-            test_run_settle_entries(entries, &before, &unsent_changed, &unsent_removed)
-        } else {
-            entries
-        };
-        // Install the settled index before capturing its public counters.
-        // A cumulative cut covers the revisions of suppressed lifecycle
-        // events before any public card delta spends the next revision.
-        inner.test_runs.entries = entries.clone().into();
-        self.retain_test_command_artifact_terminals_locked(&mut inner);
-        // Run waits may settle from here on (`refresh_test_run_waits`).
-        inner.test_runs.scanned_once = true;
-        if inner.revision != transport_revision {
-            let projection = self.test_run_history_projection_locked(&inner);
-            inner.test_runs.transport_version.store(projection.version, Ordering::Relaxed);
-            self.publish_state_locked(&inner);
-        }
-        // The cut precedes these body deltas in the existing broadcaster
-        // mailbox. Their revisions therefore remain directly admissible.
-        self.sync_test_run_cards_locked(&mut inner, &entries, &published_changed, &failures, publish);
-        self.compact_test_runs_locked(&mut inner);
-        inner.test_runs.transport_batch_pending = false;
-        let projection = self.test_run_history_projection_locked(&inner);
-        if projection.version != inner.test_runs.transport_version.load(Ordering::Relaxed) {
-            // A first empty scan (or a durability-only input change) still
-            // needs an advancing revision for ready/counter consumers.
-            let can_publish = inner.revision != transport_revision
-                || (!failed && self.commit_delta_locked(&mut inner).is_ok());
-            if can_publish {
-                inner.test_runs.transport_version.store(projection.version, Ordering::Relaxed);
-                // Card/attention changes may share the last card revision.
-                // The existing stateDiff admission accepts a cumulative cut
-                // at that revision, unlike an equal-revision global delta.
+            work.publication_failed = failed;
+            points.mark("publication_done");
+            let entries = if failed {
+                test_run_settle_entries(entries, &before, &unsent_changed, &unsent_removed)
+            } else {
+                entries
+            };
+            // Install the settled index before capturing its public counters.
+            // A cumulative cut covers the revisions of suppressed lifecycle
+            // events before any public card delta spends the next revision.
+            inner.test_runs.entries = entries.clone().into();
+            points.mark("index_installed");
+            self.retain_test_command_artifact_terminals_locked(&mut inner);
+            work.persistence.unobserved_helpers += 1;
+            points.mark("terminals_retained");
+            // Run waits may settle from here on (`refresh_test_run_waits`).
+            inner.test_runs.scanned_once = true;
+            if inner.revision != transport_revision {
+                let projection = self.test_run_history_projection_locked(&inner);
+                inner
+                    .test_runs
+                    .transport_version
+                    .store(projection.version, Ordering::Relaxed);
                 self.publish_state_locked(&inner);
             }
-        }
-        trace.mark("published");
-        inner.test_runs.any_running()
+            // The cut precedes these body deltas in the existing broadcaster
+            // mailbox. Their revisions therefore remain directly admissible.
+            work.cards = inner.test_run_cards.len();
+            let card_persistence = self.sync_test_run_cards_traced_locked(
+                &mut inner,
+                &entries,
+                &published_changed,
+                &failures,
+                publish,
+            );
+            work.persistence.merge(card_persistence);
+            points.mark("cards_done");
+            let compaction = self.compact_test_runs_traced_locked(&mut inner);
+            work.compaction_population = compaction.population;
+            work.compaction_eligible = compaction.eligible;
+            work.persistence.merge(compaction.persistence);
+            points.mark("compaction_done");
+            inner.test_runs.transport_batch_pending = false;
+            let projection = self.test_run_history_projection_locked(&inner);
+            if projection.version != inner.test_runs.transport_version.load(Ordering::Relaxed) {
+                // A first empty scan (or a durability-only input change) still
+                // needs an advancing revision for ready/counter consumers.
+                let can_publish = inner.revision != transport_revision
+                    || (!failed && {
+                        work.persistence.unobserved_helpers += 1;
+                        self.commit_delta_locked(&mut inner).is_ok()
+                    });
+                if can_publish {
+                    inner
+                        .test_runs
+                        .transport_version
+                        .store(projection.version, Ordering::Relaxed);
+                    // Card/attention changes may share the last card revision.
+                    // The existing stateDiff admission accepts a cumulative cut
+                    // at that revision, unlike an equal-revision global delta.
+                    self.publish_state_locked(&inner);
+                }
+            }
+            points.mark("published");
+            let running = inner.test_runs.any_running();
+            points.mark("tail_done");
+            running
+        };
+        // Includes guard/local destruction and the final any_running traversal.
+        // The shared trace ring is touched only after the state guard is gone.
+        points.mark("commit_released");
+        work.published_events = published_events.get();
+        trace.flush(&mut points, Some(&work));
+        running
     }
 
     /// The indexed run `run_id` and its directory.
@@ -1216,12 +1414,12 @@ impl AppState {
                     if !cards_enabled {
                         cards_enabled = state.step_test_run_cards_epoch(&mut epoch_fence);
                     }
-                    if test_run_rescan_due(
+                    if let Some(origin) = test_run_rescan_origin(
                         active,
                         last_rescan.map(|at| at.elapsed()),
                         || state.test_run_tracked_dirs_changed(),
                     ) {
-                        active = state.refresh_test_runs();
+                        active = state.refresh_test_runs_from(origin);
                         last_rescan = Some(std::time::Instant::now());
                         // After the rescan's own lock is released: resuming
                         // a wait may dispatch a turn.

@@ -296,6 +296,6 @@ impl AppState {
         drop(inner);
         // Reuse the existing artifact reader/index immediately, including for
         // a provider's still-running/background reply. No new process probe.
-        self.refresh_test_runs();
+        self.refresh_test_runs_from("command-artifact");
     }
 }

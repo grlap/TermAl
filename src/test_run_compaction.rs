@@ -282,6 +282,13 @@ fn test_run_history_from_projection(
     }
 }
 
+#[derive(Default)]
+struct TestRunCompactionTrace {
+    population: usize,
+    eligible: usize,
+    persistence: TestRunTracePersistence,
+}
+
 impl AppState {
     fn persist_test_run_compacted_locked(
         &self,
@@ -325,9 +332,17 @@ impl AppState {
         }
     }
     fn compact_test_runs_locked(&self, inner: &mut StateInner) {
+        self.compact_test_runs_traced_locked(inner);
+    }
+
+    fn compact_test_runs_traced_locked(&self, inner: &mut StateInner) -> TestRunCompactionTrace {
         // One canonical population, terminal time + stable identity, including
         // the explicit null-project bucket. Unknown obligations are unbounded.
         let mut runs = test_run_full_summaries_locked(inner);
+        let mut trace = TestRunCompactionTrace {
+            population: runs.len(),
+            ..Default::default()
+        };
         runs.sort_by(|a, b| {
             b.ended_at
                 .cmp(&a.ended_at)
@@ -341,6 +356,7 @@ impl AppState {
             if !test_run_compaction_eligible_with(inner, &run, &waited) {
                 continue;
             }
+            trace.eligible += 1;
             let count = kept.entry(run.project_id.clone()).or_default();
             *count += 1;
             if *count <= TEST_RUN_TERMINAL_RUNS_PER_PROJECT {
@@ -357,7 +373,8 @@ impl AppState {
             }
             let ids: std::collections::BTreeSet<_> = test_run_summary_ids(&run).collect();
             // Preserve the canonical execution order in the durable proof.
-            let observations = ids.iter()
+            let observations = ids
+                .iter()
                 .filter_map(|id| inner.test_run_observations.get(*id))
                 .cloned()
                 .map(test_run_minimal_observation)
@@ -385,8 +402,13 @@ impl AppState {
             let previous = inner
                 .test_run_compacted
                 .insert(id.clone(), compacted.clone());
-            match self.persist_test_run_compacted_locked(inner, compacted.clone()) {
+            let persisted = self.persist_test_run_compacted_locked(inner, compacted.clone());
+            trace.persistence.observe_compaction(&persisted);
+            match persisted {
                 Ok(true) => {
+                    // Finishing/publication may call their own persistence owners;
+                    // this trace observes the proof save, not those nested calls.
+                    trace.persistence.unobserved_helpers += 2;
                     retry |= !self.finish_test_run_compaction_locked(inner, &compacted);
                     self.publish_test_run_compact_risk_locked(inner, &compacted);
                 }
@@ -402,6 +424,7 @@ impl AppState {
             }
         }
         inner.test_runs.compaction_examined_revision = (!retry).then_some(inner.revision);
+        trace
     }
 
     fn finish_test_run_compaction_locked(

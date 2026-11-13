@@ -740,6 +740,18 @@ impl AppState {
         failures: &HashMap<String, TestRunCardFailureRead>,
         publish: &dyn Fn(&StateInner, &DeltaEvent),
     ) {
+        self.sync_test_run_cards_traced_locked(inner, entries, changed, failures, publish);
+    }
+
+    fn sync_test_run_cards_traced_locked(
+        &self,
+        inner: &mut StateInner,
+        entries: &[TestRunEntry],
+        changed: &HashSet<String>,
+        failures: &HashMap<String, TestRunCardFailureRead>,
+        publish: &dyn Fn(&StateInner, &DeltaEvent),
+    ) -> TestRunTracePersistence {
+        let mut persistence = TestRunTracePersistence::default();
         let now = chrono::Utc::now();
         let indexed: HashSet<&str> = entries
             .iter()
@@ -904,12 +916,18 @@ impl AppState {
             .first_sight
             .retain(|run_id, _| indexed.contains(run_id.as_str()));
         for delta in deltas {
-            match self.commit_persisted_delta_locked(inner) {
-                Ok(revision) => publish(
-                    &inner,
-                    &delta.into_event(revision, &self.server_instance_id),
-                ),
+            // This is the same dispatch owner used by commit_persisted_delta_locked;
+            // retain its returned disposition rather than infer it from liveness.
+            match self.bump_revision_and_persist_locked_with_dispatch(inner) {
+                Ok((revision, dispatch)) => {
+                    persistence.observe(Ok(dispatch));
+                    publish(
+                        &inner,
+                        &delta.into_event(revision, &self.server_instance_id),
+                    );
+                }
                 Err(err) => {
+                    persistence.observe(Err(()));
                     // The transcript and the map already changed in memory and
                     // are persisted by the next commit; clients resync on the
                     // revision gap.
@@ -917,5 +935,6 @@ impl AppState {
                 }
             }
         }
+        persistence
     }
 }
