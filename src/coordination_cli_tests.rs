@@ -15,19 +15,31 @@ use super::*;
 
 #[test]
 fn mailbox_relay_review_r2_cli_partial_lists_never_claim_empty_history() {
-    let command=CoordinationCliCommand::MailboxList { as_session:"session-root".into() };
-    for local in [false,true] {
-        let output=json!({"mailboxes":if local {json!([{"id":"mailbox-local","participants":[],"latestSequence":1,"unreadCount":1}])}else{json!([])},
+    let command = CoordinationCliCommand::MailboxList {
+        as_session: "session-root".into(),
+    };
+    for local in [false, true] {
+        let output = json!({"mailboxes":if local {json!([{"id":"mailbox-local","participants":[],"latestSequence":1,"unreadCount":1}])}else{json!([])},
             "unavailableRelayHomes":[{"home":{"host":{"hostId":"remote-home","hostGeneration":1},"storeId":"store"},"availability":"unavailable_unverified","status":503,"error":"home unavailable"}],
             "unavailableCentralDomain":{"central":{"hostId":"central","hostGeneration":1},"availability":"unavailable_unverified","status":409,"error":"domain authority changed"}});
-        validate_coordination_cli_output(&command,&output).unwrap();
-        let mut bytes=Vec::new();
-        render_coordination_cli_output(&command,&output,&mut bytes).unwrap();
-        let text=String::from_utf8(bytes).unwrap();
-        assert!(!text.contains("no mailboxes"),"{text}");
-        assert!(text.contains("remote-home")&&text.contains("503")&&text.contains("home unavailable"),"{text}");
-        assert!(text.contains("central")&&text.contains("409")&&text.contains("domain authority changed"),"{text}");
-        assert!(text.contains("partial"),"{text}");
+        validate_coordination_cli_output(&command, &output).unwrap();
+        let mut bytes = Vec::new();
+        render_coordination_cli_output(&command, &output, &mut bytes).unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(!text.contains("no mailboxes"), "{text}");
+        assert!(
+            text.contains("remote-home")
+                && text.contains("503")
+                && text.contains("home unavailable"),
+            "{text}"
+        );
+        assert!(
+            text.contains("central")
+                && text.contains("409")
+                && text.contains("domain authority changed"),
+            "{text}"
+        );
+        assert!(text.contains("partial"), "{text}");
     }
 }
 
@@ -182,7 +194,10 @@ fn coordination_cli_mailbox_round_trip_uses_environment_identity_default() {
                 }),
             );
         }
-        assert_eq!(request.path, "/api/sessions/session-env/mailboxes?includeRelayAvailability=true");
+        assert_eq!(
+            request.path,
+            "/api/sessions/session-env/mailboxes?includeRelayAvailability=true"
+        );
         (200, json!({ "mailboxes": [] }))
     });
     let output = execute_coordination_cli(&invocation.command, &base_url)
@@ -268,6 +283,46 @@ fn coordination_cli_parses_mailbox_send_with_both_flag_forms_and_optional_fields
             );
         }
         other => panic!("unexpected command {other:?}"),
+    }
+}
+
+#[test]
+fn coordination_cli_typed_send_requires_closed_metadata_and_rejects_duplicates() {
+    let request = json!({"mode":"focused", "targets":[{"workRef":"work", "use":{
+        "kind":"committed_input", "expected_commit":"a".repeat(40), "purpose":"verification"
+    }}]});
+    let base = cli_args(&[
+        "mailbox",
+        "send",
+        "--as-session=session-root",
+        "--to=session-peer",
+        "--message=run",
+        "--idempotency-key=typed-key",
+    ]);
+    let mut valid = base.clone();
+    valid.extend(["--test-request-json".into(), request.to_string()]);
+    let invocation = parse_coordination_cli_args(valid.clone()).unwrap();
+    match invocation.command {
+        CoordinationCliCommand::MailboxTestSend {
+            ordinary,
+            test_request,
+        } => {
+            assert!(matches!(
+                *ordinary,
+                CoordinationCliCommand::MailboxSend { .. }
+            ));
+            assert_eq!(serde_json::to_value(test_request).unwrap(), request);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+    valid.extend(["--test-request-json".into(), request.to_string()]);
+    assert!(parse_coordination_cli_args(valid).is_err());
+    let mut injected = request;
+    injected["targets"][0]["association"] = json!({"binding":{}});
+    for request in [Value::Null, json!({"mode":"full", "targets":[]}), injected] {
+        let mut args = base.clone();
+        args.extend(["--test-request-json".into(), request.to_string()]);
+        assert!(parse_coordination_cli_args(args).is_err());
     }
 }
 
@@ -623,13 +678,19 @@ fn coordination_cli_mailbox_send_resolves_names_and_posts_through_the_bridge() {
         note,
         mailbox_send_receipt_note("deliveredToIdleSession", "mailbox-message-1", false)
     );
-    assert!(note.contains("Wake status AT SEND TIME: deliveredToIdleSession"), "{note}");
+    assert!(
+        note.contains("Wake status AT SEND TIME: deliveredToIdleSession"),
+        "{note}"
+    );
     assert!(note.contains("this is not current status"), "{note}");
     assert!(
         note.contains("termal_read_mailbox_message({messageId: \"mailbox-message-1\"})"),
         "{note}"
     );
-    assert!(note.contains("read-message --message-id mailbox-message-1"), "{note}");
+    assert!(
+        note.contains("read-message --message-id mailbox-message-1"),
+        "{note}"
+    );
 }
 
 /// The human send line says the message is stored, labels its wake status
@@ -665,8 +726,14 @@ fn coordination_cli_send_says_stored_and_read_message_prints_current_status() {
     .expect("the receipt renders");
     let sent = String::from_utf8(rendered).unwrap();
     let lines = sent.lines().collect::<Vec<_>>();
-    assert!(lines[0].starts_with("stored for session-peer via mailbox-1: message mailbox-message-7 #7"), "{sent}");
-    assert!(lines[0].contains("wake status at send time durableButNotWoken"), "{sent}");
+    assert!(
+        lines[0].starts_with("stored for session-peer via mailbox-1: message mailbox-message-7 #7"),
+        "{sent}"
+    );
+    assert!(
+        lines[0].contains("wake status at send time durableButNotWoken"),
+        "{sent}"
+    );
     assert!(!sent.contains("delivered to"), "{sent}");
     // A receipt from an older host has no line of its own, and the CLI makes
     // none up.
@@ -674,8 +741,11 @@ fn coordination_cli_send_says_stored_and_read_message_prints_current_status() {
 
     // The host's own line is printed as sent.
     let mut with_note = receipt.clone();
-    with_note["receiptNote"] =
-        json!(mailbox_send_receipt_note("durableButNotWoken", "mailbox-message-7", false));
+    with_note["receiptNote"] = json!(mailbox_send_receipt_note(
+        "durableButNotWoken",
+        "mailbox-message-7",
+        false
+    ));
     let mut rendered = Vec::new();
     render_coordination_cli_output(
         &CoordinationCliCommand::MailboxSend {
@@ -739,7 +809,8 @@ fn coordination_cli_send_says_stored_and_read_message_prints_current_status() {
 #[test]
 fn coordination_cli_native_relay_status_separates_queue_handoff_and_unavailable_target() {
     let command = CoordinationCliCommand::MailboxReadMessage {
-        as_session: "session-root".into(), message_id: "relay-message-example".into(),
+        as_session: "session-root".into(),
+        message_id: "relay-message-example".into(),
     };
     let mut message = json!({
         "body": "saved body", "notificationState": "durableButNotWoken",
@@ -762,7 +833,9 @@ fn coordination_cli_native_relay_status_separates_queue_handoff_and_unavailable_
     };
     let queued = render(&message);
     assert!(queued.contains("home queue admission confirmed: true (observed home-cut)"));
-    assert!(queued.contains("queue admission recorded: true; provider handoff recorded: false; currently queued: true"));
+    assert!(queued.contains(
+        "queue admission recorded: true; provider handoff recorded: false; currently queued: true"
+    ));
     assert!(queued.contains("observed target holds: [\"approval\"]"));
     assert!(queued.contains("Resolve the pending approval; do not resend."));
     message["currentStatus"]["relayProgress"]["target"] = json!({
@@ -772,8 +845,10 @@ fn coordination_cli_native_relay_status_separates_queue_handoff_and_unavailable_
     let unavailable = render(&message);
     assert!(unavailable.contains("target progress: unavailable (observed later-cut)"));
     assert!(unavailable.contains("target unavailable: link unavailable"));
-    assert!(!unavailable.contains("provider handoff recorded:"),
-        "an unavailable target cannot inherit an earlier handoff observation");
+    assert!(
+        !unavailable.contains("provider handoff recorded:"),
+        "an unavailable target cannot inherit an earlier handoff observation"
+    );
     assert!(unavailable.contains("recipientAcknowledged: false"));
 }
 
@@ -1485,7 +1560,9 @@ fn coordination_cli_rejects_malformed_successful_responses() {
     let (base_url, _requests, server) = spawn_test_mcp_http_server(2, |request| {
         match (request.method.as_str(), request.path.as_str()) {
             ("GET", "/api/state") => (200, root_inventory_state()),
-            ("GET", "/api/sessions/session-root/mailboxes?includeRelayAvailability=true") => (200, json!({ "mailboxes": { "nope": 1 } })),
+            ("GET", "/api/sessions/session-root/mailboxes?includeRelayAvailability=true") => {
+                (200, json!({ "mailboxes": { "nope": 1 } }))
+            }
             _ => (404, json!({ "error": "unexpected" })),
         }
     });

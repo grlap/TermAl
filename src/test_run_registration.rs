@@ -24,11 +24,7 @@ fn test_run_timestamp() -> String {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TestRunNativeOrigin {
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "reject_inactive_test_request_custody"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     causal_request: Option<TestRunCausalRequest>,
     host: FederationHostIdentity,
     native_session_id: String,
@@ -110,7 +106,9 @@ impl TestRunRegistration {
         }
         let mut identity = self.clone();
         identity.native_completion = None;
-        if expected.declared_terminal.is_none() { identity.declared_terminal = None; }
+        if expected.declared_terminal.is_none() {
+            identity.declared_terminal = None;
+        }
         &identity == expected
     }
 }
@@ -118,6 +116,8 @@ impl TestRunRegistration {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct TestRunRegistrationView {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    request_message_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     history_compacted: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -175,6 +175,27 @@ struct RegisterTestRunRequest {
     run_directory: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RegisterTestRunApiRequest {
+    run_id: String,
+    run_directory: String,
+    #[serde(default, deserialize_with = "deserialize_test_request_message_id")]
+    request_message_id: Option<String>,
+}
+
+fn deserialize_test_request_message_id<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<String>, D::Error> {
+    let value = String::deserialize(deserializer)?;
+    if !mailbox_test_message_selector_valid(&value) {
+        return Err(serde::de::Error::custom(
+            "invalid_request: malformed requestMessageId",
+        ));
+    }
+    Ok(Some(value))
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RegisterTestRunResponse {
@@ -190,7 +211,11 @@ struct RegisterTestRunResponse {
 // detail is capped at 2048 bytes. These are transient observations, not the
 // parent's retained diagnostic history or a durability/settlement authority.
 fn test_run_diagnostic_id(value: &str) -> String {
-    value.chars().filter(|ch| ch.is_ascii_alphanumeric() || matches!(*ch, '-' | '_')).take(128).collect()
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(*ch, '-' | '_'))
+        .take(128)
+        .collect()
 }
 
 // Claim/durability allowance, not a source-capture budget.
@@ -199,7 +224,10 @@ const TEST_RUN_REGISTRATION_DURABILITY_BUDGET: Duration = ENGRAM_MIN_CALL_TIMEOU
 /// The shared claim-read and durability deadline. On real time it is measured
 /// from `requested`, before either authority lock; a scripted fixture clock measures from its own
 /// current reading, which only the fixture advances.
-fn test_run_registration_deadline(clock: &EngramBudgetClock, requested: std::time::Instant) -> std::time::Instant {
+fn test_run_registration_deadline(
+    clock: &EngramBudgetClock,
+    requested: std::time::Instant,
+) -> std::time::Instant {
     if matches!(clock, EngramBudgetClock::Real) {
         requested + TEST_RUN_REGISTRATION_DURABILITY_BUDGET
     } else {
@@ -207,13 +235,18 @@ fn test_run_registration_deadline(clock: &EngramBudgetClock, requested: std::tim
     }
 }
 
-fn test_run_registration_remaining(clock: &EngramBudgetClock, deadline: std::time::Instant,
-    diagnostics: &mut TestRunRegistrationDiagnostics) -> Result<Duration, ApiError> {
+fn test_run_registration_remaining(
+    clock: &EngramBudgetClock,
+    deadline: std::time::Instant,
+    diagnostics: &mut TestRunRegistrationDiagnostics,
+) -> Result<Duration, ApiError> {
     let remaining = deadline.saturating_duration_since(clock.now());
     if remaining.is_zero() {
         diagnostics.category = Some("deadline");
-        Err(ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE,
-            "test run registration budget expired before publication"))
+        Err(ApiError::from_status(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "test run registration budget expired before publication",
+        ))
     } else {
         Ok(remaining)
     }
@@ -277,24 +310,39 @@ impl TestRunRegistrationDiagnostics {
     }
 
     fn enter(&mut self, phase: &'static str) {
-        if let Some(trace) = &self.trace { trace.mark(phase); }
+        if let Some(trace) = &self.trace {
+            trace.mark(phase);
+        }
         if self.spans.len() < 16 {
-            self.spans.push((self.phase, self.phase_started.duration_since(self.started), self.phase_started.elapsed()));
+            self.spans.push((
+                self.phase,
+                self.phase_started.duration_since(self.started),
+                self.phase_started.elapsed(),
+            ));
         }
         self.phase = phase;
         self.phase_started = std::time::Instant::now();
     }
 
     fn correlate(&mut self, headers: &axum::http::HeaderMap) {
-        self.operation_id = headers.get("x-termal-registration-operation")
+        self.operation_id = headers
+            .get("x-termal-registration-operation")
             .and_then(|value| value.to_str().ok())
-            .filter(|value| !value.is_empty() && value.len() <= 64
-                && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')))
-            .unwrap_or("unavailable").to_owned();
-        self.attempt_ordinal = headers.get("x-termal-registration-attempt")
+            .filter(|value| {
+                !value.is_empty()
+                    && value.len() <= 64
+                    && value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+            })
+            .unwrap_or("unavailable")
+            .to_owned();
+        self.attempt_ordinal = headers
+            .get("x-termal-registration-attempt")
             .and_then(|value| value.to_str().ok())
             .filter(|value| matches!(*value, "1" | "2"))
-            .unwrap_or("unavailable").to_owned();
+            .unwrap_or("unavailable")
+            .to_owned();
     }
 
     #[track_caller]
@@ -302,7 +350,9 @@ impl TestRunRegistrationDiagnostics {
         #[cfg(test)]
         {
             let step = TEST_TEST_RUN_REGISTRATION_NEXT_LOCK.with(|slot| slot.borrow_mut().take());
-            if let Some(step) = step { step(); }
+            if let Some(step) = step {
+                step();
+            }
         }
         TestRunRegistrationGuard {
             guard: state.lock().expect("state mutex poisoned"),
@@ -315,39 +365,86 @@ impl TestRunRegistrationDiagnostics {
     fn fields(&self, run_id: &str, category: &str, status: u16) -> String {
         let lock_timings = match self.lock_timings.try_lock() {
             Ok(timings) => timings,
-            Err(_) => return "stateInnerTimings=UNKNOWN; diagnostic metadata unavailable".to_owned(),
+            Err(_) => {
+                return "stateInnerTimings=UNKNOWN; diagnostic metadata unavailable".to_owned();
+            }
         };
         let waited = lock_timings.waited;
         let held = lock_timings.held;
-        let locks = lock_timings.observations.iter().flatten().map(|(phase, wait, hold)| {
-            format!("{phase}:{}/{}", wait.as_millis(), hold.as_millis())
-        }).collect::<Vec<_>>().join(",");
-        let (phase, phase_elapsed) = self.failure_phase.unwrap_or((self.phase, self.phase_started.elapsed()));
-        let mut spans = self.spans.iter().map(|(phase, start, elapsed)| {
-            format!("{phase}:{}-{}", start.as_millis(), (*start + *elapsed).as_millis())
-        }).collect::<Vec<_>>().join(",");
-        spans.push_str(&format!(",{}:{}-{}", self.phase,
-            self.phase_started.duration_since(self.started).as_millis(), self.started.elapsed().as_millis()));
+        let locks = lock_timings
+            .observations
+            .iter()
+            .flatten()
+            .map(|(phase, wait, hold)| format!("{phase}:{}/{}", wait.as_millis(), hold.as_millis()))
+            .collect::<Vec<_>>()
+            .join(",");
+        let (phase, phase_elapsed) = self
+            .failure_phase
+            .unwrap_or((self.phase, self.phase_started.elapsed()));
+        let mut spans = self
+            .spans
+            .iter()
+            .map(|(phase, start, elapsed)| {
+                format!(
+                    "{phase}:{}-{}",
+                    start.as_millis(),
+                    (*start + *elapsed).as_millis()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        spans.push_str(&format!(
+            ",{}:{}-{}",
+            self.phase,
+            self.phase_started.duration_since(self.started).as_millis(),
+            self.started.elapsed().as_millis()
+        ));
         let fields = format!(
             "phase={phase}; category={category}; elapsedMs={}; phaseElapsedMs={}; stateInnerWaitMs={}; stateInnerHoldMs={}; writerProgress={}; fenceError={}; attemptId={}; runId={}; operationId={}; attempt={}; serverInstance={}; method={}; httpStatus={status}; requestDigest={}; fenceBudgetMs={}; fenceRemainingMs={}; durabilityConfirmed={}; published={}; locks={}; spans={}",
-            self.started.elapsed().as_millis(), phase_elapsed.as_millis(),
-            waited.as_millis(), held.as_millis(), self.writer_progress.as_deref().unwrap_or("not_waiting"),
-            test_run_truncate(self.fence_error.as_deref().unwrap_or("none"), 256).replace(['\r', '\n'], " "),
-            self.attempt_id, test_run_diagnostic_id(run_id),
-            self.operation_id, self.attempt_ordinal, self.server_instance, self.method,
+            self.started.elapsed().as_millis(),
+            phase_elapsed.as_millis(),
+            waited.as_millis(),
+            held.as_millis(),
+            self.writer_progress.as_deref().unwrap_or("not_waiting"),
+            test_run_truncate(self.fence_error.as_deref().unwrap_or("none"), 256)
+                .replace(['\r', '\n'], " "),
+            self.attempt_id,
+            test_run_diagnostic_id(run_id),
+            self.operation_id,
+            self.attempt_ordinal,
+            self.server_instance,
+            self.method,
             self.request_digest.as_deref().unwrap_or("unavailable"),
-            if self.method == "POST" { TEST_RUN_REGISTRATION_DURABILITY_BUDGET.as_millis().to_string() }
-                else { "not_applicable".to_owned() },
-            self.fence_deadline.map(|deadline| deadline.saturating_duration_since(self.fence_clock.now()).as_millis().to_string()).unwrap_or_else(|| "not_started".to_owned()),
-            self.durability_confirmed, self.published, test_run_truncate(&locks, 384), test_run_truncate(&spans, 640),
+            if self.method == "POST" {
+                TEST_RUN_REGISTRATION_DURABILITY_BUDGET
+                    .as_millis()
+                    .to_string()
+            } else {
+                "not_applicable".to_owned()
+            },
+            self.fence_deadline
+                .map(|deadline| deadline
+                    .saturating_duration_since(self.fence_clock.now())
+                    .as_millis()
+                    .to_string())
+                .unwrap_or_else(|| "not_started".to_owned()),
+            self.durability_confirmed,
+            self.published,
+            test_run_truncate(&locks, 384),
+            test_run_truncate(&spans, 640),
         );
         test_run_truncate(&fields, 1600)
     }
 
     fn report(&self, run_id: &str, error: &mut ApiError) {
-        let registration_pending = error.durability_deadline.as_ref().is_some_and(|deadline|
-            matches!(deadline.operation, Some(DurabilityPendingOperation::TestRunRegistration)));
-        if self.method == "POST" && error.status == StatusCode::SERVICE_UNAVAILABLE
+        let registration_pending = error.durability_deadline.as_ref().is_some_and(|deadline| {
+            matches!(
+                deadline.operation,
+                Some(DurabilityPendingOperation::TestRunRegistration)
+            )
+        });
+        if self.method == "POST"
+            && error.status == StatusCode::SERVICE_UNAVAILABLE
             && (registration_pending || self.category == Some("deadline"))
         {
             let mut block = self.state_lock_block();
@@ -369,7 +466,11 @@ impl TestRunRegistrationDiagnostics {
         } else {
             "handler_failure"
         });
-        let message = format!("{}; {}", test_run_truncate(&error.message, 384), self.fields(run_id, category, error.status.as_u16()));
+        let message = format!(
+            "{}; {}",
+            test_run_truncate(&error.message, 384),
+            self.fields(run_id, category, error.status.as_u16())
+        );
         error.message = test_run_truncate(&message, 2048)
             .replace('\r', " ")
             .replace('\n', " ");
@@ -385,9 +486,14 @@ impl TestRunRegistrationDiagnostics {
     }
 
     fn state_lock_block(&self) -> StateLockBlock {
-        let loss = self.lock_observation_loss.load(std::sync::atomic::Ordering::Relaxed);
+        let loss = self
+            .lock_observation_loss
+            .load(std::sync::atomic::Ordering::Relaxed);
         let copied = self.lock_timings.try_lock().ok().and_then(|timings| {
-            timings.observer.as_ref().map(|observer| (Arc::clone(observer), timings.wait_spans))
+            timings
+                .observer
+                .as_ref()
+                .map(|observer| (Arc::clone(observer), timings.wait_spans))
         });
         if let Some((observer, waits)) = copied {
             StateLockBlock::collect(&observer, &waits, loss)
@@ -496,6 +602,9 @@ fn test_run_registration_identity(request: &Value) -> Result<String, ApiError> {
     if let Some(source_id) = request.get("nativeSourceId") {
         immutable.insert("nativeSourceId", source_id.clone());
     }
+    if let Some(selector) = test_run_request_message_id(request)? {
+        immutable.insert("requestMessageId", Value::String(selector.to_owned()));
+    }
     let bytes = serde_json::to_vec(&immutable)
         .map_err(|_| ApiError::bad_request("invalid test run registration request"))?;
     Ok(sha256_hex(&bytes))
@@ -508,9 +617,14 @@ impl AppState {
         session_id: &str,
         request: RegisterTestRunRequest,
     ) -> Result<RegisterTestRunResponse, ApiError> {
-        self.register_test_run_with_diagnostics(session_id, request, TestRunRegistrationDiagnostics::new(&self.server_instance_id))
+        self.register_test_run_with_diagnostics(
+            session_id,
+            request,
+            TestRunRegistrationDiagnostics::new(&self.server_instance_id),
+        )
     }
 
+    #[cfg(test)]
     fn register_test_run_with_diagnostics(
         &self,
         session_id: &str,
@@ -521,18 +635,49 @@ impl AppState {
     }
 
     fn register_test_run_reserved(
-        &self, session_id: &str, request: RegisterTestRunRequest,
-        mut diagnostics: TestRunRegistrationDiagnostics, native: Option<&DeclaredRunReservation>,
+        &self,
+        session_id: &str,
+        request: RegisterTestRunRequest,
+        diagnostics: TestRunRegistrationDiagnostics,
+        native: Option<&DeclaredRunReservation>,
+    ) -> Result<RegisterTestRunResponse, ApiError> {
+        self.register_test_run_reserved_with_causal(
+            session_id,
+            request,
+            diagnostics,
+            native,
+            TestRunCausalAdmission::Direct,
+        )
+    }
+
+    fn register_test_run_reserved_with_causal(
+        &self,
+        session_id: &str,
+        request: RegisterTestRunRequest,
+        mut diagnostics: TestRunRegistrationDiagnostics,
+        native: Option<&DeclaredRunReservation>,
+        causal_admission: TestRunCausalAdmission,
     ) -> Result<RegisterTestRunResponse, ApiError> {
         let run_id = request.run_id.clone();
         if diagnostics.trace.is_none() {
-            diagnostics.trace = Some(self.test_run_phase_traces.begin("registration", Some(&run_id),
-                &diagnostics.operation_id, diagnostics.started));
+            diagnostics.trace = Some(self.test_run_phase_traces.begin(
+                "registration",
+                Some(&run_id),
+                &diagnostics.operation_id,
+                diagnostics.started,
+            ));
         }
         diagnostics.enter("validate_request");
-        let mut result = self.register_test_run_inner(session_id, request, &mut diagnostics, native);
+        let mut result = self.register_test_run_inner(
+            session_id,
+            request,
+            &mut diagnostics,
+            native,
+            causal_admission,
+        );
         if result.is_err() {
-            diagnostics.failure_phase = Some((diagnostics.phase, diagnostics.phase_started.elapsed()));
+            diagnostics.failure_phase =
+                Some((diagnostics.phase, diagnostics.phase_started.elapsed()));
             diagnostics.enter("failure_publication");
             let mut inner = diagnostics.lock(&self.inner);
             if !inner.test_runs.registered.contains(&run_id)
@@ -548,11 +693,16 @@ impl AppState {
             }
         }
         if let Err(error) = &mut result {
-            if let Some(trace) = &diagnostics.trace { trace.mark("failed"); }
+            if let Some(trace) = &diagnostics.trace {
+                trace.mark("failed");
+            }
             diagnostics.report(&run_id, error);
         } else {
             diagnostics.enter("response_ready");
-            eprintln!("[termal] test run registration confirmed: {}", diagnostics.fields(&run_id, "confirmed", 201));
+            eprintln!(
+                "[termal] test run registration confirmed: {}",
+                diagnostics.fields(&run_id, "confirmed", 201)
+            );
         }
         result
     }
@@ -563,17 +713,40 @@ impl AppState {
         request: RegisterTestRunRequest,
         diagnostics: &mut TestRunRegistrationDiagnostics,
         native: Option<&DeclaredRunReservation>,
+        causal_admission: TestRunCausalAdmission,
     ) -> Result<RegisterTestRunResponse, ApiError> {
         #[cfg(test)]
-        let verify = self.inner.lock().expect("state mutex poisoned").test_native_source_owner_metadata.clone();
+        let verify = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .test_native_source_owner_metadata
+            .clone();
         #[cfg(test)]
         if let Some(verify) = verify {
-            return self.register_test_run_inner_with_source_owner_reserved(session_id, request, diagnostics, native,
-                |state, session, deadline| verify(state, session, deadline.probe_deadline));
+            return self.register_test_run_inner_with_source_owner_reserved(
+                session_id,
+                request,
+                diagnostics,
+                native,
+                causal_admission,
+                |state, session, deadline| verify(state, session, deadline.probe_deadline),
+            );
         }
-        self.register_test_run_inner_with_source_owner_reserved(session_id, request, diagnostics, native,
-            |state, session, deadline| state.source_owner_metadata_snapshot_with(
-                session, deadline, engram_source_owner_run))
+        self.register_test_run_inner_with_source_owner_reserved(
+            session_id,
+            request,
+            diagnostics,
+            native,
+            causal_admission,
+            |state, session, deadline| {
+                state.source_owner_metadata_snapshot_with(
+                    session,
+                    deadline,
+                    engram_source_owner_run,
+                )
+            },
+        )
     }
 
     #[cfg(test)]
@@ -582,18 +755,40 @@ impl AppState {
         session_id: &str,
         request: RegisterTestRunRequest,
         diagnostics: &mut TestRunRegistrationDiagnostics,
-        verify_source_owner: impl FnOnce(&AppState, &str, std::time::Instant)
-            -> Result<(EngramSourceOwnerPin, EngramSourceOwnerAuthority), ApiError>,
+        verify_source_owner: impl FnOnce(
+            &AppState,
+            &str,
+            std::time::Instant,
+        ) -> Result<
+            (EngramSourceOwnerPin, EngramSourceOwnerAuthority),
+            ApiError,
+        >,
     ) -> Result<RegisterTestRunResponse, ApiError> {
-        self.register_test_run_inner_with_source_owner_reserved(session_id, request, diagnostics, None,
-            |state, session, plan| verify_source_owner(state, session, plan.probe_deadline))
+        self.register_test_run_inner_with_source_owner_reserved(
+            session_id,
+            request,
+            diagnostics,
+            None,
+            TestRunCausalAdmission::Direct,
+            |state, session, plan| verify_source_owner(state, session, plan.probe_deadline),
+        )
     }
 
     fn register_test_run_inner_with_source_owner_reserved(
-        &self, session_id: &str, request: RegisterTestRunRequest,
-        diagnostics: &mut TestRunRegistrationDiagnostics, native: Option<&DeclaredRunReservation>,
-        verify_source_owner: impl FnOnce(&AppState, &str, EngramSourcePhasePlan)
-            -> Result<(EngramSourceOwnerPin, EngramSourceOwnerAuthority), ApiError>,
+        &self,
+        session_id: &str,
+        request: RegisterTestRunRequest,
+        diagnostics: &mut TestRunRegistrationDiagnostics,
+        native: Option<&DeclaredRunReservation>,
+        causal_admission: TestRunCausalAdmission,
+        verify_source_owner: impl FnOnce(
+            &AppState,
+            &str,
+            EngramSourcePhasePlan,
+        ) -> Result<
+            (EngramSourceOwnerPin, EngramSourceOwnerAuthority),
+            ApiError,
+        >,
     ) -> Result<RegisterTestRunResponse, ApiError> {
         if !request.run_id.starts_with("test-")
             || request.run_id.len() > 128
@@ -658,21 +853,39 @@ impl AppState {
         let disk = TestRunDisk::read(&run_directory, None)
             .ok_or_else(|| ApiError::bad_request("test run request cannot be indexed"))?;
         if disk.locator_identity.is_none() {
-            return Err(ApiError::bad_request("test run native locator identity is unavailable"));
+            return Err(ApiError::bad_request(
+                "test run native locator identity is unavailable",
+            ));
         }
         let request_identity = test_run_registration_identity(&value)?;
+        let causal_capture = self.resolve_test_run_causal_admission(
+            session_id,
+            &request.run_id,
+            &value,
+            &request_identity,
+            causal_admission,
+        )?;
         if value.get("nativeExecution").is_some() && native.is_none() {
-            return Err(ApiError::conflict("native execution requires its host reservation"));
+            return Err(ApiError::conflict(
+                "native execution requires its host reservation",
+            ));
         }
         if let Some(start) = native {
             let inner = diagnostics.lock(&self.inner);
-            if start.host_instance != self.server_instance_id || start.session_id != session_id
-                || start.run_id != request.run_id || start.request_identity != request_identity
-                || value.get("nativeExecution").and_then(Value::as_str) != Some(start.execution_id.as_str())
-                || inner.test_run_observations.get(&start.execution_id)
+            if start.host_instance != self.server_instance_id
+                || start.session_id != session_id
+                || start.run_id != request.run_id
+                || start.request_identity != request_identity
+                || value.get("nativeExecution").and_then(Value::as_str)
+                    != Some(start.execution_id.as_str())
+                || inner
+                    .test_run_observations
+                    .get(&start.execution_id)
                     .is_none_or(|row| row.declared_native.as_ref() != Some(start))
             {
-                return Err(ApiError::conflict("native start reservation changed or is unavailable"));
+                return Err(ApiError::conflict(
+                    "native start reservation changed or is unavailable",
+                ));
             }
         }
         diagnostics.request_digest = Some(request_identity.clone());
@@ -684,7 +897,9 @@ impl AppState {
         let request_common = test_runs_git_common_dir(FsPath::new(&disk.worktree))
             .and_then(|directory| fs::canonicalize(directory).ok());
         if request_common != fs::canonicalize(&common).ok() {
-            return Err(ApiError::bad_request("test run worktree is outside the configured project"));
+            return Err(ApiError::bad_request(
+                "test run worktree is outside the configured project",
+            ));
         }
         // Committed launcher runs and original host-owned native runs bind
         // through their named root. Every other run keeps the session's
@@ -694,8 +909,11 @@ impl AppState {
         // binding. A generic launcher request cannot opt into this route.
         let prior = {
             let inner = diagnostics.lock(&self.inner);
-            inner.test_run_registrations.get(&request.run_id)
-                .filter(|row| row.request_identity == request_identity).cloned()
+            inner
+                .test_run_registrations
+                .get(&request.run_id)
+                .filter(|row| row.request_identity == request_identity)
+                .cloned()
         };
         let declared = match prior {
             Some(prior) => prior.declared,
@@ -707,7 +925,9 @@ impl AppState {
         let requested = std::time::Instant::now();
         let clock = self.engram_budget_clock();
         let source_owner = test_run_request_source_owner(&value)?;
-        let source_budget = source_owner.as_ref().map_or(Duration::ZERO, |_| ENGRAM_SOURCE_METADATA_BUDGET);
+        let source_budget = source_owner
+            .as_ref()
+            .map_or(Duration::ZERO, |_| ENGRAM_SOURCE_METADATA_BUDGET);
         let deadline = test_run_registration_deadline(&clock, requested) + source_budget;
         diagnostics.fence_deadline = Some(deadline);
         diagnostics.fence_clock = clock.clone();
@@ -715,23 +935,45 @@ impl AppState {
             diagnostics.enter("verify_source_owner");
             // Source gets the shared capture budget. Claim/durability retain
             // their own allowance within the derived outer deadline.
-            let (actual, authority) = verify_source_owner(self, session_id,
-                EngramSourcePhasePlan::at(requested + ENGRAM_SOURCE_COMMAND_BUDGET, requested))?;
+            let (actual, authority) = verify_source_owner(
+                self,
+                session_id,
+                EngramSourcePhasePlan::at(requested + ENGRAM_SOURCE_COMMAND_BUDGET, requested),
+            )?;
             if &actual != expected {
-                return Err(ApiError::conflict("test run source owner pin does not match the configured executable"));
+                return Err(ApiError::conflict(
+                    "test run source owner pin does not match the configured executable",
+                ));
             }
             Some(authority)
-        } else { None };
-        let deadline = deadline.min(test_run_registration_deadline(&clock, std::time::Instant::now()));
+        } else {
+            None
+        };
+        let deadline = deadline.min(test_run_registration_deadline(
+            &clock,
+            std::time::Instant::now(),
+        ));
         diagnostics.fence_deadline = Some(deadline);
         let current_named_binding = if committed_input {
             diagnostics.enter("read_current_claim");
             Some(if native.is_some() {
-                self.read_test_run_current_named_binding(session_id, &request.run_id,
-                    worktree_keys.as_ref(), &clock, deadline, diagnostics)?
+                self.read_test_run_current_named_binding(
+                    session_id,
+                    &request.run_id,
+                    worktree_keys.as_ref(),
+                    &clock,
+                    deadline,
+                    diagnostics,
+                )?
             } else {
-                self.read_test_run_current_launcher_named_binding(session_id, &request.run_id,
-                    worktree_keys.as_ref(), &clock, deadline, diagnostics)?
+                self.read_test_run_current_launcher_named_binding(
+                    session_id,
+                    &request.run_id,
+                    worktree_keys.as_ref(),
+                    &clock,
+                    deadline,
+                    diagnostics,
+                )?
             })
         } else {
             None
@@ -740,10 +982,15 @@ impl AppState {
             // The off-lock held-claim read is another scheduling boundary.
             // Recheck program bytes before publication, retaining the same
             // deadline and doing no filesystem IO under StateInner.
-            engram_source_owner_verify_bytes(pin, requested + source_budget + TEST_RUN_REGISTRATION_DURABILITY_BUDGET)
-                .map_err(engram_source_owner_error)?;
+            engram_source_owner_verify_bytes(
+                pin,
+                requested + source_budget + TEST_RUN_REGISTRATION_DURABILITY_BUDGET,
+            )
+            .map_err(engram_source_owner_error)?;
         }
-        if let Some(trace) = &diagnostics.trace { trace.mark("validated"); }
+        if let Some(trace) = &diagnostics.trace {
+            trace.mark("validated");
+        }
         diagnostics.enter("capture_registration");
         let (expected, dispatch) = {
             let mut inner = diagnostics.lock(&self.inner);
@@ -765,45 +1012,69 @@ impl AppState {
                 .engram
                 .as_ref()
                 .and_then(|settings| settings.authority_store_key.clone());
+            if let Some(capture) = &causal_capture {
+                capture.validate_locked(&inner, session_id, &request.run_id)?;
+            }
             if let Some(expected) = &source_owner_authority {
                 let current = engram_source_owner_authority_locked(&inner, session_id)?;
                 if &current != expected {
-                    return Err(ApiError::conflict("test run source owner configuration changed before publication"));
+                    return Err(ApiError::conflict(
+                        "test run source owner configuration changed before publication",
+                    ));
                 }
             }
             let (work_binding, named_root) = if committed_input {
-                current_named_binding.as_ref().expect("committed input claim read").resolve_locked(
-                    &inner,
-                    session_id,
-                    authority_store.as_ref(),
-                    worktree_keys.as_ref(),
-                )?
+                current_named_binding
+                    .as_ref()
+                    .expect("committed input claim read")
+                    .resolve_locked(
+                        &inner,
+                        session_id,
+                        authority_store.as_ref(),
+                        worktree_keys.as_ref(),
+                    )?
             } else {
                 (inner.sessions[index].engram.work_binding.clone(), None)
             };
             if let Some(start) = native {
-                if work_binding.as_ref() != Some(&start.binding) || named_root.as_ref() != Some(&start.named)
+                if work_binding.as_ref() != Some(&start.binding)
+                    || named_root.as_ref() != Some(&start.named)
                     || authority_store.as_ref() != Some(&start.store)
-                    || inner.test_run_observations.get(&start.execution_id)
+                    || inner
+                        .test_run_observations
+                        .get(&start.execution_id)
                         .is_none_or(|row| row.declared_native.as_ref() != Some(start))
                 {
-                    return Err(ApiError::conflict("native source authority changed after its original start"));
+                    return Err(ApiError::conflict(
+                        "native source authority changed after its original start",
+                    ));
                 }
             }
             let registration = TestRunRegistration {
                 run_id: request.run_id.clone(),
                 native_completion: None,
                 source_owner,
-                native_origin: inner.federation.local.as_ref()
+                native_origin: inner
+                    .federation
+                    .local
+                    .as_ref()
                     .filter(|host| host.validate().is_ok())
-                    .filter(|_| mailbox_relay_uuid(&inner.sessions[index].federation_native_creation_id))
+                    .filter(|_| {
+                        mailbox_relay_uuid(&inner.sessions[index].federation_native_creation_id)
+                    })
                     .map(|host| TestRunNativeOrigin {
-                        causal_request: None,
+                        causal_request: causal_capture
+                            .as_ref()
+                            .map(|capture| capture.causal.clone()),
                         host: host.clone(),
                         native_session_id: session_id.to_owned(),
-                        native_creation_id: inner.sessions[index].federation_native_creation_id.clone(),
+                        native_creation_id: inner.sessions[index]
+                            .federation_native_creation_id
+                            .clone(),
                         project_id: project.id.clone(),
-                        project_scope: authority_store.as_ref().map(|store| store.project_id.clone()),
+                        project_scope: authority_store
+                            .as_ref()
+                            .map(|store| store.project_id.clone()),
                     }),
                 project_id: Some(project.id.clone()),
                 run_directory: test_run_display_path(&run_directory),
@@ -813,7 +1084,8 @@ impl AppState {
                 initiating_session_id: session_id.to_owned(),
                 owning_session_id: session_id.to_owned(),
                 creator_pid: disk.creator_pid,
-                registered_at: native.map_or_else(test_run_timestamp, |start| start.registered_at.clone()),
+                registered_at: native
+                    .map_or_else(test_run_timestamp, |start| start.registered_at.clone()),
                 started_at: disk.started_at.clone(),
                 preset: disk.preset,
                 detached: disk.detached,
@@ -862,7 +1134,9 @@ impl AppState {
                     }
                     if test_run_compact_is_installed(&inner, compacted) {
                         diagnostics.durability_confirmed = true;
-                        if let Some(trace) = &diagnostics.trace { trace.mark("durable"); }
+                        if let Some(trace) = &diagnostics.trace {
+                            trace.mark("durable");
+                        }
                         diagnostics.published = true;
                         return Ok(RegisterTestRunResponse {
                             contract: "termal-durable-test-run-registration",
@@ -889,7 +1163,13 @@ impl AppState {
                 // Only the new off-lock claim-read path can outlive its
                 // caller before insertion. Preserve staged/unbound admission
                 // and its existing queued-persistence pending contract.
-                if matches!(current_named_binding, Some(TestRunCurrentNamedBinding::Fresh { target: Some(_), .. })) {
+                if matches!(
+                    current_named_binding,
+                    Some(TestRunCurrentNamedBinding::Fresh {
+                        target: Some(_),
+                        ..
+                    })
+                ) {
                     test_run_registration_remaining(&clock, deadline, diagnostics)?;
                 }
                 inner
@@ -957,7 +1237,8 @@ impl AppState {
                                 "requestDigest": expected.request_identity,
                                 "ownerSessionId": expected.owning_session_id,
                             }),
-                        ).at_durability_boundary(DurabilityPendingOperation::TestRunRegistration));
+                        )
+                        .at_durability_boundary(DurabilityPendingOperation::TestRunRegistration));
                     }
                     return Err(ApiError::internal(
                         "test run registration durability failed",
@@ -973,25 +1254,38 @@ impl AppState {
             }
         }
         diagnostics.durability_confirmed = true;
-        if let Some(trace) = &diagnostics.trace { trace.mark("durable"); }
+        if let Some(trace) = &diagnostics.trace {
+            trace.mark("durable");
+        }
         // Replace the rescan's former identity recheck with one bounded read
         // of this request. A mutation while its fence waited is not an ACK.
         diagnostics.enter("recheck_request");
-        let TestRunJson::Parsed(current, _, _) = test_run_read_json(&run_directory.join("request.json")) else {
-            return Err(ApiError::conflict("test run request became unavailable before acknowledgement"));
+        let TestRunJson::Parsed(current, _, _) =
+            test_run_read_json(&run_directory.join("request.json"))
+        else {
+            return Err(ApiError::conflict(
+                "test run request became unavailable before acknowledgement",
+            ));
         };
         if test_run_registration_identity(&current)? != expected.request_identity {
-            return Err(ApiError::conflict("test run request changed before acknowledgement"));
+            return Err(ApiError::conflict(
+                "test run request changed before acknowledgement",
+            ));
         }
         #[cfg(test)]
         TEST_TEST_RUN_REGISTRATION_RECHECKED.with(|slot| {
-            if let Some(step) = slot.borrow_mut().take() { step(); }
+            if let Some(step) = slot.borrow_mut().take() {
+                step();
+            }
         });
         diagnostics.enter("publish_registration");
         let acknowledgement = {
             let mut inner = diagnostics.lock(&self.inner);
-            if !inner.test_run_registrations.get(&request.run_id)
-                .is_some_and(|actual| actual.matches_registration_snapshot(&expected)) {
+            if !inner
+                .test_run_registrations
+                .get(&request.run_id)
+                .is_some_and(|actual| actual.matches_registration_snapshot(&expected))
+            {
                 return Err(ApiError::conflict(
                     "test run registration changed before acknowledgement",
                 ));
@@ -1034,7 +1328,11 @@ fn test_run_registration_final_observation<'a>(
     observations: &'a BTreeMap<String, TestRunCommandObservation>,
     durable: Option<&HashSet<String>>,
 ) -> Option<&'a TestRunCommandObservation> {
-    test_run_registration_final_observation_from_candidates(registration, observations.values(), durable)
+    test_run_registration_final_observation_from_candidates(
+        registration,
+        observations.values(),
+        durable,
+    )
 }
 
 fn test_run_registration_final_observation_from_candidates<'a>(
@@ -1085,14 +1383,17 @@ fn test_run_matching_registration<'a>(
     inner: &'a impl TestRunProjectionSource,
     disk: &TestRunDisk,
 ) -> Option<&'a TestRunRegistration> {
-    inner.projection_registrations().get(&disk.run_id).filter(|registration| {
-        registration.locator_identity.is_some()
-            && registration.locator_identity == disk.locator_identity
-            && test_run_path_key(&registration.run_directory)
-                == test_run_path_key(&test_run_display_path(&disk.run_dir))
-            && disk.owner.as_deref() == Some(&registration.initiating_session_id)
-            && disk.request_identity.as_ref() == Some(&registration.request_identity)
-    })
+    inner
+        .projection_registrations()
+        .get(&disk.run_id)
+        .filter(|registration| {
+            registration.locator_identity.is_some()
+                && registration.locator_identity == disk.locator_identity
+                && test_run_path_key(&registration.run_directory)
+                    == test_run_path_key(&test_run_display_path(&disk.run_dir))
+                && disk.owner.as_deref() == Some(&registration.initiating_session_id)
+                && disk.request_identity.as_ref() == Some(&registration.request_identity)
+        })
 }
 
 fn test_run_registration_view_from_observations<'a>(
@@ -1101,8 +1402,12 @@ fn test_run_registration_view_from_observations<'a>(
     observations: impl IntoIterator<Item = &'a TestRunCommandObservation>,
 ) -> TestRunRegistrationView {
     let registration = test_run_matching_registration(inner, disk);
-    let durable = registration.is_some() && inner.projection_index().registered.contains(&disk.run_id);
+    let durable =
+        registration.is_some() && inner.projection_index().registered.contains(&disk.run_id);
     let mut view = TestRunRegistrationView {
+        request_message_id: registration
+            .and_then(test_run_causal_request)
+            .map(|causal| causal.request_message_id.clone()),
         registration_state: Some(
             if durable {
                 "registered"
@@ -1128,7 +1433,11 @@ fn test_run_registration_view_from_observations<'a>(
         tracking_durability: Some(
             if durable {
                 "durable"
-            } else if inner.projection_index().registration_failures.contains(&disk.run_id) {
+            } else if inner
+                .projection_index()
+                .registration_failures
+                .contains(&disk.run_id)
+            {
                 "failed"
             } else {
                 "unconfirmed"
@@ -1158,7 +1467,12 @@ fn test_run_registration_view_from_observations<'a>(
                 .to_owned(),
         ..TestRunRegistrationView::default()
     };
-    if registration.is_some() && inner.projection_index().registration_failures.contains(&disk.run_id) {
+    if registration.is_some()
+        && inner
+            .projection_index()
+            .registration_failures
+            .contains(&disk.run_id)
+    {
         view.restart_evidence_reason = "Registration persistence or query confirmation failed; no durable acknowledgement was issued.".to_owned();
     }
     if durable
@@ -1184,7 +1498,10 @@ fn test_run_registration_view_from_observations<'a>(
     // A carried locator/digest identifies retained execution facts. It does
     // not establish a pending native verification or make their loss safe.
     let carried = test_run_projection_carried_matches(
-        inner, &disk.run_dir, disk.results.as_ref().map(|row| row.digest.as_str()), false,
+        inner,
+        &disk.run_dir,
+        disk.results.as_ref().map(|row| row.digest.as_str()),
+        false,
     );
     if carried {
         view.restart_would_void_evidence = None;
@@ -1203,7 +1520,10 @@ fn test_run_registered_fallback_from_observations<'a>(
     observations: impl IntoIterator<Item = &'a TestRunCommandObservation>,
 ) -> TestRunSummary {
     let durable = inner.projection_index().registered.contains(&row.run_id);
-    let failed = inner.projection_index().registration_failures.contains(&row.run_id);
+    let failed = inner
+        .projection_index()
+        .registration_failures
+        .contains(&row.run_id);
     let terminal = test_run_registration_final_observation_from_candidates(
         row,
         observations,
@@ -1212,6 +1532,8 @@ fn test_run_registered_fallback_from_observations<'a>(
     let unbound = durable && terminal.is_some();
     TestRunSummary {
         registration: TestRunRegistrationView {
+            request_message_id: test_run_causal_request(row)
+                .map(|causal| causal.request_message_id.clone()),
             registration_state: Some(if durable { "registered" } else { "registrationPending" }.to_owned()),
             tracking_provenances: vec![if durable { "launcherRegistered" } else { "registrationAttempt" }.to_owned()],
             tracking_durability: Some(if durable { "durable" } else if failed { "failed" } else { "unconfirmed" }.to_owned()),
@@ -1242,10 +1564,17 @@ async fn register_session_test_run(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-    request: Result<Json<RegisterTestRunRequest>, JsonRejection>,
+    request: Result<Json<RegisterTestRunApiRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<RegisterTestRunResponse>), ApiError> {
     let Json(request) =
         request.map_err(|error| api_json_rejection("test run registration", error))?;
+    let causal_admission = state
+        .prepare_test_run_causal_admission(&session_id, &request.run_id, request.request_message_id)
+        .await?;
+    let request = RegisterTestRunRequest {
+        run_id: request.run_id,
+        run_directory: request.run_directory,
+    };
     // This span begins at handler entry, after Axum's body extraction. It is
     // deliberately not labelled as network arrival or request-body time.
     let dispatched_at = std::time::Instant::now();
@@ -1254,11 +1583,24 @@ async fn register_session_test_run(
     diagnostics.phase_started = dispatched_at;
     diagnostics.phase = "blocking_dispatch";
     diagnostics.correlate(&headers);
-    diagnostics.trace = Some(state.test_run_phase_traces.begin("registration", Some(&request.run_id),
-        &diagnostics.operation_id, dispatched_at));
+    diagnostics.trace = Some(state.test_run_phase_traces.begin(
+        "registration",
+        Some(&request.run_id),
+        &diagnostics.operation_id,
+        dispatched_at,
+    ));
     let response = run_blocking_api(move || {
-        if let Some(trace) = &diagnostics.trace { trace.mark("blocking_dispatched"); }
-        state.register_test_run_with_diagnostics(&session_id, request, diagnostics)
-    }).await?;
+        if let Some(trace) = &diagnostics.trace {
+            trace.mark("blocking_dispatched");
+        }
+        state.register_test_run_reserved_with_causal(
+            &session_id,
+            request,
+            diagnostics,
+            None,
+            causal_admission,
+        )
+    })
+    .await?;
     Ok((StatusCode::CREATED, Json(response)))
 }

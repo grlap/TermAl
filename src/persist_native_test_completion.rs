@@ -85,6 +85,7 @@ fn reject_unversioned_native_test_custody(
     connection: &rusqlite::Connection,
     version: &str,
 ) -> Result<()> {
+    reject_unversioned_test_request_custody(connection, version)?;
     reject_unversioned_direct_prompt_policy(connection, version)?;
     if version == SQLITE_SCHEMA_VERSION || version == SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION {
         return Ok(());
@@ -92,6 +93,8 @@ fn reject_unversioned_native_test_custody(
     if matches!(
         version,
         SQLITE_DIRECT_PROMPT_PREDECESSOR
+            | SQLITE_TEST_REQUEST_CUSTODY_PREDECESSOR
+            | SQLITE_TEST_REQUEST_CUSTODY_IMPORT_PREDECESSOR
             | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR
             | SQLITE_DIRECT_PROMPT_DELIVERY_PREDECESSOR
             | SQLITE_DIRECT_PROMPT_DELIVERY_IMPORT_PREDECESSOR
@@ -178,6 +181,12 @@ fn advance_sqlite_native_test_completion_reader_floor(
     connection: &rusqlite::Connection,
 ) -> Result<()> {
     let version = required_state_meta_value(connection, "schema_version")?;
+    if matches!(
+        version.as_str(),
+        SQLITE_TEST_REQUEST_CUSTODY_PREDECESSOR | SQLITE_TEST_REQUEST_CUSTODY_IMPORT_PREDECESSOR
+    ) {
+        return advance_sqlite_test_request_custody_reader_floor(connection);
+    }
     if matches!(
         version.as_str(),
         SQLITE_DIRECT_PROMPT_PREDECESSOR

@@ -49,6 +49,20 @@ membership are checked; a copied handle is not a capability.
 
 ## One home, unchanged retries
 
+Native sends can carry the closed `testRequest` described in
+[Durable agent mailboxes](agent-mailboxes.md#typed-native-test-requests).
+The public captured payload travels in the authenticated append and full message
+read. Its requester, actual recipient and original sender key must match the
+append's principals and key. It joins the retained intent digest only when
+present; ordinary absent-field bytes and digest input are unchanged. The sender's
+private destination project/store mapping stays in the local intent and is never
+exported with the append, history or read response. Reading the public key grants
+neither sender authentication nor completion-settlement authority.
+
+Typed input is validated on the public send, relay decode and programmatic append
+boundaries. A failed transport retains the same payload, key, recipient and route.
+There is no fresh claim capture on retry and no fallback to an ordinary send.
+
 The pair's configured central host is the single immutable conversation home,
 including when the satellite sends first. Both directions share that mailbox.
 Bodies, dense sequences, issued read receipts and participant cursors live

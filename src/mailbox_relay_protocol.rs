@@ -202,11 +202,7 @@ impl MailboxRelayWake {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct MailboxRelayAppend {
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "reject_inactive_test_request_custody"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     test_request: Option<MailboxTestPayload>,
     requested_target: String,
     conversation: MailboxRelayConversation,
@@ -222,8 +218,23 @@ struct MailboxRelayAppend {
 
 impl MailboxRelayAppend {
     fn input(&self) -> Result<MailboxAppendInput, ApiError> {
-        if self.test_request.is_some() {
-            return Err(ApiError::conflict(TEST_REQUEST_CUSTODY_UNAVAILABLE));
+        if let Some(payload) = &self.test_request {
+            validate_mailbox_test_payload(payload)?;
+            if payload.requester != self.sender {
+                return Err(ApiError::conflict(
+                    "invalid_request: test-request sender does not match authenticated append",
+                ));
+            }
+            if payload.recipient.as_ref() != Some(&self.target) {
+                return Err(ApiError::conflict(
+                    "invalid_request: test-request recipient does not match append",
+                ));
+            }
+            if payload.request_send_key != self.idempotency_key {
+                return Err(ApiError::conflict(
+                    "invalid_request: test-request send key differs from append",
+                ));
+            }
         }
         self.conversation.require_member(&self.sender)?;
         self.conversation.require_member(&self.target)?;
@@ -259,12 +270,21 @@ impl MailboxRelayAppend {
     fn digest(&self) -> Result<String, ApiError> {
         self.input()?;
         // Display names can refresh without changing a previously admitted send.
-        Ok(sha256_hex(&serde_json::to_vec(&json!({
+        let mut value = json!({
             "version": MAILBOX_RELAY_VERSION, "conversation": self.conversation,
             "sender": self.sender, "target": self.target, "message": self.message,
             "requestedTarget": self.requested_target,
             "idempotencyKey": self.idempotency_key, "topic": self.topic, "stateStamp": self.state_stamp,
-        })).expect("native relay request serializes")))
+        });
+        // The optional key changes selected sends only. Legacy None retains
+        // its exact digest input, including the historical null fields.
+        if let Some(payload) = &self.test_request {
+            value["testRequest"] =
+                serde_json::to_value(payload).expect("native test-request custody serializes");
+        }
+        Ok(sha256_hex(
+            &serde_json::to_vec(&value).expect("native relay request serializes"),
+        ))
     }
 }
 
@@ -285,7 +305,9 @@ struct MailboxRelaySummary {
 impl MailboxRelaySummary {
     fn participant_names(&self) -> [String; 2] {
         self.conversation.participants.clone().map(|principal| {
-            self.summary.participants.iter()
+            self.summary
+                .participants
+                .iter()
                 .find(|participant| participant.session_id == principal.participant_key())
                 .map(|participant| participant.display_name.clone())
                 .unwrap_or_else(|| principal.native_session_id.clone())

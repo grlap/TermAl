@@ -9,7 +9,10 @@ impl MailboxStore {
         target: &FederationMailboxParticipant,
         authority: &FederationMailboxAuthority,
     ) -> Result<MailboxSummary> {
-        let _writer = self.lock_writer_with_budget("creating central mailbox membership", Duration::from_secs(2))?;
+        let _writer = self.lock_writer_with_budget(
+            "creating central mailbox membership",
+            Duration::from_secs(2),
+        )?;
         let mut connection = self.connection()?;
         let transaction =
             begin_mailbox_write(&mut connection, "creating central mailbox membership")?;
@@ -25,8 +28,22 @@ impl MailboxStore {
         let now = stamp_now();
         transaction.execute("INSERT INTO mailboxes(id,participant_key,created_at,next_sequence) VALUES(?1,?2,?3,1) ON CONFLICT(participant_key) DO NOTHING",
             rusqlite::params![id,key,now])?;
-        upsert_mailbox_participant(&transaction, &id, &actor.session_id, &actor.name, &now, false)?;
-        upsert_mailbox_participant(&transaction, &id, &target.session_id, &target.name, &now, false)?;
+        upsert_mailbox_participant(
+            &transaction,
+            &id,
+            &actor.session_id,
+            &actor.name,
+            &now,
+            false,
+        )?;
+        upsert_mailbox_participant(
+            &transaction,
+            &id,
+            &target.session_id,
+            &target.name,
+            &now,
+            false,
+        )?;
         let summary =
             mailbox_summaries_for_session_with_empty(&transaction, &actor.session_id, true)?
                 .into_iter()
@@ -66,7 +83,7 @@ impl MailboxStore {
             .query_row(
                 "SELECT id, mailbox_id, sequence, sender_session_id, sender_name,
              target_session_id,target_name,created_at,class,topic,state_stamp,body,
-             idempotency_key,unread_depth_at_append,notification_disposition
+             idempotency_key,unread_depth_at_append,notification_disposition,test_request_json
              FROM mailbox_messages WHERE id=?1
              AND NOT(target_session_id=?2 AND COALESCE(topic,'') GLOB ?3)",
                 rusqlite::params![message_id, actor, DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN],

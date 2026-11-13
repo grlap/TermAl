@@ -32,6 +32,7 @@ pub(super) async fn ordinary(
                 class: Some("routine".into()),
             },
             _target_binding: (),
+            test_request: None,
         }),
     )
     .await

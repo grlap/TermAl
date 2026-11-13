@@ -35,7 +35,17 @@ function requestIdentity(request) {
   // Optional executable provenance is immutable too. Omitting it preserves
   // every legacy request's identity; this additive lane starts no owner call.
   if (request.sourceOwner !== undefined) immutable.sourceOwner = request.sourceOwner;
+  if (request.requestMessageId !== undefined) {
+    immutable.requestMessageId = validateRequestMessageId(request.requestMessageId);
+  }
   return createHash("sha256").update(JSON.stringify(ordered(immutable))).digest("hex");
+}
+
+export function validateRequestMessageId(value) {
+  if (typeof value !== "string" || !/^(?:mailbox-message-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|relay-message-[A-Za-z0-9_-]{1,1024})$/u.test(value)) {
+    throw new Error("registration error: malformed requestMessageId");
+  }
+  return value;
 }
 
 function pathIdentity(path) {
@@ -349,7 +359,7 @@ async function queryRegisteredRun(request, runDirectory, configuration, deadline
         || pathIdentity(run.runDir) !== pathIdentity(runDirectory)
         || pathIdentity(run.worktree) !== pathIdentity(request.root)
         || run.creatorPid !== request.creatorPid || run.startedAt !== request.started
-        || run.detached !== request.detached) {
+        || run.detached !== request.detached || run.requestMessageId !== request.requestMessageId) {
       const category = run?.runId !== request.runId ? "identity_mismatch"
         : run.registrationState !== "registered" ? "disposition_mismatch"
           : run.trackingDurability !== "durable" ? "durability_unconfirmed" : "identity_mismatch";
@@ -367,6 +377,12 @@ export async function registerTestRun(request, runDirectory, env = process.env) 
 }
 
 async function registerTestRunWithin(request, runDirectory, env) {
+  if (request.requestMessageId !== undefined) {
+    validateRequestMessageId(request.requestMessageId);
+    if (!hasTermalContext(env)) {
+      throw new Error("registration error: selected test requests require their native TermAl host");
+    }
+  }
   if (!hasTermalContext(env)) {
     const registration = { state: "untracked", reason: "standalone invocation has no TermAl host/session environment" };
     console.log(`UNTRACKED ${request.runId}: ${registration.reason}`);
@@ -377,7 +393,8 @@ async function registerTestRunWithin(request, runDirectory, env) {
   if (request.owner !== session) throw new Error("registration error: launching session differs from the run owner");
   // Both attempts send these exact bytes and operation identity. A lost ACK
   // or validated pending write cannot create another logical registration.
-  const body = JSON.stringify({ runId: request.runId, runDirectory });
+  const body = JSON.stringify({ runId: request.runId, runDirectory,
+    ...(request.requestMessageId === undefined ? {} : { requestMessageId: request.requestMessageId }) });
   const identity = requestIdentity(request);
   const budgetMs = request.sourceOwner === undefined ? registrationBudgetMs : sourceRegistrationBudgetMs;
   const deadline = Date.now() + budgetMs;
@@ -449,6 +466,7 @@ async function registerTestRunWithin(request, runDirectory, env) {
 }
 
 export async function validateRunRegistration(request, env, runDirectory) {
+  if (request.requestMessageId !== undefined) validateRequestMessageId(request.requestMessageId);
   if (request.registration?.state === "registered"
       && request.registration.runId === request.runId
       && request.registration.initiatingSessionId === request.owner) {

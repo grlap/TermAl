@@ -18,32 +18,46 @@ impl FederationDeliveryCapability {
         creation: &str,
         sender: &FederationMailboxBinding,
     ) -> Result<FederationMailboxAdmission<'a>> {
-        let link = self.lease.as_ref().map(|lease| {
-            let link = lease.channel.state.lock().expect("federation link mutex poisoned");
-            if link.incarnation.as_deref() != Some(lease.incarnation.as_str())
-                || link.recorded_incarnation.as_deref() != Some(lease.incarnation.as_str()) {
-                return Err(federation_delivery_conflict());
-            }
-            Ok(link)
-        }).transpose()?;
+        let link = self
+            .lease
+            .as_ref()
+            .map(|lease| {
+                let link = lease
+                    .channel
+                    .state
+                    .lock()
+                    .expect("federation link mutex poisoned");
+                if link.incarnation.as_deref() != Some(lease.incarnation.as_str())
+                    || link.recorded_incarnation.as_deref() != Some(lease.incarnation.as_str())
+                {
+                    return Err(federation_delivery_conflict());
+                }
+                Ok(link)
+            })
+            .transpose()?;
         let inner = app.lock_federation_intent_owner(session, creation, sender)?;
         if self.central != sender.central {
             return Err(federation_delivery_conflict());
         }
         if let Some(lease) = &self.lease {
             let basis = lease.channel.transport_basis();
-            let peer = app.refresh_federation_transport_snapshot_locked(
-                &inner, &basis, &lease.incarnation,
-            ).map_err(|_| federation_delivery_conflict())?;
+            let peer = app
+                .refresh_federation_transport_snapshot_locked(&inner, &basis, &lease.incarnation)
+                .map_err(|_| federation_delivery_conflict())?;
             if inner.preferences.federation.role != FederationRole::Satellite
-                || peer.peer != self.central {
+                || peer.peer != self.central
+            {
                 return Err(federation_delivery_conflict());
             }
         } else if inner.preferences.federation.role != FederationRole::Central
-            || inner.federation.local.as_ref() != Some(&self.central) {
+            || inner.federation.local.as_ref() != Some(&self.central)
+        {
             return Err(federation_delivery_conflict());
         }
-        Ok(FederationMailboxAdmission { _inner: inner, _link: link })
+        Ok(FederationMailboxAdmission {
+            _inner: inner,
+            _link: link,
+        })
     }
 }
 
@@ -54,14 +68,21 @@ impl AppState {
     ) -> Result<FederationDeliveryCapability, ApiError> {
         let (protocol, lease): (FederationMailboxProtocol, _) = self
             .dispatch_federation_mailbox_operation_with_capability(
-                session, FederationMailboxOperation::Protocol, None,
-            ).await?;
+                session,
+                FederationMailboxOperation::Protocol,
+                None,
+            )
+            .await?;
         if protocol.protocol_version != FEDERATION_MAILBOX_WIRE_VERSION
-            || protocol.schema_version != FEDERATION_MAILBOX_SCHEMA_VERSION {
+            || protocol.schema_version != FEDERATION_MAILBOX_SCHEMA_VERSION
+        {
             return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
         }
-        Ok(FederationDeliveryCapability { central: protocol.central, lease,
-            supported: protocol.sender_intent_registry })
+        Ok(FederationDeliveryCapability {
+            central: protocol.central,
+            lease,
+            supported: protocol.sender_intent_registry,
+        })
     }
 
     async fn refuse_unsupported_federation_delivery(
@@ -75,12 +96,18 @@ impl AppState {
         let native = session.to_owned();
         let delivery = delivery.clone();
         let refusal = run_blocking_api(move || {
-            app.mailbox_store.refuse_unattempted_federation_intent(&delivery, &native, &creation, || {
-                capability.lock(&app, &native, &creation, &delivery.sender)
-            }).map_err(mailbox_api_error)
-        }).await?;
-        Ok(if refusal.is_some() { federation_delivery_local_refusal() }
-            else { federation_delivery_unsupported() })
+            app.mailbox_store
+                .refuse_unattempted_federation_intent(&delivery, &native, &creation, || {
+                    capability.lock(&app, &native, &creation, &delivery.sender)
+                })
+                .map_err(mailbox_api_error)
+        })
+        .await?;
+        Ok(if refusal.is_some() {
+            federation_delivery_local_refusal()
+        } else {
+            federation_delivery_unsupported()
+        })
     }
 
     async fn dispatch_federation_delivery_operation<T: DeserializeOwned>(
@@ -99,12 +126,17 @@ impl AppState {
         }
         let creation = self.federation_intent_owner(session)?;
         {
-            let _current = capability.lock(self, session, &creation, &delivery.sender)
+            let _current = capability
+                .lock(self, session, &creation, &delivery.sender)
                 .map_err(mailbox_api_error)?;
         }
         self.dispatch_federation_mailbox_operation_with_capability(
-            session, operation, Some(capability),
-        ).await.map(|(value, _)| value)
+            session,
+            operation,
+            Some(capability),
+        )
+        .await
+        .map(|(value, _)| value)
     }
 
     fn federation_intent_owner(&self, session: &str) -> Result<String, ApiError> {
@@ -147,7 +179,8 @@ impl AppState {
         session: &str,
         operation: FederationMailboxOperation,
     ) -> Result<FederationDelivery, ApiError> {
-        self.prepare_federation_delivery_with_target(session, operation, None).await
+        self.prepare_federation_delivery_with_target(session, operation, None)
+            .await
     }
 
     async fn prepare_federation_delivery_with_target(
@@ -169,7 +202,9 @@ impl AppState {
             ));
         };
         if !matches!(mailbox_reference_handle(&target), Ok(None)) {
-            return Err(ApiError::not_found("mailbox reference requires explicit resolution"));
+            return Err(ApiError::not_found(
+                "mailbox reference requires explicit resolution",
+            ));
         }
         let actor = self
             .federation_mailbox_actor(session)?
@@ -193,31 +228,58 @@ impl AppState {
             let connection = lookup_store.connection().map_err(mailbox_api_error)?;
             federation_intent_for_owner(&connection, &lookup_owner, &lookup_creation, &lookup_key)
                 .map_err(mailbox_api_error)
-        }).await?;
-        if retained.as_ref().is_some_and(|intent| intent.sender != actor.binding.participant_key()) {
+        })
+        .await?;
+        if retained
+            .as_ref()
+            .is_some_and(|intent| intent.sender != actor.binding.participant_key())
+        {
             return Err(ApiError::conflict(
-                "delivery key is retained under a prior domain sender; inspect its mailbox-intents status; no new delivery was admitted"));
+                "delivery key is retained under a prior domain sender; inspect its mailbox-intents status; no new delivery was admitted",
+            ));
         }
-        let exact = retained.as_ref().map(|retained| {
-            retained.matches_owner(session, &creation).map_err(mailbox_api_error)?;
-            retained.identity().map_err(mailbox_api_error)
-        }).transpose()?;
+        let exact = retained
+            .as_ref()
+            .map(|retained| {
+                retained
+                    .matches_owner(session, &creation)
+                    .map_err(mailbox_api_error)?;
+                retained.identity().map_err(mailbox_api_error)
+            })
+            .transpose()?;
         if let Some(captured) = &captured_target {
             captured.validate()?;
-            if target != captured.participant_key() || captured.central != actor.binding.central
-                || exact.as_ref().is_some_and(|retained| retained.target != *captured) {
+            if target != captured.participant_key()
+                || captured.central != actor.binding.central
+                || exact
+                    .as_ref()
+                    .is_some_and(|retained| retained.target != *captured)
+            {
                 return Err(mailbox_api_error(federation_delivery_conflict()));
             }
         }
         let target = match exact {
-            Some(exact) if target == exact.target.participant_key() => FederationMailboxParticipant {
-                session_id: exact.target.participant_key(), binding: exact.target,
-                host_name: "Retained target".into(), name: "Retained target".into(),
-            },
-            _ => if let Some(binding) = captured_target {
-                FederationMailboxParticipant { session_id: binding.participant_key(), binding,
-                    host_name: "Captured target".into(), name: "Captured target".into() }
-            } else { self.resolve_delivery_recipient(session, role, &target).await? },
+            Some(exact) if target == exact.target.participant_key() => {
+                FederationMailboxParticipant {
+                    session_id: exact.target.participant_key(),
+                    binding: exact.target,
+                    host_name: "Retained target".into(),
+                    name: "Retained target".into(),
+                }
+            }
+            _ => {
+                if let Some(binding) = captured_target {
+                    FederationMailboxParticipant {
+                        session_id: binding.participant_key(),
+                        binding,
+                        host_name: "Captured target".into(),
+                        name: "Captured target".into(),
+                    }
+                } else {
+                    self.resolve_delivery_recipient(session, role, &target)
+                        .await?
+                }
+            }
         };
         let delivery = FederationDelivery {
             version: 1,
@@ -233,19 +295,26 @@ impl AppState {
             if retained.digest != delivery.digest() {
                 return Err(mailbox_api_error(federation_delivery_conflict()));
             }
-            if let Some(error) = retained.terminal_error() { return Err(error); }
+            if let Some(error) = retained.terminal_error() {
+                return Err(error);
+            }
             if retained.state == "homeCommitted" {
-                let _current = self.lock_federation_intent_owner(session, &creation, &delivery.sender)
+                let _current = self
+                    .lock_federation_intent_owner(session, &creation, &delivery.sender)
                     .map_err(mailbox_api_error)?;
                 return Ok(delivery);
             }
         }
         let offline_basis = if role == FederationRole::Satellite {
             Some(self.federation_peer_snapshot(&delivery.sender.central.host_id)?)
-        } else { None };
+        } else {
+            None
+        };
         let capability = match self.negotiate_federation_delivery_capability(session).await {
             Ok(proof) if !proof.supported => {
-                return Err(self.refuse_unsupported_federation_delivery(session, &delivery, proof).await?);
+                return Err(self
+                    .refuse_unsupported_federation_delivery(session, &delivery, proof)
+                    .await?);
             }
             Ok(proof) => Some(proof),
             // A local retry queue is not central coordination admission. Its
@@ -262,11 +331,14 @@ impl AppState {
                     if let Some(proof) = &capability {
                         proof.lock(&app, &session, &creation, &stored.sender)
                     } else {
-                        let inner = app.lock_federation_intent_owner(&session, &creation, &stored.sender)?;
+                        let inner =
+                            app.lock_federation_intent_owner(&session, &creation, &stored.sender)?;
                         if inner.preferences.federation.role != FederationRole::Satellite {
                             return Err(federation_delivery_conflict());
                         }
-                        let basis = offline_basis.as_ref().ok_or_else(federation_delivery_conflict)?;
+                        let basis = offline_basis
+                            .as_ref()
+                            .ok_or_else(federation_delivery_conflict)?;
                         // The satellite records its central as Enrolled after
                         // connecting. This local queue grants no new central
                         // admission; the existing binding must remain current.
@@ -275,7 +347,10 @@ impl AppState {
                         }
                         app.ensure_federation_peer_current_locked(&inner, basis)
                             .map_err(|_| federation_delivery_conflict())?;
-                        Ok(FederationMailboxAdmission { _inner: inner, _link: None })
+                        Ok(FederationMailboxAdmission {
+                            _inner: inner,
+                            _link: None,
+                        })
                     }
                 })
                 .map_err(mailbox_api_error)?;
@@ -291,42 +366,66 @@ impl AppState {
         role: FederationRole,
         reference: &str,
     ) -> Result<FederationMailboxParticipant, ApiError> {
-        if reference.starts_with("session-") && matches!(role, FederationRole::Central | FederationRole::Satellite) {
+        if reference.starts_with("session-")
+            && matches!(role, FederationRole::Central | FederationRole::Satellite)
+        {
             // Exact native ids address this host only. No unrelated peer is
             // consulted to enroll or resolve a local native root.
-            self.ensure_automatic_mailbox_participation(reference, false).await?;
+            self.ensure_automatic_mailbox_participation(reference, false)
+                .await?;
             let qualified = self.automatic_local_mailbox_target(reference)?;
             if role == FederationRole::Central {
                 return resolve_federation_mailbox_participant_locked(
-                    &self.inner.lock().expect("state mutex poisoned"), &qualified,
+                    &self.inner.lock().expect("state mutex poisoned"),
+                    &qualified,
                 );
             }
-            let rows: Vec<FederationMailboxParticipant> = self.dispatch_federation_mailbox_operation(
-                session, FederationMailboxOperation::Directory { alias_basis: false },
-            ).await?;
+            let rows: Vec<FederationMailboxParticipant> = self
+                .dispatch_federation_mailbox_operation(
+                    session,
+                    FederationMailboxOperation::Directory { alias_basis: false },
+                )
+                .await?;
             return resolve_federation_delivery_target(&rows, &qualified);
         }
-        let exact_native = matches!(FederationMailboxAlias::parse(reference, None),
-            Ok(FederationMailboxAlias::HostNative { .. }));
+        let exact_native = matches!(
+            FederationMailboxAlias::parse(reference, None),
+            Ok(FederationMailboxAlias::HostNative { .. })
+        );
         if reference.starts_with("domain-session-") || exact_native {
             // Exact selection reads existing current participants. It must not
             // admit this target or unrelated roots through alias discovery.
             if role == FederationRole::Central {
                 return resolve_federation_mailbox_participant_locked(
-                    &self.inner.lock().expect("state mutex poisoned"), reference);
+                    &self.inner.lock().expect("state mutex poisoned"),
+                    reference,
+                );
             }
-            let rows: Vec<FederationMailboxParticipant> = self.dispatch_federation_mailbox_operation(
-                session, FederationMailboxOperation::Directory { alias_basis: false }).await?;
+            let rows: Vec<FederationMailboxParticipant> = self
+                .dispatch_federation_mailbox_operation(
+                    session,
+                    FederationMailboxOperation::Directory { alias_basis: false },
+                )
+                .await?;
             return resolve_federation_delivery_target(&rows, reference);
         }
         // Aliases require a fresh inventory even when an older row matches.
         // An unavailable host cannot silently disappear from uniqueness checks.
         let snapshot = self.mailbox_directory_snapshot(session).await?;
-        if !federation_directory_alias_available(reference, &snapshot.unavailable_hosts, snapshot.alias_basis.as_ref()) {
+        if !federation_directory_alias_available(
+            reference,
+            &snapshot.unavailable_hosts,
+            snapshot.alias_basis.as_ref(),
+        ) {
             return Err(ApiError::conflict(
-                "mailbox alias inventory is unavailable; use a known exact participant id or an explicit host: target on an available host"));
+                "mailbox alias inventory is unavailable; use a known exact participant id or an explicit host: target on an available host",
+            ));
         }
-        resolve_federation_delivery_target_with_basis(&snapshot.participants, reference, snapshot.alias_basis.as_ref())
+        resolve_federation_delivery_target_with_basis(
+            &snapshot.participants,
+            reference,
+            snapshot.alias_basis.as_ref(),
+        )
     }
 
     async fn send_prepared_federation_delivery(
@@ -356,7 +455,9 @@ impl AppState {
                 if intent.digest != stored.digest() {
                     return Err(mailbox_api_error(federation_delivery_conflict()));
                 }
-                if let Some(error) = intent.terminal_error() { return Err(error); }
+                if let Some(error) = intent.terminal_error() {
+                    return Err(error);
+                }
                 intent
             };
             if let Some(receipt) = intent.committed_receipt().map_err(mailbox_api_error)? {
@@ -379,7 +480,9 @@ impl AppState {
             error
         })?;
         if !capability.supported {
-            return Err(self.refuse_unsupported_federation_delivery(session, &delivery, capability).await?);
+            return Err(self
+                .refuse_unsupported_federation_delivery(session, &delivery, capability)
+                .await?);
         }
         let app = self.clone();
         let native = session.to_owned();
@@ -387,10 +490,13 @@ impl AppState {
         let stored = delivery.clone();
         let admission = capability.clone();
         run_blocking_api(move || {
-            app.mailbox_store.mark_federation_intent_unknown(&stored, || {
-                admission.lock(&app, &native, &creation, &stored.sender)
-            }).map_err(mailbox_api_error)
-        }).await?;
+            app.mailbox_store
+                .mark_federation_intent_unknown(&stored, || {
+                    admission.lock(&app, &native, &creation, &stored.sender)
+                })
+                .map_err(mailbox_api_error)
+        })
+        .await?;
         // Failure/lost reply leaves appendOutcomeUnknown durably intact. A
         // negative lookup or a local timeout never certifies a terminal state.
         let response: FederationDeliveryOutcome = self
@@ -406,16 +512,26 @@ impl AppState {
             FederationDeliveryOutcome::Committed(receipt) => receipt,
             FederationDeliveryOutcome::Terminal(terminal) => {
                 if terminal.canonical_digest != delivery.digest() {
-                    return Err(ApiError::bad_gateway("invalid central terminal outcome identity"));
+                    return Err(ApiError::bad_gateway(
+                        "invalid central terminal outcome identity",
+                    ));
                 }
                 let app = self.clone();
                 run_blocking_api(move || {
-                    app.mailbox_store.settle_federation_terminal_intent(&delivery, terminal.state, || {
-                        app.lock_federation_intent_owner(&settle_native, &settle_creation, &delivery.sender)
-                    }).map_err(mailbox_api_error)
-                }).await?;
+                    app.mailbox_store
+                        .settle_federation_terminal_intent(&delivery, terminal.state, || {
+                            app.lock_federation_intent_owner(
+                                &settle_native,
+                                &settle_creation,
+                                &delivery.sender,
+                            )
+                        })
+                        .map_err(mailbox_api_error)
+                })
+                .await?;
                 return Err(ApiError::conflict(format!(
-                    "central delivery is {}; authoritative outcome retained", terminal.state.as_str(),
+                    "central delivery is {}; authoritative outcome retained",
+                    terminal.state.as_str(),
                 )));
             }
         };
@@ -463,7 +579,8 @@ fn resolve_federation_delivery_target_with_basis(
     reference: &str,
     basis: Option<&FederationMailboxAliasBasis>,
 ) -> Result<FederationMailboxParticipant, ApiError> {
-    let first = select_federation_mailbox_alias(rows, reference, basis, federation_mailbox_alias_row)?;
+    let first =
+        select_federation_mailbox_alias(rows, reference, basis, federation_mailbox_alias_row)?;
     first.validate()?;
     Ok(first.clone())
 }
@@ -484,13 +601,27 @@ struct PrepareFederationIntentRequest {
 struct SendMailboxApiRequest {
     #[serde(flatten)]
     message: SendMailboxMessageRequest,
-    #[serde(default, rename = "targetBinding", deserialize_with = "reject_prepare_target_binding")]
+    #[serde(
+        default,
+        rename = "testRequest",
+        deserialize_with = "deserialize_mailbox_test_request"
+    )]
+    test_request: Option<MailboxTestRequest>,
+    #[serde(
+        default,
+        rename = "targetBinding",
+        deserialize_with = "reject_prepare_target_binding"
+    )]
     _target_binding: (),
 }
 
-fn reject_prepare_target_binding<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
+fn reject_prepare_target_binding<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<(), D::Error> {
     let _ = serde::de::IgnoredAny::deserialize(deserializer)?;
-    Err(serde::de::Error::custom("targetBinding is only supported by local intent preparation"))
+    Err(serde::de::Error::custom(
+        "targetBinding is only supported by local intent preparation",
+    ))
 }
 
 async fn prepare_federation_intent_route(
@@ -552,7 +683,9 @@ async fn retry_federation_intent_route(
 }
 
 async fn retry_retained_federation_intent(
-    state: AppState, session: String, key: String,
+    state: AppState,
+    session: String,
+    key: String,
 ) -> Result<MailboxAppendReceipt, ApiError> {
     let app = state.clone();
     let native = session.clone();
@@ -564,7 +697,9 @@ async fn retry_retained_federation_intent(
             .map_err(mailbox_api_error)?;
         return Ok(receipt);
     }
-    if let Some(error) = intent.terminal_error() { return Err(error); }
+    if let Some(error) = intent.terminal_error() {
+        return Err(error);
+    }
     let payload = intent
         .payload
         .ok_or_else(|| ApiError::conflict("delivery retry payload was collected"))?;
@@ -585,7 +720,9 @@ async fn cancel_federation_intent_route(
     if intent.state == "abandoned" {
         return Ok(Json(intent.status()));
     }
-    if let Some(error) = intent.terminal_error() { return Err(error); }
+    if let Some(error) = intent.terminal_error() {
+        return Err(error);
+    }
     if intent.state != "localIntentDurable" {
         return Err(ApiError::conflict(
             "possibly sent or committed delivery cannot be cancelled from a negative lookup",
@@ -613,13 +750,19 @@ async fn cancel_federation_intent_route(
         ));
     }
     run_blocking_api(move || {
-        state.mailbox_store.settle_federation_terminal_intent(
-            &delivery, FederationDeliveryTerminalState::Abandoned, || {
-                state.lock_federation_intent_owner(&session, &intent.creation, &delivery.sender)
-            },
-        ).map_err(mailbox_api_error)?;
-        state.local_federation_intent(&session,&intent.key).map(|row|Json(row.status()))
-    }).await
+        state
+            .mailbox_store
+            .settle_federation_terminal_intent(
+                &delivery,
+                FederationDeliveryTerminalState::Abandoned,
+                || state.lock_federation_intent_owner(&session, &intent.creation, &delivery.sender),
+            )
+            .map_err(mailbox_api_error)?;
+        state
+            .local_federation_intent(&session, &intent.key)
+            .map(|row| Json(row.status()))
+    })
+    .await
 }
 
 async fn gc_federation_intent_route(

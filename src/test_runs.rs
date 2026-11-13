@@ -187,6 +187,7 @@ struct TestRunListResponse {
 #[serde(rename_all = "camelCase")]
 struct TestRunDetailResponse {
     source: &'static str,
+    #[serde(serialize_with = "serialize_test_run_detail_summary")]
     run: TestRunSummary,
     detail: TestRunDetail,
 }
@@ -213,18 +214,28 @@ impl TestRunEntries {
     fn reposition(&mut self) {
         self.positions.clear();
         for (position, entry) in self.entries.iter().enumerate() {
-            self.positions.entry(entry.summary.run_id.clone()).or_default().push(position);
+            self.positions
+                .entry(entry.summary.run_id.clone())
+                .or_default()
+                .push(position);
         }
     }
 
     /// The entries with this run id, in vector order, duplicates included.
     fn with_run_id(&self, run_id: &str) -> impl Iterator<Item = &TestRunEntry> {
-        self.positions.get(run_id).into_iter().flatten().map(|position| &self.entries[*position])
+        self.positions
+            .get(run_id)
+            .into_iter()
+            .flatten()
+            .map(|position| &self.entries[*position])
     }
 
     #[cfg(test)]
     fn push(&mut self, entry: TestRunEntry) {
-        self.positions.entry(entry.summary.run_id.clone()).or_default().push(self.entries.len());
+        self.positions
+            .entry(entry.summary.run_id.clone())
+            .or_default()
+            .push(self.entries.len());
         self.entries.push(entry);
     }
 
@@ -259,7 +270,10 @@ impl TestRunEntries {
     /// The lookup rebuilt from scratch, for test-only consistency oracles.
     #[cfg(test)]
     fn rebuilt_positions(&self) -> HashMap<String, Vec<usize>> {
-        let mut rebuilt = Self { entries: self.entries.clone(), positions: HashMap::new() };
+        let mut rebuilt = Self {
+            entries: self.entries.clone(),
+            positions: HashMap::new(),
+        };
         rebuilt.reposition();
         rebuilt.positions
     }
@@ -272,7 +286,10 @@ impl TestRunEntries {
 
 impl From<Vec<TestRunEntry>> for TestRunEntries {
     fn from(entries: Vec<TestRunEntry>) -> Self {
-        let mut indexed = Self { entries, positions: HashMap::new() };
+        let mut indexed = Self {
+            entries,
+            positions: HashMap::new(),
+        };
         indexed.reposition();
         indexed
     }
@@ -457,17 +474,22 @@ fn test_run_rescan_origin(
 /// The session id `reference` names: an id of a visible session, or the name
 /// of exactly one visible root session (not a delegation child), compared
 /// without case, as the mailbox resolves `--to`.
-fn test_run_resolve_session(inner: &impl TestRunProjectionSource, reference: &str) -> Option<String> {
+fn test_run_resolve_session(
+    inner: &impl TestRunProjectionSource,
+    reference: &str,
+) -> Option<String> {
     let reference = reference.trim();
     // A mailbox-only locator cannot become an owner/notification principal by
     // matching a session's display name.
-    if !matches!(mailbox_reference_handle(reference), Ok(None)) { return None; }
+    if !matches!(mailbox_reference_handle(reference), Ok(None)) {
+        return None;
+    }
     if let Some(session) = inner.projection_session_by_id(reference) {
         return (!session.hidden).then(|| reference.to_owned());
     }
-    let mut matches = inner.projection_sessions().filter(|row| {
-        !row.hidden && !row.child && row.name.eq_ignore_ascii_case(reference)
-    });
+    let mut matches = inner
+        .projection_sessions()
+        .filter(|row| !row.hidden && !row.child && row.name.eq_ignore_ascii_case(reference));
     let found = matches.next()?;
     matches.next().is_none().then(|| found.id.to_owned())
 }
@@ -497,7 +519,10 @@ fn test_run_project_id(
         .min()
 }
 
-fn test_run_registered_project_id(inner: &impl TestRunProjectionSource, disk: &TestRunDisk) -> Option<String> {
+fn test_run_registered_project_id(
+    inner: &impl TestRunProjectionSource,
+    disk: &TestRunDisk,
+) -> Option<String> {
     test_run_matching_registration(inner, disk)
         .filter(|_| inner.projection_index().registered.contains(&disk.run_id))
         .and_then(|row| row.project_id.clone())
@@ -506,7 +531,10 @@ fn test_run_registered_project_id(inner: &impl TestRunProjectionSource, disk: &T
 
 // Registration can become durable between scans. Read/wait boundaries must
 // derive authority from that current proof, not the scanner's older summary.
-fn test_run_effective_project_id(inner: &impl TestRunProjectionSource, entry: &TestRunEntry) -> Option<String> {
+fn test_run_effective_project_id(
+    inner: &impl TestRunProjectionSource,
+    entry: &TestRunEntry,
+) -> Option<String> {
     test_run_registered_project_id(inner, &entry.disk)
         .or_else(|| entry.discovered_project_id.clone())
 }
@@ -525,19 +553,23 @@ fn test_run_summary_from_observations<'a>(
     if let Some(started) = TEST_RUN_SUMMARY_STARTED.with(|slot| slot.borrow_mut().take()) {
         started();
     }
-    if let Some(compacted) = inner.projection_compacted().get(&scanned.disk.run_id)
-        .filter(|row| row.compacted && test_run_compact_is_installed(inner, row)) {
+    if let Some(compacted) = inner
+        .projection_compacted()
+        .get(&scanned.disk.run_id)
+        .filter(|row| row.compacted && test_run_compact_is_installed(inner, row))
+    {
         return test_run_compacted_summary(inner, compacted);
     }
     let disk = &scanned.disk;
     let results = disk.results.as_ref();
     let stages = disk.stages();
-    let registration = test_run_registration_view_from_observations(inner, disk, observations.clone());
+    let registration =
+        test_run_registration_view_from_observations(inner, disk, observations.clone());
     // A durable registration captures the initiating project's authority.
     // Filesystem discovery can choose another project with an overlapping
     // root/common directory; notification routing does not transfer ownership.
-    let project_id = test_run_registered_project_id(inner, disk)
-        .or_else(|| scanned.project_id.clone());
+    let project_id =
+        test_run_registered_project_id(inner, disk).or_else(|| scanned.project_id.clone());
     // Found among all stages, so a running stage past the kept ones counts.
     let current_stage = results.and_then(|results| results.current_stage.clone());
     let mut summary = TestRunSummary {
@@ -570,7 +602,12 @@ fn test_run_summary_from_observations<'a>(
         error: results.and_then(|results| results.error.clone()),
         detail_version: results.map(|results| results.digest.clone()),
     };
-    test_run_enrich_artifact_summary_from_observations(inner, &mut summary, Some(disk), observations);
+    test_run_enrich_artifact_summary_from_observations(
+        inner,
+        &mut summary,
+        Some(disk),
+        observations,
+    );
     summary
 }
 
@@ -1363,9 +1400,7 @@ impl AppState {
         test_run_summaries_locked(&inner)
             .into_iter()
             .filter(|run| {
-                project_id.is_none_or(|project_id| {
-                    run.project_id.as_deref() == Some(project_id)
-                })
+                project_id.is_none_or(|project_id| run.project_id.as_deref() == Some(project_id))
             })
             .collect()
     }
@@ -1414,11 +1449,11 @@ impl AppState {
                     if !cards_enabled {
                         cards_enabled = state.step_test_run_cards_epoch(&mut epoch_fence);
                     }
-                    if let Some(origin) = test_run_rescan_origin(
-                        active,
-                        last_rescan.map(|at| at.elapsed()),
-                        || state.test_run_tracked_dirs_changed(),
-                    ) {
+                    if let Some(origin) =
+                        test_run_rescan_origin(active, last_rescan.map(|at| at.elapsed()), || {
+                            state.test_run_tracked_dirs_changed()
+                        })
+                    {
                         active = state.refresh_test_runs_from(origin);
                         last_rescan = Some(std::time::Instant::now());
                         // After the rescan's own lock is released: resuming
@@ -1442,6 +1477,8 @@ impl AppState {
 // keep exactly the same summary selection under the same StateInner guard.
 fn test_run_entry_locked(inner: &StateInner, run_id: &str) -> Option<(TestRunSummary, PathBuf)> {
     let entry = inner.test_runs.find(run_id)?;
-    let summary = test_run_summaries_locked(inner).into_iter().find(|run| run.run_id == run_id)?;
+    let summary = test_run_summaries_locked(inner)
+        .into_iter()
+        .find(|run| run.run_id == run_id)?;
     Some((summary, entry.disk.run_dir.clone()))
 }

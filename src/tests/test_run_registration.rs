@@ -4,6 +4,9 @@
 // verification credit from an execution result.
 use super::*;
 
+#[path = "test_run_causal_request.rs"]
+mod causal_request;
+
 // Shared real native registration/provider fixture for authenticated
 // completion-consumer tests. Telemetry is synthetic; it grants no credit.
 pub(in crate::tests) fn native_completion_producer_fixture(

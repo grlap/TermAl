@@ -19,6 +19,9 @@ mod spawn_brief;
 #[path = "delegation_mcp_evaluation_replay_tests.rs"]
 mod evaluation_replay;
 
+#[path = "delegation_mcp_test_request_tests.rs"]
+mod test_request;
+
 const TEST_MCP_HTTP_ACCEPT_DEADLINE: Duration = Duration::from_secs(10);
 
 #[test]
@@ -562,8 +565,12 @@ fn delegation_mcp_result_tool_advertises_bounded_full_output_paging() {
             .expect("result tool should have a description")
             .contains("authoritative untruncated child output")
     );
-    assert!(result_tool["description"].as_str().unwrap()
-        .contains("command statuses and child claims are not host-recorded verification"));
+    assert!(
+        result_tool["description"]
+            .as_str()
+            .unwrap()
+            .contains("command statuses and child claims are not host-recorded verification")
+    );
     assert_eq!(
         result_tool["inputSchema"]["properties"]["outputOffset"]["minimum"],
         0
@@ -576,24 +583,44 @@ fn delegation_mcp_result_tool_advertises_bounded_full_output_paging() {
         result_tool["inputSchema"]["properties"]["outputLimit"]["maximum"],
         8192
     );
-    assert_eq!(result_tool["inputSchema"]["properties"]["submissionAttempt"]["minimum"], 1);
+    assert_eq!(
+        result_tool["inputSchema"]["properties"]["submissionAttempt"]["minimum"],
+        1
+    );
     assert!(result_tool["inputSchema"]["properties"]["resultId"].is_object());
 }
 
 #[test]
 fn delegation_mcp_result_tool_pins_the_explicit_attempt_on_packet_and_page_requests() {
     for serving_root in ["session-parent", "session-eligible-reader"] {
-    let (base_url, requests, server) = spawn_test_mcp_http_server(2, |request| {
-        assert!(request.path.contains("submissionAttempt=3&resultId=review-result-abc"));
-        (200, json!({"submissionAttempt":3,"resultId":"review-result-abc"}))
-    });
-    let bridge = TermalDelegationMcpBridge::new(serving_root.to_owned(), base_url).unwrap();
-    bridge.tool_get_session_result(json!({"delegationId":"delegation-retained","submissionAttempt":3,"resultId":"review-result-abc"})).unwrap();
-    bridge.tool_get_session_result(json!({"delegationId":"delegation-retained","submissionAttempt":3,"resultId":"review-result-abc","outputOffset":256,"outputLimit":256})).unwrap();
-    server.join().unwrap();
-    let requests = requests.lock().unwrap();
-    assert_eq!(requests[0].path, format!("/api/sessions/{serving_root}/delegations/delegation-retained/result?submissionAttempt=3&resultId=review-result-abc"));
-    assert_eq!(requests[1].path, format!("/api/sessions/{serving_root}/delegations/delegation-retained/result/output?offsetBytes=256&limitBytes=256&submissionAttempt=3&resultId=review-result-abc"));
+        let (base_url, requests, server) = spawn_test_mcp_http_server(2, |request| {
+            assert!(
+                request
+                    .path
+                    .contains("submissionAttempt=3&resultId=review-result-abc")
+            );
+            (
+                200,
+                json!({"submissionAttempt":3,"resultId":"review-result-abc"}),
+            )
+        });
+        let bridge = TermalDelegationMcpBridge::new(serving_root.to_owned(), base_url).unwrap();
+        bridge.tool_get_session_result(json!({"delegationId":"delegation-retained","submissionAttempt":3,"resultId":"review-result-abc"})).unwrap();
+        bridge.tool_get_session_result(json!({"delegationId":"delegation-retained","submissionAttempt":3,"resultId":"review-result-abc","outputOffset":256,"outputLimit":256})).unwrap();
+        server.join().unwrap();
+        let requests = requests.lock().unwrap();
+        assert_eq!(
+            requests[0].path,
+            format!(
+                "/api/sessions/{serving_root}/delegations/delegation-retained/result?submissionAttempt=3&resultId=review-result-abc"
+            )
+        );
+        assert_eq!(
+            requests[1].path,
+            format!(
+                "/api/sessions/{serving_root}/delegations/delegation-retained/result/output?offsetBytes=256&limitBytes=256&submissionAttempt=3&resultId=review-result-abc"
+            )
+        );
     }
 }
 
@@ -616,9 +643,11 @@ fn delegation_mcp_result_tool_encodes_query_metacharacters_in_result_identity() 
     let requests = requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
     for request in requests.iter() {
-        assert!(request.path.ends_with(
-            "submissionAttempt=3&resultId=x%26offsetBytes%3D0%20%2B%22value%22"
-        ));
+        assert!(
+            request
+                .path
+                .ends_with("submissionAttempt=3&resultId=x%26offsetBytes%3D0%20%2B%22value%22")
+        );
         assert!(!request.path.contains("&offsetBytes=0"));
     }
 }
@@ -628,12 +657,15 @@ fn delegation_mcp_result_tool_switches_to_paged_output_when_requested() {
     let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
         assert_eq!(request.method, "GET");
         if request.path.ends_with("/result") {
-            return (200, json!({ "result": {
+            return (
+                200,
+                json!({ "result": {
                 "summary": "compact",
                 "baseRevision": "1234567890abcdef1234567890abcdef12345678",
                 "worktreePath": "C:/workspace/worker",
                 "notes": ["Child-reported native test outcome: unavailable; not host-recorded verification."],
-            } }));
+            } }),
+            );
         }
         assert_eq!(
             request.path,
@@ -658,9 +690,15 @@ fn delegation_mcp_result_tool_switches_to_paged_output_when_requested() {
         .tool_get_session_result(json!({ "delegationId": "delegation-large" }))
         .expect("compact result should succeed");
     assert_eq!(compact["result"]["summary"], "compact");
-    assert_eq!(compact["result"]["baseRevision"], "1234567890abcdef1234567890abcdef12345678");
+    assert_eq!(
+        compact["result"]["baseRevision"],
+        "1234567890abcdef1234567890abcdef12345678"
+    );
     assert_eq!(compact["result"]["worktreePath"], "C:/workspace/worker");
-    assert_eq!(compact["result"]["notes"][0], "Child-reported native test outcome: unavailable; not host-recorded verification.");
+    assert_eq!(
+        compact["result"]["notes"][0],
+        "Child-reported native test outcome: unavailable; not host-recorded verification."
+    );
 
     let page = bridge
         .tool_get_session_result(json!({
@@ -2288,7 +2326,10 @@ fn delegation_mcp_mailbox_relay_list_preserves_unavailable_home_without_fabricat
             "availability":"unavailable_unverified","status":409,"error":"domain authority changed"}});
     let response = expected.clone();
     let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
-        assert_eq!(request.path, "/api/sessions/session-parent/mailboxes?includeRelayAvailability=true");
+        assert_eq!(
+            request.path,
+            "/api/sessions/session-parent/mailboxes?includeRelayAvailability=true"
+        );
         (200, response.clone())
     });
     let bridge = TermalDelegationMcpBridge::new("session-parent".into(), base_url).unwrap();
@@ -2539,36 +2580,74 @@ fn delegation_mcp_own_mailbox_body_is_retrievable_without_changing_receipts() {
 
 #[test]
 fn mailbox_relay_mcp_preserves_reply_principal_and_opaque_read_ack_handles_without_discovery() {
-    let home=MailboxRelayHome { host:FederationHostIdentity { host_id:Uuid::new_v4().to_string(),host_generation:1 },store_id:Uuid::new_v4().to_string() };
-    let mailbox=MailboxRelayLocator::encode(&home,&format!("mailbox-{}",Uuid::new_v4()),false).unwrap();
-    let message=MailboxRelayLocator::encode(&home,&format!("mailbox-message-{}",Uuid::new_v4()),true).unwrap();
-    let peer=format!("relay-principal-{}","a".repeat(64));
-    let expected_mailbox=mailbox.clone();let expected_message=message.clone();let expected_peer=peer.clone();
-    let (base_url,requests,server)=spawn_test_mcp_http_server(3,move |request| {
-        let body:Value=serde_json::from_str(&request.body).unwrap();
+    let home = MailboxRelayHome {
+        host: FederationHostIdentity {
+            host_id: Uuid::new_v4().to_string(),
+            host_generation: 1,
+        },
+        store_id: Uuid::new_v4().to_string(),
+    };
+    let mailbox =
+        MailboxRelayLocator::encode(&home, &format!("mailbox-{}", Uuid::new_v4()), false).unwrap();
+    let message =
+        MailboxRelayLocator::encode(&home, &format!("mailbox-message-{}", Uuid::new_v4()), true)
+            .unwrap();
+    let peer = format!("relay-principal-{}", "a".repeat(64));
+    let expected_mailbox = mailbox.clone();
+    let expected_message = message.clone();
+    let expected_peer = peer.clone();
+    let (base_url, requests, server) = spawn_test_mcp_http_server(3, move |request| {
+        let body: Value = serde_json::from_str(&request.body).unwrap();
         if request.path.ends_with("/send") {
-            assert_eq!(body["targetSessionId"],expected_peer);
-            assert_eq!(body["idempotencyKey"],"same-relay-key");
-            return (202,json!({"mailboxId":expected_mailbox,"messageId":expected_message,"sequence":1,"unreadDepth":1,
-                "notificationDisposition":"durableButNotWoken","duplicate":false,"senderProcessedThrough":1,"senderCursorAdvanced":true}));
+            assert_eq!(body["targetSessionId"], expected_peer);
+            assert_eq!(body["idempotencyKey"], "same-relay-key");
+            return (
+                202,
+                json!({"mailboxId":expected_mailbox,"messageId":expected_message,"sequence":1,"unreadDepth":1,
+                "notificationDisposition":"durableButNotWoken","duplicate":false,"senderProcessedThrough":1,"senderCursorAdvanced":true}),
+            );
         }
         if request.path.ends_with("/read") {
-            assert_eq!(request.path,format!("/api/sessions/session-parent/mailboxes/{expected_mailbox}/read"));
-            assert_eq!(body["issueReceipt"],true);
-            return (200,json!({"messages":[],"afterSequence":1,"processedThrough":1,"receipt":"relay-page","hasMore":false}));
+            assert_eq!(
+                request.path,
+                format!("/api/sessions/session-parent/mailboxes/{expected_mailbox}/read")
+            );
+            assert_eq!(body["issueReceipt"], true);
+            return (
+                200,
+                json!({"messages":[],"afterSequence":1,"processedThrough":1,"receipt":"relay-page","hasMore":false}),
+            );
         }
-        assert_eq!(request.path,format!("/api/sessions/session-parent/mailboxes/{expected_mailbox}/acknowledge"));
-        assert_eq!(body,json!({"receipt":"relay-page"}));
-        (200,json!({"id":expected_mailbox,"participants":[],"latestSequence":1,"unreadCount":0}))
+        assert_eq!(
+            request.path,
+            format!("/api/sessions/session-parent/mailboxes/{expected_mailbox}/acknowledge")
+        );
+        assert_eq!(body, json!({"receipt":"relay-page"}));
+        (
+            200,
+            json!({"id":expected_mailbox,"participants":[],"latestSequence":1,"unreadCount":0}),
+        )
     });
-    let bridge=TermalDelegationMcpBridge::new("session-parent".into(),base_url).unwrap();
-    let sent=bridge.tool_send_to_session(json!({"sessionId":peer,"message":"routine reply","idempotencyKey":"same-relay-key"})).unwrap();
-    assert_eq!(sent["mailboxId"],mailbox);
-    assert_eq!(sent["messageId"],message);
-    let page=bridge.tool_read_mailbox(json!({"mailboxId":mailbox})).unwrap();
-    bridge.tool_acknowledge_mailbox(json!({"mailboxId":mailbox,"receipt":page["receipt"]})).unwrap();
+    let bridge = TermalDelegationMcpBridge::new("session-parent".into(), base_url).unwrap();
+    let sent = bridge
+        .tool_send_to_session(
+            json!({"sessionId":peer,"message":"routine reply","idempotencyKey":"same-relay-key"}),
+        )
+        .unwrap();
+    assert_eq!(sent["mailboxId"], mailbox);
+    assert_eq!(sent["messageId"], message);
+    let page = bridge
+        .tool_read_mailbox(json!({"mailboxId":mailbox}))
+        .unwrap();
+    bridge
+        .tool_acknowledge_mailbox(json!({"mailboxId":mailbox,"receipt":page["receipt"]}))
+        .unwrap();
     server.join().unwrap();
-    assert_eq!(requests.lock().unwrap().len(),3,"no state/name discovery or hidden re-send");
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        3,
+        "no state/name discovery or hidden re-send"
+    );
 }
 
 #[test]
@@ -4570,13 +4649,20 @@ fn delegation_followup_http_budget_covers_release_reconciliation_and_restore() {
 fn evaluation_bridge_returns_the_reply_after_scripted_source_overrun() {
     for status in [200, 409] {
         let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |_| {
-            (status, if status == 200 { json!({"source":"observed"}) }
-                else { json!({"error":"source preflight expired after its issued observation"}) })
+            (
+                status,
+                if status == 200 {
+                    json!({"source":"observed"})
+                } else {
+                    json!({"error":"source preflight expired after its issued observation"})
+                },
+            )
         });
         let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url).unwrap();
         let started = std::time::Instant::now();
-        let clock = std::cell::Cell::new(started
-            + acceptance_evaluation_request_tracker_budget() - Duration::from_millis(1));
+        let clock = std::cell::Cell::new(
+            started + acceptance_evaluation_request_tracker_budget() - Duration::from_millis(1),
+        );
         let result = bridge.post_long_call_with_sender(
             DelegationLongCall::EvaluationRequest,
             "/api/sessions/session-parent/acceptance-evaluations",
@@ -4590,9 +4676,11 @@ fn evaluation_bridge_returns_the_reply_after_scripted_source_overrun() {
                 clock.set(clock.get() + ENGRAM_SOURCE_METADATA_BUDGET - Duration::from_millis(1));
                 let request = request.build().unwrap();
                 let elapsed = clock.get().duration_since(started);
-                assert!(elapsed + termal_delegation_turn_delivery_budget()
-                    < *request.timeout().unwrap(),
-                    "the HTTP caller must retain the issued source reply");
+                assert!(
+                    elapsed + termal_delegation_turn_delivery_budget()
+                        < *request.timeout().unwrap(),
+                    "the HTTP caller must retain the issued source reply"
+                );
                 bridge.client.execute(request)
             },
         );
@@ -4612,16 +4700,19 @@ fn evaluation_bridge_returns_the_reply_after_scripted_source_overrun() {
 #[test]
 fn naming_bridge_keeps_a_completed_reply_after_scripted_control_overrun() {
     for status in [200, 409] {
-        let reply = if status == 200 { json!({"generation":7,"root":"recorded-root"}) }
-            else { json!({"error":"binding refused after its admitted control read"}) };
+        let reply = if status == 200 {
+            json!({"generation":7,"root":"recorded-root"})
+        } else {
+            json!({"error":"binding refused after its admitted control read"})
+        };
         let response = reply.clone();
-        let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |_| {
-            (status, response.clone())
-        });
+        let (base_url, requests, server) =
+            spawn_test_mcp_http_server(1, move |_| (status, response.clone()));
         let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url).unwrap();
         let started = std::time::Instant::now();
-        let clock = std::cell::Cell::new(started
-            + ENGRAM_SOURCE_ROOT_NAMING_BUDGET - Duration::from_millis(1));
+        let clock = std::cell::Cell::new(
+            started + ENGRAM_SOURCE_ROOT_NAMING_BUDGET - Duration::from_millis(1),
+        );
         let body = json!({"work":"fixture-work","path":"recorded-root"});
         let result = bridge.post_long_call_with_sender(
             DelegationLongCall::SourceRootNaming,
@@ -4632,8 +4723,10 @@ fn naming_bridge_keeps_a_completed_reply_after_scripted_control_overrun() {
                 // allowance expired. It retains its full operation window.
                 clock.set(clock.get() + ENGRAM_MIN_CALL_TIMEOUT - Duration::from_millis(1));
                 let request = request.build().unwrap();
-                assert!(clock.get().duration_since(started) < *request.timeout().unwrap(),
-                    "the HTTP caller must retain the completed control reply");
+                assert!(
+                    clock.get().duration_since(started) < *request.timeout().unwrap(),
+                    "the HTTP caller must retain the completed control reply"
+                );
                 bridge.client.execute(request)
             },
         );
@@ -4643,14 +4736,24 @@ fn naming_bridge_keeps_a_completed_reply_after_scripted_control_overrun() {
             let error = result.unwrap_err();
             assert!(error.downcast_ref::<TermalDelegationApiError>().is_some());
             assert!(!termal_delegation_outcome_is_unknown(&error), "{error:#}");
-            assert!(error.to_string().contains("binding refused after its admitted control read"));
+            assert!(
+                error
+                    .to_string()
+                    .contains("binding refused after its admitted control read")
+            );
         }
         server.join().unwrap();
         let requests = requests.lock().unwrap();
         assert_eq!(requests.len(), 1, "no naming replay");
         assert_eq!(requests[0].method, "POST");
-        assert_eq!(requests[0].path, "/api/sessions/session-parent/engram-source-root");
-        assert_eq!(serde_json::from_str::<Value>(&requests[0].body).unwrap(), body);
+        assert_eq!(
+            requests[0].path,
+            "/api/sessions/session-parent/engram-source-root"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&requests[0].body).unwrap(),
+            body
+        );
     }
 }
 
@@ -4863,7 +4966,10 @@ fn delegation_mcp_resume_after_test_runs_posts_backend_run_wait() {
         assert_eq!(body["runIds"], json!(["test-full", "test-focused"]));
         assert_eq!(body["mode"], "any");
         assert_eq!(body["title"], "Gate fan-in");
-        assert!(body.get("delegationIds").is_none(), "a wait never mixes delegations and runs");
+        assert!(
+            body.get("delegationIds").is_none(),
+            "a wait never mixes delegations and runs"
+        );
         (
             201,
             json!({ "waitId": "test-run-wait-one", "runIds": ["test-full", "test-focused"], "mode": "any" }),
@@ -4882,9 +4988,14 @@ fn delegation_mcp_resume_after_test_runs_posts_backend_run_wait() {
 
     assert_eq!(response["waitId"], "test-run-wait-one");
     server.join().expect("test server should join");
-    assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
+    assert_eq!(
+        requests.lock().expect("request log mutex poisoned").len(),
+        1
+    );
     assert!(
-        bridge.tool_resume_after_test_runs(json!({ "runIds": [] })).is_err(),
+        bridge
+            .tool_resume_after_test_runs(json!({ "runIds": [] }))
+            .is_err(),
         "at least one run id"
     );
 }
@@ -4911,7 +5022,9 @@ fn delegation_mcp_run_wait_tool_is_hidden_from_and_rejected_for_children() {
         .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
         .collect::<Vec<_>>();
     assert!(
-        !names.iter().any(|name| name == "termal_resume_after_test_runs"),
+        !names
+            .iter()
+            .any(|name| name == "termal_resume_after_test_runs"),
         "a child never sees the run wait: {names:?}"
     );
     assert!(
@@ -4919,7 +5032,9 @@ fn delegation_mcp_run_wait_tool_is_hidden_from_and_rejected_for_children() {
         "a child names no source root; its turns are measured in its workdir: {names:?}"
     );
     assert!(
-        names.iter().any(|name| name == "termal_resume_after_delegations"),
+        names
+            .iter()
+            .any(|name| name == "termal_resume_after_delegations"),
         "only the run wait is root-only among the waits: {names:?}"
     );
     let error = bridge
@@ -4929,7 +5044,9 @@ fn delegation_mcp_run_wait_tool_is_hidden_from_and_rejected_for_children() {
         }))
         .expect_err("a child cannot wait on runs");
     assert!(
-        error.to_string().contains("not available to delegation-child sessions"),
+        error
+            .to_string()
+            .contains("not available to delegation-child sessions"),
         "{error}"
     );
     server.join().expect("test server should join");
@@ -4985,7 +5102,10 @@ fn delegation_mcp_name_source_root_posts_its_request_and_waits_the_naming_budget
     let requests = requests.lock().expect("request log mutex poisoned");
     for request in requests.iter() {
         assert_eq!(request.method, "POST");
-        assert_eq!(request.path, "/api/sessions/session-parent/engram-source-root");
+        assert_eq!(
+            request.path,
+            "/api/sessions/session-parent/engram-source-root"
+        );
     }
     let bodies = requests
         .iter()
@@ -4993,6 +5113,14 @@ fn delegation_mcp_name_source_root_posts_its_request_and_waits_the_naming_budget
         .collect::<Vec<_>>();
     assert_eq!(bodies[0], json!({ "work": "w-a", "path": ".worktrees/wt" }));
     assert_eq!(bodies[1], json!({ "work": "w-a" }), "omitted, not blank");
-    assert_eq!(bodies[2], json!({ "work": "w-a", "path": "   " }), "blank, kept");
-    assert_eq!(bodies.len(), 3, "nothing is sent for a path that is no string");
+    assert_eq!(
+        bodies[2],
+        json!({ "work": "w-a", "path": "   " }),
+        "blank, kept"
+    );
+    assert_eq!(
+        bodies.len(),
+        3,
+        "nothing is sent for a path that is no string"
+    );
 }

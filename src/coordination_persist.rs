@@ -17,7 +17,10 @@ fn resolve_coordination_persistence_path(persistence_path: &FsPath) -> PathBuf {
 }
 
 const COORDINATION_DIRECT_PROMPT_PREDECESSOR: &str = "7-review-custody-index-1";
-const COORDINATION_SQLITE_SCHEMA_VERSION: &str = "8-direct-prompt-1";
+const COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR: &str = "8-direct-prompt-1";
+const COORDINATION_SQLITE_SCHEMA_VERSION: &str = "8-direct-prompt-1-test-request-custody-1";
+
+include!("coordination_test_request_custody.rs");
 
 // Built only by boot-time schema admission, before the mailbox connection mutex
 // exists. The covering key range keeps orphaned archive reads off message bodies.
@@ -221,7 +224,16 @@ fn expected_coordination_schema_objects_for_version(
     version: &str,
 ) -> Result<Vec<CoordinationSchemaObject>> {
     match version {
-        "1" | "2" | "3" | "4" | "5" | "5-mailbox-relay-1" | "6-executor-outcomes-1" | COORDINATION_DIRECT_PROMPT_PREDECESSOR | COORDINATION_SQLITE_SCHEMA_VERSION => {}
+        "1"
+        | "2"
+        | "3"
+        | "4"
+        | "5"
+        | "5-mailbox-relay-1"
+        | "6-executor-outcomes-1"
+        | COORDINATION_DIRECT_PROMPT_PREDECESSOR
+        | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
+        | COORDINATION_SQLITE_SCHEMA_VERSION => {}
         _ => {
             return Err(reject_unsupported_coordination_schema(format!(
                 "unknown version {version}"
@@ -236,27 +248,75 @@ fn expected_coordination_schema_objects_for_version(
     if version != "1" {
         connection.execute_batch(MAILBOX_READ_PAGES_SCHEMA_SQL)?;
     }
-    if matches!(version, "3" | "4" | "5" | "5-mailbox-relay-1" | "6-executor-outcomes-1" | COORDINATION_DIRECT_PROMPT_PREDECESSOR | COORDINATION_SQLITE_SCHEMA_VERSION) {
+    if matches!(
+        version,
+        "3" | "4"
+            | "5"
+            | "5-mailbox-relay-1"
+            | "6-executor-outcomes-1"
+            | COORDINATION_DIRECT_PROMPT_PREDECESSOR
+            | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
+            | COORDINATION_SQLITE_SCHEMA_VERSION
+    ) {
         connection.execute_batch(FEDERATION_MAILBOX_DELIVERY_SCHEMA_SQL)?;
     }
     // Historical version 4 is exactly the landed executor schema.
-    if matches!(version, "4" | "5" | "5-mailbox-relay-1" | "6-executor-outcomes-1" | COORDINATION_DIRECT_PROMPT_PREDECESSOR | COORDINATION_SQLITE_SCHEMA_VERSION) {
+    if matches!(
+        version,
+        "4" | "5"
+            | "5-mailbox-relay-1"
+            | "6-executor-outcomes-1"
+            | COORDINATION_DIRECT_PROMPT_PREDECESSOR
+            | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
+            | COORDINATION_SQLITE_SCHEMA_VERSION
+    ) {
         connection.execute_batch(FEDERATION_EXECUTOR_SCHEMA_SQL)?;
     }
-    if matches!(version, "5" | "5-mailbox-relay-1" | "6-executor-outcomes-1" | COORDINATION_DIRECT_PROMPT_PREDECESSOR | COORDINATION_SQLITE_SCHEMA_VERSION) {
+    if matches!(
+        version,
+        "5" | "5-mailbox-relay-1"
+            | "6-executor-outcomes-1"
+            | COORDINATION_DIRECT_PROMPT_PREDECESSOR
+            | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
+            | COORDINATION_SQLITE_SCHEMA_VERSION
+    ) {
         connection.execute_batch(MAILBOX_CONTINUATION_DECLARATIONS_SCHEMA_SQL)?;
     }
-    if matches!(version, "5-mailbox-relay-1" | "6-executor-outcomes-1" | COORDINATION_DIRECT_PROMPT_PREDECESSOR | COORDINATION_SQLITE_SCHEMA_VERSION) {
+    if matches!(
+        version,
+        "5-mailbox-relay-1"
+            | "6-executor-outcomes-1"
+            | COORDINATION_DIRECT_PROMPT_PREDECESSOR
+            | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
+            | COORDINATION_SQLITE_SCHEMA_VERSION
+    ) {
         connection.execute_batch(MAILBOX_RELAY_SCHEMA_SQL)?;
     }
-    if matches!(version, "6-executor-outcomes-1" | COORDINATION_DIRECT_PROMPT_PREDECESSOR | COORDINATION_SQLITE_SCHEMA_VERSION) {
+    if matches!(
+        version,
+        "6-executor-outcomes-1"
+            | COORDINATION_DIRECT_PROMPT_PREDECESSOR
+            | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
+            | COORDINATION_SQLITE_SCHEMA_VERSION
+    ) {
         connection.execute_batch(FEDERATION_EXECUTOR_OUTCOMES_SCHEMA_SQL)?;
     }
-    if matches!(version, COORDINATION_DIRECT_PROMPT_PREDECESSOR | COORDINATION_SQLITE_SCHEMA_VERSION) {
+    if matches!(
+        version,
+        COORDINATION_DIRECT_PROMPT_PREDECESSOR
+            | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
+            | COORDINATION_SQLITE_SCHEMA_VERSION
+    ) {
         connection.execute_batch(MAILBOX_REVIEW_CUSTODY_INDEX_SCHEMA_SQL)?;
     }
-    if version == COORDINATION_SQLITE_SCHEMA_VERSION {
+    if matches!(
+        version,
+        COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR | COORDINATION_SQLITE_SCHEMA_VERSION
+    ) {
         connection.execute_batch(&remote_prompt_storage_schema_sql())?;
+    }
+    if version == COORDINATION_SQLITE_SCHEMA_VERSION {
+        connection.execute_batch(MAILBOX_TEST_REQUEST_CUSTODY_SCHEMA_SQL)?;
     }
     coordination_schema_objects(&connection)
 }
@@ -277,6 +337,7 @@ fn initialize_current_coordination_schema(transaction: &rusqlite::Transaction<'_
     transaction.execute_batch(FEDERATION_EXECUTOR_OUTCOMES_SCHEMA_SQL)?;
     transaction.execute_batch(MAILBOX_REVIEW_CUSTODY_INDEX_SCHEMA_SQL)?;
     transaction.execute_batch(&remote_prompt_storage_schema_sql())?;
+    transaction.execute_batch(MAILBOX_TEST_REQUEST_CUSTODY_SCHEMA_SQL)?;
     transaction
         .execute(
             "INSERT INTO meta(key, value) VALUES('coordination_schema_version', ?1)",
@@ -348,25 +409,48 @@ fn validate_coordination_schema_version(
             "found version `{stored_schema_version}`, expected `{version}`"
         )));
     }
-    if matches!(version, "5-mailbox-relay-1" | "6-executor-outcomes-1" | COORDINATION_DIRECT_PROMPT_PREDECESSOR | COORDINATION_SQLITE_SCHEMA_VERSION) {
+    if matches!(
+        version,
+        "5-mailbox-relay-1"
+            | "6-executor-outcomes-1"
+            | COORDINATION_DIRECT_PROMPT_PREDECESSOR
+            | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
+            | COORDINATION_SQLITE_SCHEMA_VERSION
+    ) {
         validate_mailbox_relay_records(connection)?;
     }
-    if version == COORDINATION_SQLITE_SCHEMA_VERSION {
+    if matches!(
+        version,
+        COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR | COORDINATION_SQLITE_SCHEMA_VERSION
+    ) {
         validate_remote_prompt_journals(connection)?;
+    }
+    if version == COORDINATION_SQLITE_SCHEMA_VERSION {
+        validate_coordination_test_request_custody(connection)?;
     }
     Ok(())
 }
 
 fn ensure_sqlite_coordination_schema(connection: &rusqlite::Connection) -> Result<()> {
-    let historical = ["1", "2", "3", "4", "5", "5-mailbox-relay-1", "6-executor-outcomes-1", COORDINATION_DIRECT_PROMPT_PREDECESSOR]
-        .into_iter()
-        .map(|version| {
-            Ok((
-                version,
-                expected_coordination_schema_objects_for_version(version)?,
-            ))
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let historical = [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "5-mailbox-relay-1",
+        "6-executor-outcomes-1",
+        COORDINATION_DIRECT_PROMPT_PREDECESSOR,
+        COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR,
+    ]
+    .into_iter()
+    .map(|version| {
+        Ok((
+            version,
+            expected_coordination_schema_objects_for_version(version)?,
+        ))
+    })
+    .collect::<Result<Vec<_>>>()?;
     // Inspect the complete layout and marker in one read snapshot. Another
     // opener must not make us combine its new marker with our old inventory.
     let (actual_schema, source_version) = {
@@ -420,25 +504,51 @@ fn ensure_sqlite_coordination_schema(connection: &rusqlite::Connection) -> Resul
                 if matches!(*old_version, "1" | "2" | "3") {
                     transaction.execute_batch(FEDERATION_EXECUTOR_SCHEMA_SQL)?;
                 }
-                if !matches!(*old_version, "5" | "5-mailbox-relay-1" | "6-executor-outcomes-1" | COORDINATION_DIRECT_PROMPT_PREDECESSOR) {
+                if !matches!(
+                    *old_version,
+                    "5" | "5-mailbox-relay-1"
+                        | "6-executor-outcomes-1"
+                        | COORDINATION_DIRECT_PROMPT_PREDECESSOR
+                        | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
+                ) {
                     transaction.execute_batch(MAILBOX_CONTINUATION_DECLARATIONS_SCHEMA_SQL)?;
                 }
                 // The relay floor already owns its store identity row.
-                if !matches!(*old_version, "5-mailbox-relay-1" | "6-executor-outcomes-1" | COORDINATION_DIRECT_PROMPT_PREDECESSOR) {
+                if !matches!(
+                    *old_version,
+                    "5-mailbox-relay-1"
+                        | "6-executor-outcomes-1"
+                        | COORDINATION_DIRECT_PROMPT_PREDECESSOR
+                        | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
+                ) {
                     initialize_mailbox_relay_schema(&transaction)?;
                 }
-                if !matches!(*old_version, "6-executor-outcomes-1" | COORDINATION_DIRECT_PROMPT_PREDECESSOR) {
+                if !matches!(
+                    *old_version,
+                    "6-executor-outcomes-1"
+                        | COORDINATION_DIRECT_PROMPT_PREDECESSOR
+                        | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
+                ) {
                     transaction.execute_batch(FEDERATION_EXECUTOR_OUTCOMES_SCHEMA_SQL)?;
                 }
                 transaction.execute_batch(MAILBOX_REVIEW_CUSTODY_INDEX_SCHEMA_SQL)?;
-                transaction.execute_batch(&remote_prompt_storage_schema_sql())?;
+                if *old_version != COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR {
+                    transaction.execute_batch(&remote_prompt_storage_schema_sql())?;
+                }
+                test_request_custody_floor_fault("coord_validated")?;
+                transaction.execute_batch(MAILBOX_TEST_REQUEST_CUSTODY_SCHEMA_SQL)?;
+                test_request_custody_floor_fault("coord_columns")?;
                 let changed = transaction.execute(
                     "UPDATE meta SET value = ?1 WHERE key = 'coordination_schema_version' AND value = ?2",
                     rusqlite::params![COORDINATION_SQLITE_SCHEMA_VERSION, old_version],
                 )?;
-                if changed != 1 { bail!("coordination reader floor changed during upgrade"); }
+                if changed != 1 {
+                    bail!("coordination reader floor changed during upgrade");
+                }
+                test_request_custody_floor_fault("coord_header")?;
             }
             validate_current_coordination_schema(&transaction)?;
+            test_request_custody_floor_fault("coord_readback")?;
             #[cfg(test)]
             if let Some(hook) =
                 TEST_COORDINATION_UPGRADE_BEFORE_COMMIT.with(|slot| slot.borrow_mut().take())

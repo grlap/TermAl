@@ -9,7 +9,7 @@
 
 /// The successor of the current MAIN reader floor: the predecessor's exact
 /// inventory plus the required import-reconciliation journal field.
-const SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-direct-prompt-delivery-1-import-reconciliation-1";
+const SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-direct-prompt-delivery-1-test-request-custody-1-import-reconciliation-1";
 const ENGRAM_IMPORT_RECONCILIATION_FIELD: &str = "engramImportReconciliation";
 
 /// The authority to make the first activation. Only a real enrollment or
@@ -63,6 +63,7 @@ fn engram_import_reconciliation_floor_is_successor(
         version.as_deref(),
         Some(
             SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION
+                | SQLITE_TEST_REQUEST_CUSTODY_IMPORT_PREDECESSOR
                 | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR
                 | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR
                 | SQLITE_DIRECT_PROMPT_DELIVERY_IMPORT_PREDECESSOR

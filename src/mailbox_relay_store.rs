@@ -180,7 +180,12 @@ impl MailboxStore {
         // Current ownership fences apply to both branches. Readiness for a new
         // admission must not reinterpret an already committed exact retry.
         let appended = self.append_with_delivery_policy(
-            &input, None, Some((relay, peer)), authorize, |_, authority| authorize_new(authority))?;
+            &input,
+            None,
+            Some((relay, peer)),
+            authorize,
+            |_, authority| authorize_new(authority),
+        )?;
         let MailboxAppendResult {
             receipt,
             finalization,
@@ -232,9 +237,14 @@ impl MailboxStore {
         remember_mailbox_relay_association(&transaction, conversation, mailbox_id, names)?;
         #[cfg(test)]
         {
-            let before_authorize = self.before_relay_association_authorize.lock()
-                .expect("relay association observer mutex poisoned").take();
-            if let Some(before_authorize) = before_authorize { before_authorize(); }
+            let before_authorize = self
+                .before_relay_association_authorize
+                .lock()
+                .expect("relay association observer mutex poisoned")
+                .take();
+            if let Some(before_authorize) = before_authorize {
+                before_authorize();
+            }
         }
         let _authority = authorize()?;
         transaction.commit()?;
@@ -247,6 +257,25 @@ impl MailboxStore {
         peer: &FederationPeerSnapshot,
         authorize: impl FnOnce() -> Result<G>,
     ) -> Result<Option<MailboxAppendReceipt>> {
+        self.pin_mailbox_relay_with_test_scope(relay, peer, None, authorize)
+    }
+
+    fn pin_mailbox_relay_with_test_scope<G>(
+        &self,
+        relay: &MailboxRelayAppend,
+        peer: &FederationPeerSnapshot,
+        scope: Option<&MailboxTestSenderScope>,
+        authorize: impl FnOnce() -> Result<G>,
+    ) -> Result<Option<MailboxAppendReceipt>> {
+        if relay.test_request.is_none() && scope.is_some() {
+            return Err(relay_store_error(
+                "sender scope has no retained test request",
+            ));
+        }
+        if let Some(scope) = scope {
+            validate_mailbox_test_sender_scope(scope)
+                .map_err(|error| relay_store_error(&error.message))?;
+        }
         let digest = relay
             .digest()
             .map_err(|error| relay_store_error(&error.message))?;
@@ -287,21 +316,32 @@ impl MailboxStore {
                 "idempotency key belongs to an existing standalone mailbox send; no relay fallback",
             ));
         }
-        if native_sender_has_domain_intent(&transaction, &relay.sender.native_session_id,
-            &relay.sender.native_creation_id, &relay.idempotency_key)? {
+        if native_sender_has_domain_intent(
+            &transaction,
+            &relay.sender.native_session_id,
+            &relay.sender.native_creation_id,
+            &relay.idempotency_key,
+        )? {
             return Err(federation_delivery_conflict());
         }
         let sender = relay.sender.participant_key();
-        let existing: Option<(String,String,String,Option<String>,String)> = transaction.query_row(
-            "SELECT request_digest,conversation_json,peer_json,receipt_json,sender_key FROM mailbox_relay_intents WHERE owner_session_id=?1 AND idempotency_key=?2",
-            rusqlite::params![relay.sender.native_session_id,relay.idempotency_key],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?)),
+        let existing: Option<(String,String,String,Option<String>,String,Option<MailboxTestSenderScope>)> = transaction.query_row(
+            "SELECT request_digest,conversation_json,peer_json,receipt_json,sender_key,test_request_scope_json FROM mailbox_relay_intents WHERE owner_session_id=?1 AND idempotency_key=?2",
+            rusqlite::params![relay.sender.native_session_id,relay.idempotency_key],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,mailbox_test_scope_from_row(row,5)?)),
         ).optional()?;
-        let receipt = if let Some((stored_digest, json, stored_peer, receipt, stored_sender)) =
-            existing
+        let receipt = if let Some((
+            stored_digest,
+            json,
+            stored_peer,
+            receipt,
+            stored_sender,
+            stored_scope,
+        )) = existing
         {
             let conversation: MailboxRelayConversation = serde_json::from_str(&json)?;
             let stored_peer: FederationPeerSnapshot = serde_json::from_str(&stored_peer)?;
             if stored_sender != sender
+                || stored_scope.as_ref() != scope
                 || stored_digest != digest
                 || conversation != relay.conversation
                 || !same_mailbox_relay_enrollment(&stored_peer, peer)
@@ -326,9 +366,9 @@ impl MailboxStore {
                 ));
             }
             transaction.execute(
-                "INSERT INTO mailbox_relay_intents(sender_key,owner_session_id,idempotency_key,record_version,request_digest,conversation_json,peer_json,created_at,requested_target)
-                 VALUES(?1,?2,?3,1,?4,?5,?6,?7,?8)",
-                rusqlite::params![sender,relay.sender.native_session_id,relay.idempotency_key,digest,serde_json::to_string(&relay.conversation)?,serde_json::to_string(peer)?,stamp_now(),relay.requested_target],
+                "INSERT INTO mailbox_relay_intents(sender_key,owner_session_id,idempotency_key,record_version,request_digest,conversation_json,peer_json,created_at,requested_target,test_request_json,test_request_scope_json)
+                 VALUES(?1,?2,?3,1,?4,?5,?6,?7,?8,?9,?10)",
+                rusqlite::params![sender,relay.sender.native_session_id,relay.idempotency_key,digest,serde_json::to_string(&relay.conversation)?,serde_json::to_string(peer)?,stamp_now(),relay.requested_target,relay.test_request.as_ref().map(serde_json::to_string).transpose()?,scope.map(serde_json::to_string).transpose()?],
             )?;
             None
         };

@@ -116,6 +116,7 @@ export async function registrationHost(callback, {
           creatorPid: saved.request.creatorPid, startedAt: saved.request.started,
           detached: saved.request.detached, registrationState: "registered", trackingDurability: "durable",
           trackingProvenances: ["launcherRegistered"],
+          ...(saved.request.requestMessageId === undefined ? {} : { requestMessageId: saved.request.requestMessageId }),
         } : undefined;
         response.end(JSON.stringify(errorReason && queryStatus >= 400
           ? { error: errorReason } : { run: queryTransform ? queryTransform(run) : run }));

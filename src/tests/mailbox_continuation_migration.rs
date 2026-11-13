@@ -34,7 +34,21 @@ fn retained_rows(connection: &rusqlite::Connection) -> Vec<Vec<Vec<rusqlite::typ
                 .prepare(&format!("SELECT * FROM {table} ORDER BY 1,2"))
                 .unwrap();
             let columns = statement.column_count();
-            statement
+            let has_custody = *table == "mailbox_messages" && columns == 18;
+            if *table == "mailbox_messages" {
+                assert!(
+                    matches!(columns, 16 | 18),
+                    "unexpected mailbox snapshot shape"
+                );
+                if has_custody {
+                    assert_eq!(statement.column_name(16).unwrap(), "test_request_json");
+                    assert_eq!(
+                        statement.column_name(17).unwrap(),
+                        "test_request_scope_json"
+                    );
+                }
+            }
+            let mut rows = statement
                 .query_map([], |row| {
                     (0..columns)
                         .map(|column| row.get(column))
@@ -42,7 +56,18 @@ fn retained_rows(connection: &rusqlite::Connection) -> Vec<Vec<Vec<rusqlite::typ
                 })
                 .unwrap()
                 .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap()
+                .unwrap();
+            if has_custody {
+                // Compare every original v4 value across migration, while
+                // also requiring that the new nullable fields stay empty.
+                // A non-null custody value must fail, never be truncated away.
+                for row in &mut rows {
+                    assert_eq!(row[16], rusqlite::types::Value::Null);
+                    assert_eq!(row[17], rusqlite::types::Value::Null);
+                    row.truncate(16);
+                }
+            }
+            rows
         })
         .collect()
 }
@@ -105,6 +130,7 @@ fn populated_v4() -> (TestTempRoot, PathBuf) {
         .unwrap();
     {
         let connection = store.connection().unwrap();
+        remove_empty_test_request_custody_columns_for_test(&connection);
         connection.execute_batch(
             "DROP TABLE remote_prompt_intents;
              DROP TABLE remote_prompt_receives;

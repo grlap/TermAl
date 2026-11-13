@@ -372,6 +372,8 @@ fn validate_no_legacy_embedded_state(
     } else if matches!(
         required_state_meta_value(connection, "schema_version")?.as_str(),
         SQLITE_SCHEMA_VERSION
+            | SQLITE_TEST_REQUEST_CUSTODY_PREDECESSOR
+            | SQLITE_TEST_REQUEST_CUSTODY_IMPORT_PREDECESSOR
             | SQLITE_CHECKPOINT_RESULT_PREDECESSOR
             | SQLITE_DIRECT_PROMPT_PREDECESSOR
             | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR

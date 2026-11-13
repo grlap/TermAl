@@ -22,6 +22,37 @@ recorded in the [handoff ledger](handoffs.md) instead.
 
 ## Delivery contract
 
+### Typed native test requests
+
+An optional `testRequest` on a native send names `mode: "full" | "focused"`
+and 1–16 `targets`. Each target names `workRef` and `use`, either
+`{ "kind": "committed_input", "expected_commit": "<commit40>", "purpose": "verification" | "landing_gate" }`
+or `{ "kind": "authorized_test_ref", "ref_name": "refs/heads/test/…", "expected_tree": "<tree40>", "purpose": "landing_gate" }`.
+The shared `use` contract deliberately retains these snake_case keys and values.
+Callers cannot supply captured bindings, roots, native identities or store paths.
+The MCP send tool accepts this object directly; CLI `mailbox send` accepts its
+JSON spelling through `--test-request-json`. Invalid or explicit-null metadata
+is refused before append. A typed send cannot fall back to domain delivery or
+silently become ordinary mail.
+
+The sender host captures each target's current held claim and uniquely named
+source root through the existing Engram owners. An unavailable service or stale
+association produces an explicit uncredited reason for that target. It does not
+invent a binding. The route pins the actual native recipient, including its
+creation and store identity. Payload, original send key and optional host-private
+destination mapping are retained with the existing append or sender intent.
+Retries reuse that original capture; changed metadata or a replacement recipient
+requires a new message and key. The private mapping identifies a destination
+store; it grants no authority, and a completion consumer must revalidate current
+destination authority before association.
+
+Full participant reads carry the public typed payload and its original send key.
+That key is sender-scoped and supplies no permission to send or settle as the
+sender. Ordinary messages still omit their key. The host-private mapping never
+appears in relay traffic, mailbox responses, CLI/MCP output or Debug output.
+Typed custody does not itself execute a command, grant executor placement or
+create verification credit. Completion association is a separate consumer.
+
 `termal_send_to_session` accepts a peer session id or name, a message body, and
 a required sender-supplied `idempotencyKey`.
 

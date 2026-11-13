@@ -45,11 +45,7 @@ struct MailboxSummary {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct MailboxMessage {
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "reject_inactive_test_request_custody"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     test_request: Option<MailboxTestPayload>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     notification_cause: Option<String>,
@@ -100,6 +96,8 @@ struct MailboxAppendInput {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct MailboxIdempotencyRecord {
+    test_request: Option<MailboxTestPayload>,
+    test_request_scope: Option<MailboxTestSenderScope>,
     sender_session_id: String,
     idempotency_key: String,
     mailbox_id: String,
@@ -471,18 +469,49 @@ impl AppState {
         Ok(())
     }
 
+    #[cfg(test)]
     fn append_mailbox_message_and_notify(
         &self,
         sender_session_id: &str,
         request: SendMailboxMessageRequest,
     ) -> std::result::Result<MailboxAppendReceipt, ApiError> {
-        self.append_native_mailbox_message_and_notify(sender_session_id, request, NativeMailboxNamespace::Standalone)
+        self.append_native_mailbox_message_and_notify(
+            sender_session_id,
+            request,
+            NativeMailboxNamespace::Standalone,
+        )
     }
 
-    fn append_native_mailbox_message_and_notify(&self, sender_session_id: &str,
-        request: SendMailboxMessageRequest, namespace: NativeMailboxNamespace)
-        -> std::result::Result<MailboxAppendReceipt, ApiError>
-    {
+    #[cfg(test)]
+    fn append_native_mailbox_message_and_notify(
+        &self,
+        sender_session_id: &str,
+        request: SendMailboxMessageRequest,
+        namespace: NativeMailboxNamespace,
+    ) -> std::result::Result<MailboxAppendReceipt, ApiError> {
+        self.append_native_mailbox_message_with_test_custody(
+            sender_session_id,
+            request,
+            namespace,
+            None,
+        )
+    }
+
+    fn append_native_mailbox_message_with_test_custody(
+        &self,
+        sender_session_id: &str,
+        request: SendMailboxMessageRequest,
+        namespace: NativeMailboxNamespace,
+        custody: Option<MailboxTestSendCustody>,
+    ) -> Result<MailboxAppendReceipt, ApiError> {
+        let custody = custody
+            .map(|captured| {
+                let recipient = self
+                    .native_mailbox_relay_descriptor(&request.target_session_id)?
+                    .principal;
+                captured.for_recipient(&recipient)
+            })
+            .transpose()?;
         if request
             .class
             .as_deref()
@@ -494,9 +523,8 @@ impl AppState {
         }
         let (sender_name, target_name) =
             self.mailbox_peer_names(sender_session_id, &request.target_session_id)?;
-        let creations = self.native_mailbox_creations([
-            sender_session_id, &request.target_session_id,
-        ], namespace)?;
+        let creations = self
+            .native_mailbox_creations([sender_session_id, &request.target_session_id], namespace)?;
         self.ensure_mailbox_session_active(sender_session_id)?;
         self.ensure_mailbox_session_active(&request.target_session_id)?;
         let input = MailboxAppendInput {
@@ -511,18 +539,46 @@ impl AppState {
         };
         let appended = self
             .mailbox_store
-            .append_with_delivery_policy(&input, None, None, || self.authorize_native_mailbox(
-                [sender_session_id, &input.target_session_id], &creations, namespace,
-            ), |transaction, _| {
-                if matches!(namespace, NativeMailboxNamespace::Local)
-                    && native_sender_has_domain_intent(transaction, sender_session_id,
-                        &creations[0], &input.idempotency_key)? {
-                    return Err(federation_delivery_conflict());
-                }
-                Ok(())
-            })
+            .append_with_test_request_custody(
+                &input,
+                custody.as_ref().map(|captured| &captured.payload),
+                custody
+                    .as_ref()
+                    .and_then(|captured| captured.sender_scope.as_ref()),
+                || {
+                    let guard = self.authorize_native_mailbox(
+                        [sender_session_id, &input.target_session_id],
+                        &creations,
+                        namespace,
+                    )?;
+                    if let Some(captured) = &custody {
+                        captured
+                            .validate_locked(&guard, sender_session_id)
+                            .map_err(|error| relay_store_error(&error.message))?;
+                    }
+                    Ok(guard)
+                },
+                |transaction, _| {
+                    if matches!(namespace, NativeMailboxNamespace::Local)
+                        && native_sender_has_domain_intent(
+                            transaction,
+                            sender_session_id,
+                            &creations[0],
+                            &input.idempotency_key,
+                        )?
+                    {
+                        return Err(federation_delivery_conflict());
+                    }
+                    Ok(())
+                },
+            )
             .map_err(mailbox_api_error)?;
-        self.finish_mailbox_append_and_notify(sender_session_id, &input.target_session_id, &input, appended)
+        self.finish_mailbox_append_and_notify(
+            sender_session_id,
+            &input.target_session_id,
+            &input,
+            appended,
+        )
     }
 
     /// A held wake may name an existing provider-capacity recovery, but it
@@ -541,8 +597,17 @@ impl AppState {
     /// authorizes a queued wake to pass a pause.
     fn mailbox_queued_wake_disposition(&self, target_session_id: &str) -> &'static str {
         let inner = self.inner.lock().expect("state mutex poisoned");
-        if inner.find_session_index(target_session_id).is_some_and(|index|
-            inner.sessions[index].provider_capacity_retry.as_ref().is_some_and(|retry| retry.due_at.is_some() || (retry.recovering && !retry.dispatched))) {
+        if inner
+            .find_session_index(target_session_id)
+            .is_some_and(|index| {
+                inner.sessions[index]
+                    .provider_capacity_retry
+                    .as_ref()
+                    .is_some_and(|retry| {
+                        retry.due_at.is_some() || (retry.recovering && !retry.dispatched)
+                    })
+            })
+        {
             return "waitingForProviderCapacity";
         }
         let held = inner
@@ -568,7 +633,9 @@ impl AppState {
         target_session_id: &str,
     ) -> std::result::Result<(String, String), ApiError> {
         if !matches!(mailbox_reference_handle(target_session_id), Ok(None)) {
-            return Err(ApiError::not_found("mailbox reference requires explicit resolution"));
+            return Err(ApiError::not_found(
+                "mailbox reference requires explicit resolution",
+            ));
         }
         let inner = self.inner.lock().expect("state mutex poisoned");
         let sender_index = inner
@@ -642,12 +709,21 @@ impl AppState {
     }
 
     fn requeue_mailbox_notification_with_rejection(
-        &self, notification: &MailboxNotificationDelivery, known_rejected: bool,
+        &self,
+        notification: &MailboxNotificationDelivery,
+        known_rejected: bool,
     ) -> Result<bool> {
-        if MailboxRelayLocator::decode(&notification.mailbox_id,false).map_err(|error|anyhow!(error.message))?.is_some() {
+        if MailboxRelayLocator::decode(&notification.mailbox_id, false)
+            .map_err(|error| anyhow!(error.message))?
+            .is_some()
+        {
             return self.requeue_native_mailbox_relay_notification(notification, known_rejected);
         }
-        let Some(storage_key)=self.local_mailbox_storage_key(&notification.session_id, &notification.mailbox_id)? else { return Ok(false); };
+        let Some(storage_key) =
+            self.local_mailbox_storage_key(&notification.session_id, &notification.mailbox_id)?
+        else {
+            return Ok(false);
+        };
         let Some(wakeup) = self.mailbox_store.unread_wakeup_for_mailbox_through(
             &storage_key,
             &notification.mailbox_id,
@@ -691,7 +767,11 @@ impl AppState {
         promote_existing_to_front: bool,
     ) -> Result<MailboxWakeQueueOutcome> {
         self.queue_mailbox_wakeups_for_binding_outcome(
-            session_id, wakeups, recovery, promote_existing_to_front, None,
+            session_id,
+            wakeups,
+            recovery,
+            promote_existing_to_front,
+            None,
         )
     }
 
@@ -703,19 +783,41 @@ impl AppState {
         promote_existing_to_front: bool,
         expected_binding: Option<&FederationMailboxBinding>,
     ) -> Result<MailboxWakeQueueOutcome> {
-        self.queue_mailbox_wakeups_for_native_outcome(session_id,wakeups,recovery,promote_existing_to_front,expected_binding,None)
+        self.queue_mailbox_wakeups_for_native_outcome(
+            session_id,
+            wakeups,
+            recovery,
+            promote_existing_to_front,
+            expected_binding,
+            None,
+        )
     }
 
     fn queue_mailbox_wakeups_for_native_outcome(
-        &self, session_id:&str, wakeups:Vec<MailboxUnreadWakeup>, recovery:MailboxWakeupRecovery,
-        promote_existing_to_front:bool, expected_binding:Option<&FederationMailboxBinding>,
-        expected_relay:Option<(&MailboxRelayPrincipal,Option<&FederationLinkLease>, &FederationPeerSnapshot)>,
+        &self,
+        session_id: &str,
+        wakeups: Vec<MailboxUnreadWakeup>,
+        recovery: MailboxWakeupRecovery,
+        promote_existing_to_front: bool,
+        expected_binding: Option<&FederationMailboxBinding>,
+        expected_relay: Option<(
+            &MailboxRelayPrincipal,
+            Option<&FederationLinkLease>,
+            &FederationPeerSnapshot,
+        )>,
     ) -> Result<MailboxWakeQueueOutcome> {
         let mut owned_wakeups = Vec::with_capacity(wakeups.len());
         for wakeup in wakeups {
-            let key = if let Some((principal,_,_))=expected_relay { Some(principal.participant_key()) }
-                else { self.local_mailbox_storage_key(session_id, &wakeup.mailbox_id)? };
-            if expected_binding.is_some_and(|binding| key.as_ref() != Some(&binding.participant_key())) { continue; }
+            let key = if let Some((principal, _, _)) = expected_relay {
+                Some(principal.participant_key())
+            } else {
+                self.local_mailbox_storage_key(session_id, &wakeup.mailbox_id)?
+            };
+            if expected_binding
+                .is_some_and(|binding| key.as_ref() != Some(&binding.participant_key()))
+            {
+                continue;
+            }
             // Queue insertion retains its root/lease guards below. A missing
             // store row must not change accepted carrier ordering; only a
             // proven storage owner may receive the recovery bookkeeping.
@@ -736,54 +838,98 @@ impl AppState {
                 Vec::new()
             } else {
                 let inner = self.inner.lock().expect("state mutex poisoned");
-                inner.find_session_index(session_id)
-                    .map(|index| mailbox_fifo_prefix(&inner.sessions[index])).unwrap_or_default()
+                inner
+                    .find_session_index(session_id)
+                    .map(|index| mailbox_fifo_prefix(&inner.sessions[index]))
+                    .unwrap_or_default()
             };
-            let relay_candidates = observed_prefix.iter().filter_map(|(id, source)| {
-                let (mailbox, sequence) = source.as_ref()?;
-                mailbox.starts_with("relay-mailbox-").then(|| (id.clone(), MailboxNotificationDelivery {
-                    session_id: session_id.to_owned(), mailbox_id: mailbox.clone(), through_sequence: *sequence,
-                }))
-            }).map(|(id, notification)| {
-                let authority = self.prepare_mailbox_relay_dispatch_authority(&notification);
-                (id, notification, authority)
-            }).collect::<Vec<_>>();
+            let relay_candidates = observed_prefix
+                .iter()
+                .filter_map(|(id, source)| {
+                    let (mailbox, sequence) = source.as_ref()?;
+                    mailbox.starts_with("relay-mailbox-").then(|| {
+                        (
+                            id.clone(),
+                            MailboxNotificationDelivery {
+                                session_id: session_id.to_owned(),
+                                mailbox_id: mailbox.clone(),
+                                through_sequence: *sequence,
+                            },
+                        )
+                    })
+                })
+                .map(|(id, notification)| {
+                    let authority = self.prepare_mailbox_relay_dispatch_authority(&notification);
+                    (id, notification, authority)
+                })
+                .collect::<Vec<_>>();
             #[cfg(test)]
-            if let Some(hook) = TEST_MAILBOX_AFTER_PREFIX_OBSERVATION.with(|hook| hook.borrow_mut().take()) { hook(); }
-            let relay_link = expected_relay.and_then(|(_,lease,_)|lease).map(|lease| {
-                let guard = lease.channel.state.lock().expect("federation link mutex poisoned");
-                if guard.incarnation.as_deref() != Some(lease.incarnation.as_str())
-                    || guard.recorded_incarnation.as_deref() != Some(lease.incarnation.as_str()) {
-                    return Err(relay_store_error("native mailbox notification link changed"));
-                }
-                Ok(guard)
-            }).transpose()?;
+            if let Some(hook) =
+                TEST_MAILBOX_AFTER_PREFIX_OBSERVATION.with(|hook| hook.borrow_mut().take())
+            {
+                hook();
+            }
+            let relay_link = expected_relay
+                .and_then(|(_, lease, _)| lease)
+                .map(|lease| {
+                    let guard = lease
+                        .channel
+                        .state
+                        .lock()
+                        .expect("federation link mutex poisoned");
+                    if guard.incarnation.as_deref() != Some(lease.incarnation.as_str())
+                        || guard.recorded_incarnation.as_deref() != Some(lease.incarnation.as_str())
+                    {
+                        return Err(relay_store_error(
+                            "native mailbox notification link changed",
+                        ));
+                    }
+                    Ok(guard)
+                })
+                .transpose()?;
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_visible_session_index(session_id) else {
                 return Ok(MailboxWakeQueueOutcome::default());
             };
-            if let Some((principal,lease,peer)) = expected_relay {
-                let current = federation_snapshot_locked(&inner, &peer.peer.host_id).map_err(|error|relay_store_error(&error.message))?;
-                if !mailbox_relay_peer_current_locked(&inner, &current, peer.enrollment_generation) || !same_mailbox_relay_enrollment(peer, &current) {
-                    return Err(relay_store_error("native relay wake enrollment changed before queue admission"));
+            if let Some((principal, lease, peer)) = expected_relay {
+                let current = federation_snapshot_locked(&inner, &peer.peer.host_id)
+                    .map_err(|error| relay_store_error(&error.message))?;
+                if !mailbox_relay_peer_current_locked(&inner, &current, peer.enrollment_generation)
+                    || !same_mailbox_relay_enrollment(peer, &current)
+                {
+                    return Err(relay_store_error(
+                        "native relay wake enrollment changed before queue admission",
+                    ));
                 }
-                if !inner.preferences.federation.enabled || principal.native_session_id != session_id || inner.federation.local.as_ref() != Some(&principal.host)
-                    || inner.sessions[index].federation_native_creation_id != principal.native_creation_id {
+                if !inner.preferences.federation.enabled
+                    || principal.native_session_id != session_id
+                    || inner.federation.local.as_ref() != Some(&principal.host)
+                    || inner.sessions[index].federation_native_creation_id
+                        != principal.native_creation_id
+                {
                     return Ok(MailboxWakeQueueOutcome::default());
                 }
                 if let Some(lease) = lease {
-                    self.refresh_federation_transport_snapshot_locked(&inner,&lease.channel.transport_basis(),&lease.incarnation)
-                        .map_err(|error|relay_store_error(&error.message))?;
+                    self.refresh_federation_transport_snapshot_locked(
+                        &inner,
+                        &lease.channel.transport_basis(),
+                        &lease.incarnation,
+                    )
+                    .map_err(|error| relay_store_error(&error.message))?;
                 }
             }
             if let Some(binding) = expected_binding {
                 // Revalidate while applying the queue change, after all store I/O.
                 // A delayed committed wake never targets a recreated native root.
                 if inner.sessions[index].mailbox_binding() != Some(binding)
-                    || inner.federation.mailbox_directory.get(&binding.participant_key()).is_none_or(|row| {
-                        row.binding != *binding
-                            || !federation_mailbox_participant_current_locked(&inner, row)
-                    })
+                    || inner
+                        .federation
+                        .mailbox_directory
+                        .get(&binding.participant_key())
+                        .is_none_or(|row| {
+                            row.binding != *binding
+                                || !federation_mailbox_participant_current_locked(&inner, row)
+                        })
                 {
                     return Ok(MailboxWakeQueueOutcome::default());
                 }
@@ -797,7 +943,9 @@ impl AppState {
                 return Ok(MailboxWakeQueueOutcome::default());
             }
 
-            if !promote_existing_to_front && mailbox_fifo_prefix(&inner.sessions[index]) != observed_prefix {
+            if !promote_existing_to_front
+                && mailbox_fifo_prefix(&inner.sessions[index]) != observed_prefix
+            {
                 // Releasing both guards is essential: preparing a newly exposed
                 // carrier performs store I/O and takes the dispatch owner's locks.
                 drop(inner);
@@ -806,22 +954,38 @@ impl AppState {
                 if prefix_refreshes >= 3 {
                     // No queue mutation occurred. The durable producer retains
                     // its unconfirmed wake and can retry through its existing owner.
-                    return Err(anyhow!("mailbox queue changed during FIFO admission; wake remains owed"));
+                    return Err(anyhow!(
+                        "mailbox queue changed during FIFO admission; wake remains owed"
+                    ));
                 }
                 continue;
             }
-            let fenced_relays = relay_candidates.iter().filter_map(|(id, notification, authority)| {
-                let fenced = match authority {
-                    Ok(Some(authority)) => mailbox_fifo_authority_is_fenced(authority.validate_locked(&inner)),
-                    Ok(None) => false,
-                    Err(error) if error.status.is_client_error() => true,
-                    Err(error) => {
-                        eprintln!("mailbox> FIFO authority observation unavailable: {}", mailbox_preview(&error.message));
-                        false
-                    }
-                };
-                fenced.then(|| (id.as_str(), notification.mailbox_id.as_str(), notification.through_sequence))
-            }).collect::<Vec<_>>();
+            let fenced_relays = relay_candidates
+                .iter()
+                .filter_map(|(id, notification, authority)| {
+                    let fenced = match authority {
+                        Ok(Some(authority)) => {
+                            mailbox_fifo_authority_is_fenced(authority.validate_locked(&inner))
+                        }
+                        Ok(None) => false,
+                        Err(error) if error.status.is_client_error() => true,
+                        Err(error) => {
+                            eprintln!(
+                                "mailbox> FIFO authority observation unavailable: {}",
+                                mailbox_preview(&error.message)
+                            );
+                            false
+                        }
+                    };
+                    fenced.then(|| {
+                        (
+                            id.as_str(),
+                            notification.mailbox_id.as_str(),
+                            notification.through_sequence,
+                        )
+                    })
+                })
+                .collect::<Vec<_>>();
             let mut changed = false;
             let mut recovered_through = Vec::with_capacity(wakeups.len());
             for (wakeup, storage_key) in wakeups {
@@ -839,15 +1003,22 @@ impl AppState {
                     // duplicate the live wake after the terminal transition.
                     continue;
                 }
-                let text = if wakeup.unread_count == 0 { mailbox_continuation_notification_text(
-                    &wakeup.mailbox_id,wakeup.sequence,&wakeup.sender_name,wakeup.topic.as_deref(),
-                ) } else { mailbox_notification_text(
-                    &wakeup.mailbox_id,
-                    wakeup.unread_count,
-                    wakeup.sequence,
-                    &wakeup.sender_name,
-                    wakeup.topic.as_deref(),
-                ) };
+                let text = if wakeup.unread_count == 0 {
+                    mailbox_continuation_notification_text(
+                        &wakeup.mailbox_id,
+                        wakeup.sequence,
+                        &wakeup.sender_name,
+                        wakeup.topic.as_deref(),
+                    )
+                } else {
+                    mailbox_notification_text(
+                        &wakeup.mailbox_id,
+                        wakeup.unread_count,
+                        wakeup.sequence,
+                        &wakeup.sender_name,
+                        wakeup.topic.as_deref(),
+                    )
+                };
                 let source = MessageSource::mailbox(
                     wakeup.sender_session_id,
                     wakeup.sender_name,
@@ -942,9 +1113,18 @@ impl AppState {
                 if !promote_existing_to_front {
                     while record.queued_prompts.get(insert_at).is_some_and(|queued| {
                         mailbox_fifo_entry_is_runnable(record, queued)
-                            && !queued.pending_prompt.source.as_ref().and_then(|source| source.mailbox.as_ref())
-                                .is_some_and(|mailbox| fenced_relays.iter().any(|(id, name, sequence)|
-                                    *id == queued.pending_prompt.id && *name == mailbox.mailbox_id && *sequence == mailbox.sequence))
+                            && !queued
+                                .pending_prompt
+                                .source
+                                .as_ref()
+                                .and_then(|source| source.mailbox.as_ref())
+                                .is_some_and(|mailbox| {
+                                    fenced_relays.iter().any(|(id, name, sequence)| {
+                                        *id == queued.pending_prompt.id
+                                            && *name == mailbox.mailbox_id
+                                            && *sequence == mailbox.sequence
+                                    })
+                                })
                     }) {
                         insert_at += 1;
                     }
@@ -980,22 +1160,47 @@ impl AppState {
             if let Some((principal, _, _)) = expected_relay {
                 for (mailbox, sequence, _) in &recovered_through {
                     let Some(locator) = MailboxRelayLocator::decode(mailbox, false)
-                        .map_err(|error|anyhow!(error.message))? else { continue; };
+                        .map_err(|error| anyhow!(error.message))?
+                    else {
+                        continue;
+                    };
                     let record = &inner.sessions[index];
-                    let covered = record.queued_prompts.iter().any(|queued|
-                        queued.pending_prompt.source.as_ref().and_then(|source|source.mailbox.as_ref())
-                            .is_some_and(|source|source.mailbox_id == *mailbox && source.sequence >= *sequence));
+                    let covered = record.queued_prompts.iter().any(|queued| {
+                        queued
+                            .pending_prompt
+                            .source
+                            .as_ref()
+                            .and_then(|source| source.mailbox.as_ref())
+                            .is_some_and(|source| {
+                                source.mailbox_id == *mailbox && source.sequence >= *sequence
+                            })
+                    });
                     if covered {
                         // Record before releasing the same lock that first exposes
                         // the cancellable carrier, even if either later write fails.
-                        self.mailbox_store.note_live_mailbox_relay_queued(principal, &locator.id, *sequence);
-                        relay_owner = relay_owner.or_else(|| MailboxRelayDrainOwner::capture_boundary(
-                            record, &locator.home, &locator.id, *sequence, self.federation_executor_wake_signal.clone()));
+                        self.mailbox_store.note_live_mailbox_relay_queued(
+                            principal,
+                            &locator.id,
+                            *sequence,
+                        );
+                        relay_owner = relay_owner.or_else(|| {
+                            MailboxRelayDrainOwner::capture_boundary(
+                                record,
+                                &locator.home,
+                                &locator.id,
+                                *sequence,
+                                self.federation_executor_wake_signal.clone(),
+                            )
+                        });
                         if relay_owner.is_none() {
                             // A relay joining behind a dormant local mailbox must
                             // drive that exact head, not bypass it or a user barrier.
                             local_head_owner = local_mailbox_head_for_relay(
-                                record, &locator.home, &locator.id, *sequence);
+                                record,
+                                &locator.home,
+                                &locator.id,
+                                *sequence,
+                            );
                         }
                     }
                 }
@@ -1010,8 +1215,12 @@ impl AppState {
             drop(inner);
             drop(relay_link);
             for (mailbox_id, sequence, storage_key) in recovered_through {
-                if expected_relay.is_some() { continue; }
-                let Some(storage_key) = storage_key else { continue; };
+                if expected_relay.is_some() {
+                    continue;
+                }
+                let Some(storage_key) = storage_key else {
+                    continue;
+                };
                 self.mailbox_store.mark_notifications_recovered_through(
                     &storage_key,
                     &mailbox_id,
@@ -1068,10 +1277,11 @@ impl AppState {
                 .and_then(|index| {
                     let record = &inner.sessions[index];
                     dispatch_queue_position(&inner, index)
-                        .and_then(|position| record.queued_prompts.get(position)).filter(|queued| {
-                        !queued.has_stored_history()
-                            && !queued_prompt_kept_standalone(record, queued)
-                    })
+                        .and_then(|position| record.queued_prompts.get(position))
+                        .filter(|queued| {
+                            !queued.has_stored_history()
+                                && !queued_prompt_kept_standalone(record, queued)
+                        })
                 })
                 .and_then(|queued| {
                     let mailbox = queued.pending_prompt.source.as_ref()?.mailbox.as_ref()?;
@@ -1087,10 +1297,15 @@ impl AppState {
         }) else {
             return Ok(None);
         };
-        if let Some(locator) = MailboxRelayLocator::decode(&head.mailbox_id,false).map_err(|error|anyhow!(error.message))? {
-            return self.read_native_mailbox_relay_revalidation(session_id,head,&locator);
+        if let Some(locator) = MailboxRelayLocator::decode(&head.mailbox_id, false)
+            .map_err(|error| anyhow!(error.message))?
+        {
+            return self.read_native_mailbox_relay_revalidation(session_id, head, &locator);
         }
-        let Some(storage_key)=self.local_mailbox_storage_key(session_id, &head.mailbox_id)? else { return Ok(None); };
+        let Some(storage_key) = self.local_mailbox_storage_key(session_id, &head.mailbox_id)?
+        else {
+            return Ok(None);
+        };
         let wakeup = self
             .mailbox_store
             .unread_wakeup_for_mailbox(&storage_key, &head.mailbox_id)?;
@@ -1131,7 +1346,8 @@ impl AppState {
             return Ok(false);
         };
         let position = dispatch_queue_position(&inner, index);
-        let front_matches = position.and_then(|position| inner.sessions[index].queued_prompts.get(position))
+        let front_matches = position
+            .and_then(|position| inner.sessions[index].queued_prompts.get(position))
             .is_some_and(|queued| {
                 queued.pending_prompt.id == head.prompt_id
                     && queued.pending_prompt.text == head.text
@@ -1149,7 +1365,8 @@ impl AppState {
         // Authorization may have been prepared during the off-lock mailbox
         // read. Its text/source is now replay input, not a coalescible wake.
         // The same holds for an entry that took a durability hold meanwhile.
-        if position.and_then(|position| inner.sessions[index].queued_prompts.get(position))
+        if position
+            .and_then(|position| inner.sessions[index].queued_prompts.get(position))
             .is_some_and(|queued| {
                 queued.has_stored_history()
                     || queued_prompt_kept_standalone(&inner.sessions[index], queued)
@@ -1167,7 +1384,9 @@ impl AppState {
                 .get_mut(position.expect("validated mailbox queue position"))
                 .expect("validated mailbox queue head should exist");
             let Some(boundary) = boundary.filter(|boundary| !boundary.delivered) else {
-                record.queued_prompts.remove(position.expect("validated mailbox queue position"));
+                record
+                    .queued_prompts
+                    .remove(position.expect("validated mailbox queue position"));
                 sync_pending_prompts(record);
                 self.commit_locked(&mut inner)?;
                 return Ok(true);
@@ -1242,9 +1461,15 @@ impl AppState {
                         "mailbox> failed revalidating queued notification for `{session_id}`: {err:#}"
                     );
                     let inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.find_session_index(session_id).and_then(|index|inner.sessions[index].queued_prompts.front())
-                        .and_then(|queued|queued.pending_prompt.source.as_ref()).and_then(|source|source.mailbox.as_ref())
-                        .is_some_and(|source|source.mailbox_id.starts_with("relay-mailbox-")) { return Err(mailbox_relay_admission_held(err)); }
+                    if inner
+                        .find_session_index(session_id)
+                        .and_then(|index| inner.sessions[index].queued_prompts.front())
+                        .and_then(|queued| queued.pending_prompt.source.as_ref())
+                        .and_then(|source| source.mailbox.as_ref())
+                        .is_some_and(|source| source.mailbox_id.starts_with("relay-mailbox-"))
+                    {
+                        return Err(mailbox_relay_admission_held(err));
+                    }
                     return Ok(());
                 }
             }
@@ -1281,16 +1506,24 @@ impl AppState {
     }
 
     fn mark_mailbox_notification_delivered(&self, notification: &MailboxNotificationDelivery) {
-        if matches!(MailboxRelayLocator::decode(&notification.mailbox_id,false),Ok(Some(_))) {
+        if matches!(
+            MailboxRelayLocator::decode(&notification.mailbox_id, false),
+            Ok(Some(_))
+        ) {
             if let Err(error) = self.mark_native_mailbox_relay_handoff(notification) {
                 eprintln!("native mailbox relay handoff metadata remains unsettled: {error:#}");
             }
             return;
         }
-        let storage_key = match self.local_mailbox_storage_key(&notification.session_id, &notification.mailbox_id) {
+        let storage_key = match self
+            .local_mailbox_storage_key(&notification.session_id, &notification.mailbox_id)
+        {
             Ok(Some(key)) => key,
             Ok(None) => return,
-            Err(error) => { eprintln!("mailbox> failed selecting delivered notification owner: {error:#}"); return; }
+            Err(error) => {
+                eprintln!("mailbox> failed selecting delivered notification owner: {error:#}");
+                return;
+            }
         };
         if let Err(err) = self.mailbox_store.mark_notifications_delivered_through(
             &storage_key,
@@ -1330,15 +1563,52 @@ async fn send_mailbox_message(
     State(state): State<AppState>,
     Json(request): Json<SendMailboxApiRequest>,
 ) -> Result<(StatusCode, Json<MailboxAppendReceipt>), ApiError> {
+    let test_request = request.test_request;
     let request = request.message;
-    if let Some(receipt) = state.replay_original_native_mailbox_send(&sender_session_id, &request).await? {
+    let custody = if let Some(test_request) = test_request {
+        let app = state.clone();
+        let sender = sender_session_id.clone();
+        let key = request.idempotency_key.clone();
+        run_blocking_api(move || {
+            app.prepare_mailbox_test_request(&sender, &key, Some(&test_request))
+        })
+        .await?
+    } else {
+        None
+    };
+    if let Some(receipt) = state
+        .replay_original_native_mailbox_send(
+            &sender_session_id,
+            &request,
+            custody.as_ref().map(|captured| &captured.payload),
+        )
+        .await?
+    {
         return Ok((StatusCode::ACCEPTED, Json(receipt.with_receipt_note())));
     }
-    if let Some(receipt)=state.send_native_mailbox_relay(&sender_session_id,&request).await? {
+    let relay = if custody.is_some() {
+        state
+            .send_native_mailbox_relay_with_test_custody(
+                &sender_session_id,
+                &request,
+                custody.as_ref(),
+            )
+            .await?
+    } else {
+        state
+            .send_native_mailbox_relay(&sender_session_id, &request)
+            .await?
+    };
+    if let Some(receipt) = relay {
         return Ok((StatusCode::ACCEPTED, Json(receipt.with_receipt_note())));
     }
-    if !matches!(mailbox_reference_handle(&request.target_session_id), Ok(None)) {
-        return Err(ApiError::not_found("mailbox reference requires explicit resolution"));
+    if !matches!(
+        mailbox_reference_handle(&request.target_session_id),
+        Ok(None)
+    ) {
+        return Err(ApiError::not_found(
+            "mailbox reference requires explicit resolution",
+        ));
     }
     if let Some(target) = state.local_native_mailbox_target(&request.target_session_id)? {
         let app = state.clone();
@@ -1347,34 +1617,74 @@ async fn send_mailbox_message(
         let retained_domain = run_blocking_api(move || {
             let creation = {
                 let inner = app.inner.lock().expect("state mutex poisoned");
-                federation_mailbox_root_locked(&inner, &native)?.federation_native_creation_id.clone()
+                federation_mailbox_root_locked(&inner, &native)?
+                    .federation_native_creation_id
+                    .clone()
             };
-            app.mailbox_store.native_sender_has_domain_intent(&native, &creation, &key)
+            app.mailbox_store
+                .native_sender_has_domain_intent(&native, &creation, &key)
                 .map_err(mailbox_api_error)
-        }).await?;
+        })
+        .await?;
         // A retained domain intent owns its key; a local spelling cannot
         // turn its retry into a new native append, including during an outage.
         if !retained_domain {
             let mut request = request;
             request.target_session_id = target;
-            let receipt = run_blocking_api(move || state.append_native_mailbox_message_and_notify(
-                &sender_session_id, request, NativeMailboxNamespace::Local,
-            )).await?;
+            let receipt = run_blocking_api(move || {
+                state.append_native_mailbox_message_with_test_custody(
+                    &sender_session_id,
+                    request,
+                    NativeMailboxNamespace::Local,
+                    custody,
+                )
+            })
+            .await?;
             return Ok((StatusCode::ACCEPTED, Json(receipt.with_receipt_note())));
         }
     }
-    state.ensure_automatic_mailbox_participation(&sender_session_id, false).await?;
-    if state.federation_mailbox_actor_if_bound(&sender_session_id)?.is_some() {
-        if request.class.as_deref().is_some_and(|class| class != "routine") {
-            return Err(ApiError::bad_request("durable mailboxes currently support only class `routine`"));
+    state
+        .ensure_automatic_mailbox_participation(&sender_session_id, false)
+        .await?;
+    if state
+        .federation_mailbox_actor_if_bound(&sender_session_id)?
+        .is_some()
+    {
+        if custody.is_some() {
+            return Err(ApiError::conflict(
+                "producer_unsupported: typed test requests require native mailbox custody",
+            ));
         }
-        let receipt: MailboxAppendReceipt = state.federation_mailbox_operation(&sender_session_id,FederationMailboxOperation::Send {
-            target:request.target_session_id,message:request.message,key:request.idempotency_key,
-            topic:request.topic,state_stamp:request.state_stamp }).await?;
+        if request
+            .class
+            .as_deref()
+            .is_some_and(|class| class != "routine")
+        {
+            return Err(ApiError::bad_request(
+                "durable mailboxes currently support only class `routine`",
+            ));
+        }
+        let receipt: MailboxAppendReceipt = state
+            .federation_mailbox_operation(
+                &sender_session_id,
+                FederationMailboxOperation::Send {
+                    target: request.target_session_id,
+                    message: request.message,
+                    key: request.idempotency_key,
+                    topic: request.topic,
+                    state_stamp: request.state_stamp,
+                },
+            )
+            .await?;
         return Ok((StatusCode::ACCEPTED, Json(receipt.with_receipt_note())));
     }
     let receipt = run_blocking_api(move || {
-        state.append_mailbox_message_and_notify(&sender_session_id, request)
+        state.append_native_mailbox_message_with_test_custody(
+            &sender_session_id,
+            request,
+            NativeMailboxNamespace::Standalone,
+            custody,
+        )
     })
     .await?;
     Ok((StatusCode::ACCEPTED, Json(receipt.with_receipt_note())))
@@ -1400,15 +1710,23 @@ async fn list_mailboxes(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<MailboxSummary>>, ApiError> {
-    Ok(Json(list_mailboxes_with_availability(&session_id, &state).await?.mailboxes))
+    Ok(Json(
+        list_mailboxes_with_availability(&session_id, &state)
+            .await?
+            .mailboxes,
+    ))
 }
 
 async fn list_mailboxes_api(
-    AxumPath(session_id): AxumPath<String>, State(state): State<AppState>,
+    AxumPath(session_id): AxumPath<String>,
+    State(state): State<AppState>,
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Response, ApiError> {
     let listing = list_mailboxes_with_availability(&session_id, &state).await?;
-    if query.get("includeRelayAvailability").is_some_and(|value|value == "true") {
+    if query
+        .get("includeRelayAvailability")
+        .is_some_and(|value| value == "true")
+    {
         return Ok(Json(listing).into_response());
     }
     let unavailable = listing.unavailable_relay_homes.len();
@@ -1416,37 +1734,66 @@ async fn list_mailboxes_api(
     let unavailable_prior = listing.unavailable_prior_domains.len();
     let mut response = Json(listing.mailboxes).into_response();
     if unavailable > 0 {
-        response.headers_mut().insert("x-termal-unavailable-relay-homes",
-            unavailable.to_string().parse().map_err(|_|ApiError::internal("invalid relay availability header"))?);
+        response.headers_mut().insert(
+            "x-termal-unavailable-relay-homes",
+            unavailable
+                .to_string()
+                .parse()
+                .map_err(|_| ApiError::internal("invalid relay availability header"))?,
+        );
     }
     if unavailable_domain {
-        response.headers_mut().insert("x-termal-unavailable-central-domain", axum::http::HeaderValue::from_static("1"));
+        response.headers_mut().insert(
+            "x-termal-unavailable-central-domain",
+            axum::http::HeaderValue::from_static("1"),
+        );
     }
     if unavailable_prior > 0 {
-        response.headers_mut().insert("x-termal-unavailable-prior-domains",
-            unavailable_prior.to_string().parse().map_err(|_|ApiError::internal("invalid prior domain availability header"))?);
+        response.headers_mut().insert(
+            "x-termal-unavailable-prior-domains",
+            unavailable_prior
+                .to_string()
+                .parse()
+                .map_err(|_| ApiError::internal("invalid prior domain availability header"))?,
+        );
     }
     if unavailable > 0 || unavailable_domain || unavailable_prior > 0 {
-        response.headers_mut().insert("link", axum::http::HeaderValue::from_static("<?includeRelayAvailability=true>; rel=\"mailbox-availability\""));
+        response.headers_mut().insert(
+            "link",
+            axum::http::HeaderValue::from_static(
+                "<?includeRelayAvailability=true>; rel=\"mailbox-availability\"",
+            ),
+        );
     }
     Ok(response)
 }
 
-async fn list_mailboxes_with_availability(session_id: &str, state: &AppState) -> Result<MailboxRelayListing, ApiError> {
+async fn list_mailboxes_with_availability(
+    session_id: &str,
+    state: &AppState,
+) -> Result<MailboxRelayListing, ApiError> {
     let worker = state.clone();
     let native = session_id.to_owned();
     let mut local = run_blocking_api(move || {
         worker.ensure_mailbox_session_active(&native)?;
-        worker.mailbox_store.list_for_session(&native).map_err(mailbox_api_error)
-    }).await?;
-    let mut relays=state.list_native_mailbox_relays(session_id).await?;
+        worker
+            .mailbox_store
+            .list_for_session(&native)
+            .map_err(mailbox_api_error)
+    })
+    .await?;
+    let mut relays = state.list_native_mailbox_relays(session_id).await?;
     // Original native ownership is selected before any domain request. It is
     // separate history, never a fallback for a refused central operation.
     relays.mailboxes.append(&mut local);
-    let participation = state.ensure_automatic_mailbox_participation(session_id, false).await;
+    let participation = state
+        .ensure_automatic_mailbox_participation(session_id, false)
+        .await;
     relays.unavailable_prior_domains = {
         let inner = state.inner.lock().expect("state mutex poisoned");
-        let index = inner.find_session_index(session_id).ok_or_else(|| ApiError::not_found("session not found"))?;
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
         let root = &inner.sessions[index];
         root.federation_retired_automatic_mailbox_bindings.iter().map(|binding| MailboxUnavailablePriorDomain {
             central: binding.central.clone(), participant_id: binding.participant_key(),
@@ -1454,16 +1801,27 @@ async fn list_mailboxes_with_availability(session_id: &str, state: &AppState) ->
         }).collect()
     };
     if let Err(error) = participation {
-        let central = state.inner.lock().expect("state mutex poisoned").preferences.federation.central.clone()
+        let central = state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .preferences
+            .federation
+            .central
+            .clone()
             .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
         relays.unavailable_central_domain = Some(MailboxRelayUnavailableDomain {
-            central, availability: "unavailable_unverified", status: error.status.as_u16(), error: error.message,
+            central,
+            availability: "unavailable_unverified",
+            status: error.status.as_u16(),
+            error: error.message,
         });
         return Ok(relays);
     }
     let bound_central = {
         let inner = state.inner.lock().expect("state mutex poisoned");
-        let binding = inner.find_session_index(session_id)
+        let binding = inner
+            .find_session_index(session_id)
             .and_then(|index| inner.sessions[index].mailbox_binding());
         if binding.is_some() {
             federation_mailbox_root_locked(&inner, session_id)?;
@@ -1471,7 +1829,9 @@ async fn list_mailboxes_with_availability(session_id: &str, state: &AppState) ->
         binding.map(|binding| binding.central.clone())
     };
     if let Some(central) = bound_central {
-        let domain:Result<Vec<MailboxSummary>,ApiError>=state.federation_mailbox_operation(session_id,FederationMailboxOperation::List).await;
+        let domain: Result<Vec<MailboxSummary>, ApiError> = state
+            .federation_mailbox_operation(session_id, FederationMailboxOperation::List)
+            .await;
         match domain {
             Ok(mut summaries) => {
                 summaries.append(&mut relays.mailboxes);
@@ -1482,7 +1842,10 @@ async fn list_mailboxes_with_availability(session_id: &str, state: &AppState) ->
                 // Preserve its refusal explicitly, with no standalone fallback,
                 // invented domain summary or weakened domain authorization.
                 relays.unavailable_central_domain = Some(MailboxRelayUnavailableDomain {
-                    central, availability:"unavailable_unverified", status:error.status.as_u16(), error:error.message,
+                    central,
+                    availability: "unavailable_unverified",
+                    status: error.status.as_u16(),
+                    error: error.message,
                 });
             }
         }
@@ -1496,16 +1859,35 @@ async fn read_mailbox(
     State(state): State<AppState>,
     Json(request): Json<ReadMailboxRequest>,
 ) -> Result<Json<MailboxReadResponse>, ApiError> {
-    if let Some(locator)=MailboxRelayLocator::decode(&mailbox_id,false)? {
-        return state.read_native_mailbox_relay(&session_id,locator,request).await.map(Json);
+    if let Some(locator) = MailboxRelayLocator::decode(&mailbox_id, false)? {
+        return state
+            .read_native_mailbox_relay(&session_id, locator, request)
+            .await
+            .map(Json);
     }
-    if !state.owns_original_mailbox_resource(&session_id, &mailbox_id, false).await?
-        && state.federation_mailbox_actor_if_bound(&session_id)?.is_some() {
-        return state.read_federation_mailbox(&session_id, mailbox_id, request.after_sequence,
-            request.limit, request.issue_receipt, request.read_key).await.map(Json);
+    if !state
+        .owns_original_mailbox_resource(&session_id, &mailbox_id, false)
+        .await?
+        && state
+            .federation_mailbox_actor_if_bound(&session_id)?
+            .is_some()
+    {
+        return state
+            .read_federation_mailbox(
+                &session_id,
+                mailbox_id,
+                request.after_sequence,
+                request.limit,
+                request.issue_receipt,
+                request.read_key,
+            )
+            .await
+            .map(Json);
     }
     if request.read_key.is_some() {
-        return Err(ApiError::conflict("readKey requires its original central mailbox binding; no local fallback"));
+        return Err(ApiError::conflict(
+            "readKey requires its original central mailbox binding; no local fallback",
+        ));
     }
     let messages = run_blocking_api(move || {
         state.ensure_mailbox_session_active(&session_id)?;
@@ -1533,14 +1915,28 @@ async fn read_mailbox_message(
     AxumPath((session_id, message_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<MailboxMessage>, ApiError> {
-    if let Some(locator)=MailboxRelayLocator::decode(&message_id,true)? {
+    if let Some(locator) = MailboxRelayLocator::decode(&message_id, true)? {
         // The relay read says itself when its remote home cannot answer.
-        return state.read_native_mailbox_relay_message(&session_id,locator).await.map(Json);
+        return state
+            .read_native_mailbox_relay_message(&session_id, locator)
+            .await
+            .map(Json);
     }
-    if !state.owns_original_mailbox_resource(&session_id, &message_id, true).await?
-        && state.federation_mailbox_actor_if_bound(&session_id)?.is_some() {
-        return state.federation_mailbox_operation(&session_id,FederationMailboxOperation::ReadMessage { message_id }).await
-            .map(Json).map_err(mailbox_current_status_unavailable);
+    if !state
+        .owns_original_mailbox_resource(&session_id, &message_id, true)
+        .await?
+        && state
+            .federation_mailbox_actor_if_bound(&session_id)?
+            .is_some()
+    {
+        return state
+            .federation_mailbox_operation(
+                &session_id,
+                FederationMailboxOperation::ReadMessage { message_id },
+            )
+            .await
+            .map(Json)
+            .map_err(mailbox_current_status_unavailable);
     }
     let message = run_blocking_api(move || {
         state.ensure_mailbox_session_active(&session_id)?;
@@ -1558,20 +1954,43 @@ async fn acknowledge_mailbox(
     State(state): State<AppState>,
     Json(request): Json<AcknowledgeMailboxRequest>,
 ) -> Result<Json<MailboxSummary>, ApiError> {
-    if let Some(locator)=MailboxRelayLocator::decode(&mailbox_id,false)? {
-        return state.acknowledge_native_mailbox_relay(&session_id,locator,request).await.map(Json);
+    if let Some(locator) = MailboxRelayLocator::decode(&mailbox_id, false)? {
+        return state
+            .acknowledge_native_mailbox_relay(&session_id, locator, request)
+            .await
+            .map(Json);
     }
-    if !state.owns_original_mailbox_resource(&session_id, &mailbox_id, false).await?
-        && state.federation_mailbox_actor_if_bound(&session_id)?.is_some() {
+    if !state
+        .owns_original_mailbox_resource(&session_id, &mailbox_id, false)
+        .await?
+        && state
+            .federation_mailbox_actor_if_bound(&session_id)?
+            .is_some()
+    {
         if request.no_continuation {
             return Err(ApiError::bad_request(
                 "noContinuation is unavailable for central-domain mailboxes; acknowledge the receipt without it and keep the continuation",
             ));
         }
-        let (Some(receipt),None,None) = (request.receipt,request.expected_processed_through,request.processed_through) else {
-            return Err(ApiError::bad_request("central domain acknowledgement requires only the unchanged issued receipt"));
+        let (Some(receipt), None, None) = (
+            request.receipt,
+            request.expected_processed_through,
+            request.processed_through,
+        ) else {
+            return Err(ApiError::bad_request(
+                "central domain acknowledgement requires only the unchanged issued receipt",
+            ));
         };
-        return state.federation_mailbox_operation(&session_id,FederationMailboxOperation::Acknowledge { mailbox_id,receipt }).await.map(Json);
+        return state
+            .federation_mailbox_operation(
+                &session_id,
+                FederationMailboxOperation::Acknowledge {
+                    mailbox_id,
+                    receipt,
+                },
+            )
+            .await
+            .map(Json);
     }
     let summary = run_blocking_api(move || {
         state.ensure_mailbox_session_active(&session_id)?;
@@ -1593,7 +2012,9 @@ async fn acknowledge_mailbox(
                         &session_id,
                         &mailbox_id,
                         &receipt,
-                        request.no_continuation.then(|| turn.as_ref().map_or(0, |t| t.generation)),
+                        request
+                            .no_continuation
+                            .then(|| turn.as_ref().map_or(0, |t| t.generation)),
                     )
                     .map_err(mailbox_api_error)?;
                 state.observe_mailbox_coverage_ack(
@@ -1637,9 +2058,11 @@ async fn acknowledge_mailbox(
 fn mailbox_api_error(err: anyhow::Error) -> ApiError {
     if let Some(mailbox_error) = err.downcast_ref::<MailboxStoreError>() {
         if mailbox_error.writer_admission {
-            return ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE,
-                mailbox_error.message.clone())
-                .with_kind(ApiErrorKind::FederationMailboxWriterAdmission);
+            return ApiError::from_status(
+                StatusCode::SERVICE_UNAVAILABLE,
+                mailbox_error.message.clone(),
+            )
+            .with_kind(ApiErrorKind::FederationMailboxWriterAdmission);
         }
         return match mailbox_error.kind {
             MailboxStoreErrorKind::Validation => {
@@ -1651,8 +2074,9 @@ fn mailbox_api_error(err: anyhow::Error) -> ApiError {
                 StatusCode::SERVICE_UNAVAILABLE,
                 mailbox_error.message.clone(),
             ),
-            MailboxStoreErrorKind::Capacity => ApiError::from_status(
-                StatusCode::TOO_MANY_REQUESTS, mailbox_error.message.clone()),
+            MailboxStoreErrorKind::Capacity => {
+                ApiError::from_status(StatusCode::TOO_MANY_REQUESTS, mailbox_error.message.clone())
+            }
         };
     }
     ApiError::internal(format!("mailbox operation failed: {err:#}"))
@@ -1739,9 +2163,13 @@ impl MailboxStore {
         self.lock_writer_with_budget(operation, self.write_admission_timeout)
     }
 
-    fn lock_writer_with_budget(&self, operation: &str, budget: Duration) -> Result<SqliteStateWriterGuard<'_>> {
-        lock_sqlite_state_writer_for(&self.write_lock, self.write_admission_timeout.min(budget)).ok_or_else(
-            || {
+    fn lock_writer_with_budget(
+        &self,
+        operation: &str,
+        budget: Duration,
+    ) -> Result<SqliteStateWriterGuard<'_>> {
+        lock_sqlite_state_writer_for(&self.write_lock, self.write_admission_timeout.min(budget))
+            .ok_or_else(|| {
                 anyhow::Error::new(MailboxStoreError {
                     kind: MailboxStoreErrorKind::Retryable,
                     writer_admission: true,
@@ -1750,8 +2178,7 @@ impl MailboxStore {
                          was committed by this operation, so retry the same request"
                     ),
                 })
-            },
-        )
+            })
     }
 
     fn append_delegation_review_result(
@@ -1974,45 +2401,158 @@ impl MailboxStore {
     }
 
     #[cfg(test)]
-    fn append_authorized<G>(&self, input: &MailboxAppendInput, authorize: impl FnOnce() -> Result<G>) -> Result<MailboxAppendResult> {
+    fn append_authorized<G>(
+        &self,
+        input: &MailboxAppendInput,
+        authorize: impl FnOnce() -> Result<G>,
+    ) -> Result<MailboxAppendResult> {
         self.append_with_delivery(input, None, authorize)
     }
 
     #[cfg(test)]
-    fn append_with_delivery<G>(&self, input: &MailboxAppendInput, delivery: Option<&FederationDelivery>, authorize: impl FnOnce() -> Result<G>) -> Result<MailboxAppendResult> {
+    fn append_with_delivery<G>(
+        &self,
+        input: &MailboxAppendInput,
+        delivery: Option<&FederationDelivery>,
+        authorize: impl FnOnce() -> Result<G>,
+    ) -> Result<MailboxAppendResult> {
         self.append_with_delivery_and_relay(input, delivery, None, authorize)
     }
 
     #[cfg(test)]
-    fn append_with_delivery_and_relay<G>(&self, input: &MailboxAppendInput, delivery: Option<&FederationDelivery>, relay: Option<(&MailboxRelayAppend, &FederationPeerSnapshot)>, authorize: impl FnOnce() -> Result<G>) -> Result<MailboxAppendResult> {
+    fn append_with_delivery_and_relay<G>(
+        &self,
+        input: &MailboxAppendInput,
+        delivery: Option<&FederationDelivery>,
+        relay: Option<(&MailboxRelayAppend, &FederationPeerSnapshot)>,
+        authorize: impl FnOnce() -> Result<G>,
+    ) -> Result<MailboxAppendResult> {
         self.append_with_delivery_policy(input, delivery, relay, authorize, |_, _| Ok(()))
     }
 
-    fn append_with_delivery_policy<G>(&self, input: &MailboxAppendInput, delivery: Option<&FederationDelivery>, relay: Option<(&MailboxRelayAppend, &FederationPeerSnapshot)>, authorize: impl FnOnce() -> Result<G>, after_authorize: impl FnOnce(&rusqlite::Transaction<'_>, &G) -> Result<()>) -> Result<MailboxAppendResult> {
-        self.append_with_delivery_policy_inner(input, delivery, relay, authorize, after_authorize, false)
+    fn append_with_delivery_policy<G>(
+        &self,
+        input: &MailboxAppendInput,
+        delivery: Option<&FederationDelivery>,
+        relay: Option<(&MailboxRelayAppend, &FederationPeerSnapshot)>,
+        authorize: impl FnOnce() -> Result<G>,
+        after_authorize: impl FnOnce(&rusqlite::Transaction<'_>, &G) -> Result<()>,
+    ) -> Result<MailboxAppendResult> {
+        self.append_with_delivery_policy_inner(
+            input,
+            delivery,
+            relay,
+            authorize,
+            after_authorize,
+            false,
+        )
     }
 
-    fn append_with_delivery_policy_inner<G>(&self, input: &MailboxAppendInput, delivery: Option<&FederationDelivery>, relay: Option<(&MailboxRelayAppend, &FederationPeerSnapshot)>, authorize: impl FnOnce() -> Result<G>, after_authorize: impl FnOnce(&rusqlite::Transaction<'_>, &G) -> Result<()>, internal_review: bool) -> Result<MailboxAppendResult> {
+    fn append_with_delivery_policy_inner<G>(
+        &self,
+        input: &MailboxAppendInput,
+        delivery: Option<&FederationDelivery>,
+        relay: Option<(&MailboxRelayAppend, &FederationPeerSnapshot)>,
+        authorize: impl FnOnce() -> Result<G>,
+        after_authorize: impl FnOnce(&rusqlite::Transaction<'_>, &G) -> Result<()>,
+        internal_review: bool,
+    ) -> Result<MailboxAppendResult> {
+        self.append_with_test_request_custody_inner(
+            input,
+            delivery,
+            relay,
+            authorize,
+            after_authorize,
+            internal_review,
+            relay.and_then(|(append, _)| append.test_request.as_ref()),
+            None,
+        )
+    }
+
+    fn append_with_test_request_custody<G>(
+        &self,
+        input: &MailboxAppendInput,
+        payload: Option<&MailboxTestPayload>,
+        scope: Option<&MailboxTestSenderScope>,
+        authorize: impl FnOnce() -> Result<G>,
+        after_authorize: impl FnOnce(&rusqlite::Transaction<'_>, &G) -> Result<()>,
+    ) -> Result<MailboxAppendResult> {
+        self.append_with_test_request_custody_inner(
+            input,
+            None,
+            None,
+            authorize,
+            after_authorize,
+            false,
+            payload,
+            scope,
+        )
+    }
+
+    fn append_with_test_request_custody_inner<G>(
+        &self,
+        input: &MailboxAppendInput,
+        delivery: Option<&FederationDelivery>,
+        relay: Option<(&MailboxRelayAppend, &FederationPeerSnapshot)>,
+        authorize: impl FnOnce() -> Result<G>,
+        after_authorize: impl FnOnce(&rusqlite::Transaction<'_>, &G) -> Result<()>,
+        internal_review: bool,
+        test_request: Option<&MailboxTestPayload>,
+        test_request_scope: Option<&MailboxTestSenderScope>,
+    ) -> Result<MailboxAppendResult> {
+        if test_request.is_none() && test_request_scope.is_some() {
+            return Err(relay_store_error(
+                "sender scope has no retained test request",
+            ));
+        }
+        if let Some(scope) = test_request_scope {
+            validate_mailbox_test_sender_scope(scope)
+                .map_err(|error| relay_store_error(&error.message))?;
+        }
+        if let Some(payload) = test_request {
+            validate_mailbox_test_payload(payload)
+                .map_err(|error| relay_store_error(&error.message))?;
+            if payload.request_send_key != input.idempotency_key {
+                return Err(relay_store_error(
+                    "test-request custody belongs to another send key",
+                ));
+            }
+        }
         if internal_review {
             validate_mailbox_append_shape(input)?;
         } else {
             validate_mailbox_append_input(input)?;
         }
-        if let Some((relay, _))=relay {
-            if relay.input().map_err(|error|relay_store_error(&error.message))? != *input {
+        if let Some((relay, _)) = relay {
+            if relay
+                .input()
+                .map_err(|error| relay_store_error(&error.message))?
+                != *input
+            {
                 return Err(relay_store_error("native relay append input changed"));
             }
         }
         let write_guard = if delivery.is_some() || relay.is_some() {
             self.lock_writer_with_budget("waiting to begin mailbox append", Duration::from_secs(2))?
-        } else { self.lock_writer("waiting to begin mailbox append")? };
+        } else {
+            self.lock_writer("waiting to begin mailbox append")?
+        };
         let mut connection = self.connection()?;
         let transaction = begin_mailbox_write(&mut connection, "beginning mailbox append")?;
-        if relay.is_none() && native_sender_has_relay_intent(
-            &transaction, &input.sender_session_id, &input.idempotency_key)? {
-            return Err(relay_store_error("idempotency key belongs to a native relay send; no standalone fallback"));
+        if relay.is_none()
+            && native_sender_has_relay_intent(
+                &transaction,
+                &input.sender_session_id,
+                &input.idempotency_key,
+            )?
+        {
+            return Err(relay_store_error(
+                "idempotency key belongs to a native relay send; no standalone fallback",
+            ));
         }
-        if let Some((relay, _)) = relay { check_mailbox_relay_home(&transaction, relay)?; }
+        if let Some((relay, _)) = relay {
+            check_mailbox_relay_home(&transaction, relay)?;
+        }
         if let Some(delivery) = delivery {
             federation_delivery_check_central(&transaction, delivery)?;
         }
@@ -2023,6 +2563,8 @@ impl MailboxStore {
             &input.idempotency_key,
         )? {
             if existing.target_session_id != input.target_session_id
+                || existing.test_request.as_ref() != test_request
+                || existing.test_request_scope.as_ref() != test_request_scope
                 || existing.body != input.body
                 || existing.topic != input.topic
                 || existing.state_stamp != input.state_stamp
@@ -2041,10 +2583,23 @@ impl MailboxStore {
                 &input.sender_session_id,
             )?;
             if let Some(delivery) = delivery {
-                federation_delivery_commit_central(&transaction, delivery, &existing.message_id, existing.sequence)?;
+                federation_delivery_commit_central(
+                    &transaction,
+                    delivery,
+                    &existing.message_id,
+                    existing.sequence,
+                )?;
             }
             if let Some((relay, peer)) = relay {
-                commit_mailbox_relay_append(&transaction, relay, peer, &existing.mailbox_id, &existing.message_id, existing.sequence, existing.unread_depth_at_append)?;
+                commit_mailbox_relay_append(
+                    &transaction,
+                    relay,
+                    peer,
+                    &existing.mailbox_id,
+                    &existing.message_id,
+                    existing.sequence,
+                    existing.unread_depth_at_append,
+                )?;
             }
             let authority = authorize()?;
             // A retry cannot revoke a wake authorized by the original append.
@@ -2164,8 +2719,8 @@ impl MailboxStore {
                    id, mailbox_id, sequence, sender_session_id, sender_name,
                    target_session_id, target_name, created_at, class, topic,
                    state_stamp, body, idempotency_key, unread_depth_at_append,
-                   notification_disposition, dispatch_outcome
-                 ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'routine', ?9, ?10, ?11, ?12, ?13, ?14, NULL)",
+                   notification_disposition, dispatch_outcome, test_request_json, test_request_scope_json
+                 ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'routine', ?9, ?10, ?11, ?12, ?13, ?14, NULL, ?15, ?16)",
                 rusqlite::params![
                     &message_id,
                     &mailbox_id,
@@ -2181,6 +2736,8 @@ impl MailboxStore {
                     &input.idempotency_key,
                     unread_depth,
                     notification_disposition,
+                    test_request.map(serde_json::to_string).transpose()?,
+                    test_request_scope.map(serde_json::to_string).transpose()?,
                 ],
             )
             .context("failed to append mailbox message")?;
@@ -2219,7 +2776,15 @@ impl MailboxStore {
             federation_delivery_test_cut("beforeCentralCommit");
         }
         if let Some((relay, peer)) = relay {
-            commit_mailbox_relay_append(&transaction, relay, peer, &mailbox_id, &message_id, sequence, unread_depth)?;
+            commit_mailbox_relay_append(
+                &transaction,
+                relay,
+                peer,
+                &mailbox_id,
+                &message_id,
+                sequence,
+                unread_depth,
+            )?;
         }
         let authority = authorize()?;
         after_authorize(&transaction, &authority)?;
@@ -2620,7 +3185,11 @@ impl MailboxStore {
              WHERE mine.session_id = ?1
                AND mine.mailbox_id = ?2
                AND mine.left_at IS NULL",
-            rusqlite::params![session_id, mailbox_id, DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN],
+            rusqlite::params![
+                session_id,
+                mailbox_id,
+                DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN
+            ],
             |row| {
                 Ok(MailboxUnreadWakeup {
                     mailbox_id: mailbox_id.to_owned(),
@@ -2758,7 +3327,11 @@ impl MailboxStore {
             .context("failed to prepare unread mailbox wake-up query")?;
         let rows = statement
             .query_map(
-                rusqlite::params![session_id, recovery_mode, DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN],
+                rusqlite::params![
+                    session_id,
+                    recovery_mode,
+                    DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN
+                ],
                 |row| {
                     Ok(MailboxUnreadWakeup {
                         mailbox_id: row.get(0)?,
@@ -2800,12 +3373,24 @@ impl MailboxStore {
         limit: u64,
         issue_receipt: bool,
     ) -> Result<MailboxReadResponse> {
-        self.read_range_authorized(session_id, mailbox_id, after_sequence, limit, issue_receipt, || Ok(()))
+        self.read_range_authorized(
+            session_id,
+            mailbox_id,
+            after_sequence,
+            limit,
+            issue_receipt,
+            || Ok(()),
+        )
     }
 
     fn read_range_authorized<G>(
-        &self, session_id: &str, mailbox_id: &str, after_sequence: Option<u64>,
-        limit: u64, issue_receipt: bool, authorize: impl FnOnce() -> Result<G>,
+        &self,
+        session_id: &str,
+        mailbox_id: &str,
+        after_sequence: Option<u64>,
+        limit: u64,
+        issue_receipt: bool,
+        authorize: impl FnOnce() -> Result<G>,
     ) -> Result<MailboxReadResponse> {
         let limit = limit.clamp(1, 200);
         let _write_guard = if issue_receipt {
@@ -2831,7 +3416,7 @@ impl MailboxStore {
                 "SELECT id, mailbox_id, sequence, sender_session_id, sender_name,
                         target_session_id, target_name, created_at, class, topic,
                         state_stamp, body, idempotency_key, unread_depth_at_append,
-                        notification_disposition
+                        notification_disposition, test_request_json
                  FROM mailbox_messages
                  WHERE mailbox_id = ?1 AND sequence > ?2
                    AND NOT (
@@ -2883,7 +3468,10 @@ impl MailboxStore {
             .commit()
             .map_err(|err| mailbox_sqlite_write_error("committing mailbox page issuance", err))?;
         Ok(MailboxReadResponse {
-            receipt_state: None, read_key: None, page_id: None, cursor_generation: None,
+            receipt_state: None,
+            read_key: None,
+            page_id: None,
+            cursor_generation: None,
             reader_session_id: None,
             messages,
             after_sequence,
@@ -2906,14 +3494,18 @@ impl MailboxStore {
                 "SELECT id, mailbox_id, sequence, sender_session_id, sender_name,
                         target_session_id, target_name, created_at, class, topic,
                         state_stamp, body, idempotency_key, unread_depth_at_append,
-                        notification_disposition
+                        notification_disposition, test_request_json
                  FROM mailbox_messages
                  WHERE id = ?1
                    AND NOT (
                      target_session_id = ?2
                      AND COALESCE(topic, '') GLOB ?3
                    )",
-                rusqlite::params![message_id, session_id, DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN],
+                rusqlite::params![
+                    message_id,
+                    session_id,
+                    DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN
+                ],
                 mailbox_message_from_row,
             )
             .map_err(|err| match err {
@@ -2977,20 +3569,35 @@ impl MailboxStore {
         declaration_generation: Option<u64>,
     ) -> Result<(MailboxSummary, u64)> {
         self.acknowledge_authorized_with_declaration(
-            session_id, mailbox_id, receipt, expected_processed_through,
-            processed_through, declaration_generation, || Ok(()),
+            session_id,
+            mailbox_id,
+            receipt,
+            expected_processed_through,
+            processed_through,
+            declaration_generation,
+            || Ok(()),
         )
     }
 
     fn acknowledge_authorized<G>(
-        &self, session_id: &str, mailbox_id: &str, receipt: Option<&str>,
-        expected_processed_through: u64, processed_through: u64,
+        &self,
+        session_id: &str,
+        mailbox_id: &str,
+        receipt: Option<&str>,
+        expected_processed_through: u64,
+        processed_through: u64,
         authorize: impl FnOnce() -> Result<G>,
     ) -> Result<MailboxSummary> {
         self.acknowledge_authorized_with_declaration(
-            session_id, mailbox_id, receipt, expected_processed_through,
-            processed_through, None, authorize,
-        ).map(|result| result.0)
+            session_id,
+            mailbox_id,
+            receipt,
+            expected_processed_through,
+            processed_through,
+            None,
+            authorize,
+        )
+        .map(|result| result.0)
     }
 
     fn acknowledge_authorized_with_declaration<G>(
@@ -3302,12 +3909,14 @@ fn mailbox_message_for_idempotency_key(
     match connection.query_row(
         "SELECT mailbox_id, id, sequence, sender_name, target_session_id,
                 target_name, body, topic, state_stamp, unread_depth_at_append,
-                dispatch_outcome
+                dispatch_outcome, test_request_json, test_request_scope_json
          FROM mailbox_messages
          WHERE sender_session_id = ?1 AND idempotency_key = ?2",
         rusqlite::params![sender_session_id, idempotency_key],
         |row| {
             Ok(MailboxIdempotencyRecord {
+                test_request: mailbox_test_payload_from_row(row, 11)?,
+                test_request_scope: mailbox_test_scope_from_row(row, 12)?,
                 sender_session_id: sender_session_id.to_owned(),
                 idempotency_key: idempotency_key.to_owned(),
                 mailbox_id: row.get(0)?,
@@ -3333,7 +3942,7 @@ fn mailbox_message_for_idempotency_key(
 fn mailbox_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MailboxMessage> {
     let notification_state: String = row.get(14)?;
     Ok(MailboxMessage {
-        test_request: None,
+        test_request: mailbox_test_payload_from_row(row, 15)?,
         notification_cause: None,
         id: row.get(0)?,
         mailbox_id: row.get(1)?,
@@ -3396,7 +4005,11 @@ fn mailbox_summaries_for_session_with_empty(
         .context("failed to prepare mailbox summary query")?;
     let rows = statement
         .query_map(
-            rusqlite::params![session_id, DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN, include_empty],
+            rusqlite::params![
+                session_id,
+                DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN,
+                include_empty
+            ],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,

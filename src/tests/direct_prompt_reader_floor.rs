@@ -427,6 +427,7 @@ fn direct_prompt_policy_key_presence_refuses_every_predecessor_before_normalizat
 fn coordination_predecessor() -> rusqlite::Connection {
     let connection = rusqlite::Connection::open_in_memory().unwrap();
     ensure_sqlite_coordination_schema(&connection).unwrap();
+    remove_empty_test_request_custody_columns_for_test(&connection);
     connection
         .execute_batch(
             "DROP TABLE remote_prompt_intents; DROP TABLE remote_prompt_receives;
@@ -450,10 +451,56 @@ fn coordination_predecessor() -> rusqlite::Connection {
 fn direct_prompt_coordination_upgrade_preserves_old_rows_and_adds_no_work() {
     let connection = coordination_predecessor();
     let before = image(&connection);
+    let columns = |table: &str| {
+        connection
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, u64>(3)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+    let old_columns = ["mailbox_messages", "mailbox_relay_intents"]
+        .into_iter()
+        .map(|table| (table, columns(table)))
+        .collect::<BTreeMap<_, _>>();
     ensure_sqlite_coordination_schema(&connection).unwrap();
+    validate_current_coordination_schema(&connection).unwrap();
     let after = image(&connection);
     for (table, definition, rows) in &before {
         if table == "meta" {
+            continue;
+        }
+        if let Some(previous_columns) = old_columns.get(table.as_str()) {
+            let mut expected_columns = previous_columns.clone();
+            expected_columns.extend([
+                ("test_request_json".to_owned(), "TEXT".to_owned(), 0),
+                ("test_request_scope_json".to_owned(), "TEXT".to_owned(), 0),
+            ]);
+            assert_eq!(
+                columns(table),
+                expected_columns,
+                "{table} column order and nullability"
+            );
+            let expected_rows = rows
+                .iter()
+                .map(|row| {
+                    let mut row = row.clone();
+                    row.extend([rusqlite::types::Value::Null, rusqlite::types::Value::Null]);
+                    row
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                &after.iter().find(|(name, _, _)| name == table).unwrap().2,
+                &expected_rows,
+                "{table}: every old value preserved, new custody absent"
+            );
             continue;
         }
         assert_eq!(

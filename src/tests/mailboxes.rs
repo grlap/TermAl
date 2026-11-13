@@ -5,6 +5,9 @@
 
 use super::*;
 
+#[path = "mailbox_test_request.rs"]
+pub(super) mod test_request;
+
 pub(super) fn mailbox_test_state() -> (AppState, String, String) {
     let base = test_app_state();
     let coordination_path = resolve_coordination_persistence_path(base.persistence_path.as_ref());

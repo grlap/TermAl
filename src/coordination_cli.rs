@@ -24,6 +24,7 @@ const COORDINATION_CLI_USAGE: &str = "usage:
                       (--message <text> | --message-file <path or ->)
                       --idempotency-key <key> [--topic <text>]
                       [--state-stamp <text>] [--class <class>]
+                      [--test-request-json <JSON>]
                       [--json] [--base-url <url>]
   termal mailbox read [--as-session <id>] --mailbox-id <id>
                       [--after <sequence>] [--limit <count>]
@@ -135,7 +136,13 @@ enum CoordinationCliMessageSource {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum CoordinationCliCommand {
     Help,
-    FederationStatus { as_session: String },
+    MailboxTestSend {
+        ordinary: Box<CoordinationCliCommand>,
+        test_request: MailboxTestRequest,
+    },
+    FederationStatus {
+        as_session: String,
+    },
     SessionsList {
         as_session: Option<String>,
     },
@@ -396,7 +403,10 @@ fn parse_coordination_cli_args_with_default_session_id(
     let command_label = format!("{group} {verb}");
     let command = match (group.as_str(), verb.as_str()) {
         ("federation", "status") => CoordinationCliCommand::FederationStatus {
-            as_session: take_coordination_cli_session_id(&mut flags, default_session_id.as_deref())?,
+            as_session: take_coordination_cli_session_id(
+                &mut flags,
+                default_session_id.as_deref(),
+            )?,
         },
         ("sessions", "list") => CoordinationCliCommand::SessionsList {
             as_session: take_optional_coordination_cli_session_id(
@@ -446,7 +456,22 @@ fn parse_coordination_cli_args_with_default_session_id(
                     )));
                 }
             }
-            CoordinationCliCommand::MailboxSend {
+            let test_request = flags
+                .values
+                .remove("--test-request-json")
+                .map(|value| {
+                    let request: MailboxTestRequest =
+                        serde_json::from_str(&value).map_err(|err| {
+                            coordination_cli_usage_error(format!(
+                                "invalid --test-request-json: {err}"
+                            ))
+                        })?;
+                    validate_mailbox_test_request(&request)
+                        .map_err(|err| coordination_cli_usage_error(err.message))?;
+                    Ok::<_, anyhow::Error>(request)
+                })
+                .transpose()?;
+            let ordinary = CoordinationCliCommand::MailboxSend {
                 as_session,
                 to,
                 message,
@@ -454,6 +479,13 @@ fn parse_coordination_cli_args_with_default_session_id(
                 topic: flags.take_optional("--topic"),
                 state_stamp: flags.take_optional("--state-stamp"),
                 class,
+            };
+            match test_request {
+                Some(test_request) => CoordinationCliCommand::MailboxTestSend {
+                    ordinary: Box::new(ordinary),
+                    test_request,
+                },
+                None => ordinary,
             }
         }
         ("mailbox", "read") => CoordinationCliCommand::MailboxRead {
@@ -622,10 +654,20 @@ fn validate_coordination_cli_output(
     let unusable = |detail: String| anyhow!("the server returned an unusable response: {detail}");
     match command {
         CoordinationCliCommand::Help => Ok(()),
+        CoordinationCliCommand::MailboxTestSend { ordinary, .. } => {
+            validate_coordination_cli_output(ordinary, output)
+        }
         CoordinationCliCommand::FederationStatus { .. } => {
-            if output.get("federation").and_then(Value::as_object).is_none()
+            if output
+                .get("federation")
+                .and_then(Value::as_object)
+                .is_none()
                 || output.get("hostUtilization").is_none()
-                || !matches!(output.get("hostUtilizationStatus"), Some(Value::Null | Value::Number(_))) {
+                || !matches!(
+                    output.get("hostUtilizationStatus"),
+                    Some(Value::Null | Value::Number(_))
+                )
+            {
                 bail!("unusable federation status response");
             }
             Ok(())
@@ -759,10 +801,23 @@ fn coordination_cli_error_is_broken_pipe(err: &anyhow::Error) -> bool {
 /// Executes one command against `base_url` and returns the same JSON the
 /// corresponding MCP tool would return.
 fn execute_coordination_cli(command: &CoordinationCliCommand, base_url: &str) -> Result<Value> {
+    execute_coordination_cli_with_test_request(command, base_url, None)
+}
+
+fn execute_coordination_cli_with_test_request(
+    command: &CoordinationCliCommand,
+    base_url: &str,
+    test_request: Option<&MailboxTestRequest>,
+) -> Result<Value> {
     match command {
         CoordinationCliCommand::Help => Ok(json!({ "usage": coordination_cli_usage() })),
+        CoordinationCliCommand::MailboxTestSend {
+            ordinary,
+            test_request,
+        } => execute_coordination_cli_with_test_request(ordinary, base_url, Some(test_request)),
         CoordinationCliCommand::FederationStatus { as_session } => {
-            coordination_cli_authorized_bridge(as_session, base_url)?.tool_federation_status(json!({}))
+            coordination_cli_authorized_bridge(as_session, base_url)?
+                .tool_federation_status(json!({}))
         }
         CoordinationCliCommand::SessionsList { as_session } => {
             let caller = as_session
@@ -806,6 +861,12 @@ fn execute_coordination_cli(command: &CoordinationCliCommand, base_url: &str) ->
                 if let Some(value) = value {
                     arguments.insert(name.to_owned(), Value::String(value.clone()));
                 }
+            }
+            if let Some(test_request) = test_request {
+                arguments.insert(
+                    "testRequest".to_owned(),
+                    serde_json::to_value(test_request)?,
+                );
             }
             bridge.tool_send_to_session(Value::Object(arguments))
         }
@@ -940,7 +1001,10 @@ fn render_coordination_cli_message(message: &Value, out: &mut impl Write) -> Res
     )?;
     // Only an exact read carries the current projection; its summary opens
     // with "As of <observedAt>:".
-    if let Some(current) = message.get("currentStatus").filter(|value| value.is_object()) {
+    if let Some(current) = message
+        .get("currentStatus")
+        .filter(|value| value.is_object())
+    {
         writeln!(
             out,
             "  current status: {}",
@@ -951,25 +1015,48 @@ fn render_coordination_cli_message(message: &Value, out: &mut impl Write) -> Res
             "  recipientAcknowledged: {}",
             coordination_cli_field(current, "recipientAcknowledged")
         )?;
-        if let Some(relay) = current.get("relayProgress").filter(|value| value.is_object()) {
-            writeln!(out, "  home queue admission confirmed: {} (observed {})",
+        if let Some(relay) = current
+            .get("relayProgress")
+            .filter(|value| value.is_object())
+        {
+            writeln!(
+                out,
+                "  home queue admission confirmed: {} (observed {})",
                 coordination_cli_field(relay, "homeQueueAdmissionConfirmed"),
-                coordination_cli_field(relay, "homeObservedAt"))?;
+                coordination_cli_field(relay, "homeObservedAt")
+            )?;
             if let Some(target) = relay.get("target").filter(|value| value.is_object()) {
-                writeln!(out, "  target progress: {} (observed {})",
+                writeln!(
+                    out,
+                    "  target progress: {} (observed {})",
                     coordination_cli_field(target, "availability"),
-                    coordination_cli_field(target, "observedAt"))?;
+                    coordination_cli_field(target, "observedAt")
+                )?;
                 if target.get("availability").and_then(Value::as_str) == Some("observed") {
-                    writeln!(out, "  queue admission recorded: {}; provider handoff recorded: {}; currently queued: {}",
+                    writeln!(
+                        out,
+                        "  queue admission recorded: {}; provider handoff recorded: {}; currently queued: {}",
                         coordination_cli_field(target, "queueAdmissionRecorded"),
                         coordination_cli_field(target, "providerHandoffRecorded"),
-                        coordination_cli_field(target, "currentlyQueued"))?;
-                    writeln!(out, "  observed target holds: {}",
-                        coordination_cli_field(target, "currentSessionHolds"))?;
+                        coordination_cli_field(target, "currentlyQueued")
+                    )?;
+                    writeln!(
+                        out,
+                        "  observed target holds: {}",
+                        coordination_cli_field(target, "currentSessionHolds")
+                    )?;
                 } else {
-                    writeln!(out, "  target unavailable: {}", coordination_cli_field(target, "reason"))?;
+                    writeln!(
+                        out,
+                        "  target unavailable: {}",
+                        coordination_cli_field(target, "reason")
+                    )?;
                 }
-                writeln!(out, "  recovery: {}", coordination_cli_field(target, "recovery"))?;
+                writeln!(
+                    out,
+                    "  recovery: {}",
+                    coordination_cli_field(target, "recovery")
+                )?;
             }
         }
     }
@@ -982,26 +1069,67 @@ fn render_coordination_cli_message(message: &Value, out: &mut impl Write) -> Res
 fn coordination_cli_mailbox_unavailability(output: &Value) -> Result<Vec<String>> {
     let mut lines = Vec::new();
     let describe = |entry: &Value, identity: &str, label: &str| -> Result<String> {
-        let host = entry.get(identity).and_then(|identity| {
-            if identity.get("host").is_some() { identity.get("host") } else { Some(identity) }
-        }).and_then(|host|host.get("hostId")).and_then(Value::as_str)
-            .filter(|host|!host.trim().is_empty())
-            .ok_or_else(||anyhow!("the server returned an unusable response: missing unavailable {label} identity"))?;
-        let status = entry.get("status").and_then(Value::as_u64).filter(|status|(400..600).contains(status))
-            .ok_or_else(||anyhow!("the server returned an unusable response: invalid unavailable {label} status"))?;
-        let error = entry.get("error").and_then(Value::as_str).filter(|error|!error.trim().is_empty())
-            .ok_or_else(||anyhow!("the server returned an unusable response: missing unavailable {label} error"))?;
+        let host = entry
+            .get(identity)
+            .and_then(|identity| {
+                if identity.get("host").is_some() {
+                    identity.get("host")
+                } else {
+                    Some(identity)
+                }
+            })
+            .and_then(|host| host.get("hostId"))
+            .and_then(Value::as_str)
+            .filter(|host| !host.trim().is_empty())
+            .ok_or_else(|| {
+                anyhow!(
+                    "the server returned an unusable response: missing unavailable {label} identity"
+                )
+            })?;
+        let status = entry
+            .get("status")
+            .and_then(Value::as_u64)
+            .filter(|status| (400..600).contains(status))
+            .ok_or_else(|| {
+                anyhow!(
+                    "the server returned an unusable response: invalid unavailable {label} status"
+                )
+            })?;
+        let error = entry
+            .get("error")
+            .and_then(Value::as_str)
+            .filter(|error| !error.trim().is_empty())
+            .ok_or_else(|| {
+                anyhow!(
+                    "the server returned an unusable response: missing unavailable {label} error"
+                )
+            })?;
         if entry.get("availability").and_then(Value::as_str) != Some("unavailable_unverified") {
-            return Err(anyhow!("the server returned an unusable response: invalid unavailable {label} classification"));
+            return Err(anyhow!(
+                "the server returned an unusable response: invalid unavailable {label} classification"
+            ));
         }
-        Ok(format!("unavailable {label} {}: HTTP {status} {}", sanitize_coordination_cli_text(host,false),sanitize_coordination_cli_text(error,false)))
+        Ok(format!(
+            "unavailable {label} {}: HTTP {status} {}",
+            sanitize_coordination_cli_text(host, false),
+            sanitize_coordination_cli_text(error, false)
+        ))
     };
     if let Some(homes) = output.get("unavailableRelayHomes") {
-        let homes = homes.as_array().ok_or_else(||anyhow!("the server returned an unusable response: unavailableRelayHomes is not an array"))?;
-        for home in homes { lines.push(describe(home,"home","relay home")?); }
+        let homes = homes.as_array().ok_or_else(|| {
+            anyhow!(
+                "the server returned an unusable response: unavailableRelayHomes is not an array"
+            )
+        })?;
+        for home in homes {
+            lines.push(describe(home, "home", "relay home")?);
+        }
     }
-    if let Some(domain) = output.get("unavailableCentralDomain").filter(|value|!value.is_null()) {
-        lines.push(describe(domain,"central","central domain")?);
+    if let Some(domain) = output
+        .get("unavailableCentralDomain")
+        .filter(|value| !value.is_null())
+    {
+        lines.push(describe(domain, "central", "central domain")?);
     }
     Ok(lines)
 }
@@ -1015,6 +1143,9 @@ fn render_coordination_cli_output(
 ) -> Result<()> {
     match command {
         CoordinationCliCommand::Help => writeln!(out, "{}", coordination_cli_usage())?,
+        CoordinationCliCommand::MailboxTestSend { ordinary, .. } => {
+            return render_coordination_cli_output(ordinary, output, out);
+        }
         CoordinationCliCommand::FederationStatus { .. } => {
             writeln!(out, "{}", serde_json::to_string_pretty(output)?)?;
         }
@@ -1047,8 +1178,13 @@ fn render_coordination_cli_output(
                 .map(Vec::as_slice)
                 .unwrap_or_default();
             if !unavailable.is_empty() {
-                writeln!(out,"partial mailbox list for {as_session}; unavailable authority is not empty history")?;
-                for refusal in unavailable { writeln!(out,"{refusal}")?; }
+                writeln!(
+                    out,
+                    "partial mailbox list for {as_session}; unavailable authority is not empty history"
+                )?;
+                for refusal in unavailable {
+                    writeln!(out, "{refusal}")?;
+                }
             } else if mailboxes.is_empty() {
                 writeln!(out, "no mailboxes for {as_session}")?;
             }
@@ -1133,9 +1269,12 @@ fn render_coordination_cli_output(
                 coordination_cli_field(output, "nextAfterSequence")
             )?;
             if output.get("receiptState").is_some() {
-                writeln!(out, "receipt state {}, readKey {}",
+                writeln!(
+                    out,
+                    "receipt state {}, readKey {}",
                     coordination_cli_field(output, "receiptState"),
-                    coordination_cli_field(output, "readKey"))?;
+                    coordination_cli_field(output, "readKey")
+                )?;
             }
             let messages = output
                 .get("messages")

@@ -1649,11 +1649,21 @@ fn old_coordination_schema_migration_preserves_the_opaque_key_and_exact_attempt_
                 [REVIEW_ATTEMPT_AUTH_KEY],
             )
             .unwrap();
+        let custody_rows: u64 = connection.query_row(
+            "SELECT COUNT(*) FROM original.mailbox_messages WHERE test_request_json IS NOT NULL OR test_request_scope_json IS NOT NULL",
+            [], |row| row.get(0)).unwrap();
+        assert_eq!(
+            custody_rows, 0,
+            "only ordinary legacy fixtures may be projected into the v1 schema"
+        );
         connection
             .execute_batch(
                 "INSERT INTO mailboxes SELECT * FROM original.mailboxes;
             INSERT INTO mailbox_participants SELECT * FROM original.mailbox_participants;
-            INSERT INTO mailbox_messages SELECT * FROM original.mailbox_messages;",
+            INSERT INTO mailbox_messages SELECT id,mailbox_id,sequence,sender_session_id,sender_name,
+                target_session_id,target_name,created_at,class,topic,state_stamp,body,idempotency_key,
+                unread_depth_at_append,notification_disposition,dispatch_outcome
+                FROM original.mailbox_messages;",
             )
             .unwrap();
     }

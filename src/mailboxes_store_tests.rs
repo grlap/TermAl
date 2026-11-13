@@ -392,6 +392,7 @@ fn mailbox_version_one_upgrade_preserves_cursors_and_requires_new_issuance() {
         input.idempotency_key = "unprocessed-before-upgrade".into();
         store.append(&input).unwrap();
         // Exact old schema and existing durable state, in an isolated fixture.
+        remove_empty_test_request_custody_columns_for_test(&store.connection().unwrap());
         store
             .connection()
             .unwrap()
@@ -464,6 +465,7 @@ fn mailbox_version_two_upgrade_preserves_receipts_and_cursor_without_coverage() 
         store
             .acknowledge_page("session-target", &message.mailbox_id, &receipt)
             .unwrap();
+        remove_empty_test_request_custody_columns_for_test(&store.connection().unwrap());
         store
             .connection()
             .unwrap()
@@ -528,10 +530,15 @@ fn mailbox_version_three_upgrade_preserves_delivery_records_and_receipts() {
     let (message, receipt) = {
         let store = MailboxStore::open(&path).unwrap();
         let message = store.append(&test_input()).unwrap();
-        let page = store.read_range("session-target", &message.mailbox_id, None, 10).unwrap();
+        let page = store
+            .read_range("session-target", &message.mailbox_id, None, 10)
+            .unwrap();
         let receipt = page.receipt.unwrap();
-        store.acknowledge_page("session-target", &message.mailbox_id, &receipt).unwrap();
+        store
+            .acknowledge_page("session-target", &message.mailbox_id, &receipt)
+            .unwrap();
         let connection = store.connection().unwrap();
+        remove_empty_test_request_custody_columns_for_test(&connection);
         connection.execute_batch(
             "DROP TABLE remote_prompt_intents;
              DROP TABLE remote_prompt_receives;
@@ -563,30 +570,80 @@ fn mailbox_version_three_upgrade_preserves_delivery_records_and_receipts() {
         (message.receipt.clone(), receipt)
     };
     let store = MailboxStore::open(&path).unwrap();
-    store.acknowledge_page("session-target", &message.mailbox_id, &receipt).unwrap();
+    store
+        .acknowledge_page("session-target", &message.mailbox_id, &receipt)
+        .unwrap();
     let connection = store.connection().unwrap();
     validate_current_coordination_schema(&connection).unwrap();
     assert_review_custody_index(&connection);
-    assert_eq!(mailbox_processed_through(&connection, &message.mailbox_id, "session-target").unwrap(), 1);
+    assert_eq!(
+        mailbox_processed_through(&connection, &message.mailbox_id, "session-target").unwrap(),
+        1
+    );
     for (query, expected) in [
-        ("SELECT envelope_json || ':' || state || ':' || payload FROM federation_mailbox_intents", "envelope:appendOutcomeUnknown:payload"),
-        ("SELECT canonical_digest || ':' || state FROM federation_mailbox_dedup", "digest:refused"),
-        ("SELECT target_binding_json || ':' || state FROM federation_mailbox_wake_obligations", "binding:pending"),
-        ("SELECT sender_session_id || ':' || retired_at FROM federation_mailbox_retired_namespaces", "retired:retired-at"),
+        (
+            "SELECT envelope_json || ':' || state || ':' || payload FROM federation_mailbox_intents",
+            "envelope:appendOutcomeUnknown:payload",
+        ),
+        (
+            "SELECT canonical_digest || ':' || state FROM federation_mailbox_dedup",
+            "digest:refused",
+        ),
+        (
+            "SELECT target_binding_json || ':' || state FROM federation_mailbox_wake_obligations",
+            "binding:pending",
+        ),
+        (
+            "SELECT sender_session_id || ':' || retired_at FROM federation_mailbox_retired_namespaces",
+            "retired:retired-at",
+        ),
     ] {
-        assert_eq!(connection.query_row(query, [], |r| r.get::<_, String>(0)).unwrap(), expected);
+        assert_eq!(
+            connection
+                .query_row(query, [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            expected
+        );
     }
-    assert_eq!(connection.query_row("SELECT count(*) FROM mailbox_continuation_declarations", [], |r| r.get::<_, u64>(0)).unwrap(), 0);
-    assert_eq!(connection.query_row("SELECT count(*) FROM mailbox_read_pages WHERE receipt=?1", [&receipt], |r| r.get::<_, u64>(0)).unwrap(), 1);
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT count(*) FROM mailbox_continuation_declarations",
+                [],
+                |r| r.get::<_, u64>(0)
+            )
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT count(*) FROM mailbox_read_pages WHERE receipt=?1",
+                [&receipt],
+                |r| r.get::<_, u64>(0)
+            )
+            .unwrap(),
+        1
+    );
 }
 
 #[test]
 fn mailbox_version_three_failed_upgrade_leaves_the_exact_schema_unchanged() {
     let connection = rusqlite::Connection::open_in_memory().unwrap();
-    connection.execute_batch(COORDINATION_SCHEMA_V1_SQL).unwrap();
-    connection.execute_batch(MAILBOX_READ_PAGES_SCHEMA_SQL).unwrap();
-    connection.execute_batch(FEDERATION_MAILBOX_DELIVERY_SCHEMA_SQL).unwrap();
-    connection.execute_batch("INSERT INTO meta VALUES('coordination_schema_version','3'); PRAGMA query_only=ON;").unwrap();
+    connection
+        .execute_batch(COORDINATION_SCHEMA_V1_SQL)
+        .unwrap();
+    connection
+        .execute_batch(MAILBOX_READ_PAGES_SCHEMA_SQL)
+        .unwrap();
+    connection
+        .execute_batch(FEDERATION_MAILBOX_DELIVERY_SCHEMA_SQL)
+        .unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO meta VALUES('coordination_schema_version','3'); PRAGMA query_only=ON;",
+        )
+        .unwrap();
     let before = coordination_schema_objects(&connection).unwrap();
     assert!(ensure_sqlite_coordination_schema(&connection).is_err());
     assert_eq!(coordination_schema_objects(&connection).unwrap(), before);
@@ -773,8 +830,9 @@ fn sqlite_state_writer_admission_serves_request_and_internal_tickets_in_fifo_ord
     let (request_acquired_tx, request_acquired_rx) = mpsc::channel();
     let (release_request_tx, release_request_rx) = mpsc::channel();
     let request_thread = std::thread::spawn(move || {
-        let _guard = lock_sqlite_state_writer_for(&request_admission, crate::TEST_PHASE_DEADLOCK_GUARD)
-            .expect("queued request writer should acquire before its diagnostic deadline");
+        let _guard =
+            lock_sqlite_state_writer_for(&request_admission, crate::TEST_PHASE_DEADLOCK_GUARD)
+                .expect("queued request writer should acquire before its diagnostic deadline");
         request_acquired_tx
             .send(())
             .expect("request acquisition observer should remain connected");
@@ -1854,15 +1912,38 @@ fn exact_read_projects_current_wake_and_recipient_acknowledgement() {
         .expect("the original receipt finalizes before the duplicate");
 
     for (state, sentence) in [
-        ("queuedBehindActiveTurn", "Wake queued; it waits for the recipient's active turn to end."),
-        ("deliveredToIdleSession", "Notification delivered to the recipient's session."),
-        ("recoveredWake", "Wake queued for the recipient by recovery."),
-        ("heldBehindPausedQueue", "Wake held; it waits for the recipient's paused queue to be resumed."),
-        ("waitingForAutomaticRetry", "Wake held; it waits for the recipient's due automatic retry, which clears it by itself."),
-        ("waitingForProviderCapacity", "Wake held; it waits for provider capacity."),
-        ("durableButNotWoken", "No wake confirmed; the message remains stored."),
+        (
+            "queuedBehindActiveTurn",
+            "Wake queued; it waits for the recipient's active turn to end.",
+        ),
+        (
+            "deliveredToIdleSession",
+            "Notification delivered to the recipient's session.",
+        ),
+        (
+            "recoveredWake",
+            "Wake queued for the recipient by recovery.",
+        ),
+        (
+            "heldBehindPausedQueue",
+            "Wake held; it waits for the recipient's paused queue to be resumed.",
+        ),
+        (
+            "waitingForAutomaticRetry",
+            "Wake held; it waits for the recipient's due automatic retry, which clears it by itself.",
+        ),
+        (
+            "waitingForProviderCapacity",
+            "Wake held; it waits for provider capacity.",
+        ),
+        (
+            "durableButNotWoken",
+            "No wake confirmed; the message remains stored.",
+        ),
     ] {
-        store.set_notification_state(&receipt.message_id, state).unwrap();
+        store
+            .set_notification_state(&receipt.message_id, state)
+            .unwrap();
         for reader in ["session-sender", "session-target"] {
             let message = store.read_message(reader, &receipt.message_id).unwrap();
             assert_eq!(message.notification_summary, sentence, "{reader}: {state}");
@@ -1897,7 +1978,10 @@ fn exact_read_projects_current_wake_and_recipient_acknowledgement() {
     let duplicate = store.append(&test_input()).unwrap();
     assert!(duplicate.duplicate);
     assert_eq!(duplicate.message_id, receipt.message_id);
-    assert_eq!(duplicate.notification_disposition, receipt.notification_disposition);
+    assert_eq!(
+        duplicate.notification_disposition,
+        receipt.notification_disposition
+    );
 
     // Acknowledged without any wake: the state still says no wake was
     // confirmed, and the recipient's acknowledgement is reported on its own.
@@ -1959,7 +2043,10 @@ fn every_send_receipt_line_names_its_exact_id_and_the_current_status_read() {
                 );
                 assert!(line.contains("); this is not current status."), "{line}");
             }
-            assert!(line.contains(" Do not resend based on this receipt alone. "), "{line}");
+            assert!(
+                line.contains(" Do not resend based on this receipt alone. "),
+                "{line}"
+            );
             assert!(
                 line.ends_with(&format!(
                     "If current status is needed, use termal_read_mailbox_message({{messageId: \"{id}\"}}) or `termal mailbox read-message --message-id {id}`."
@@ -1976,7 +2063,10 @@ fn every_send_receipt_line_names_its_exact_id_and_the_current_status_read() {
                 "send it again",
                 "resend it",
             ] {
-                assert!(!lower.contains(misleading), "{disposition}: `{misleading}` in {line}");
+                assert!(
+                    !lower.contains(misleading),
+                    "{disposition}: `{misleading}` in {line}"
+                );
             }
         }
     }
@@ -1991,12 +2081,18 @@ fn every_send_receipt_line_names_its_exact_id_and_the_current_status_read() {
     let store = MailboxStore::open(&root.database_path()).unwrap();
     let receipt = store.append(&test_input()).unwrap();
     assert!(receipt.receipt_note.is_none());
-    let expected =
-        mailbox_send_receipt_note(&receipt.notification_disposition, &receipt.message_id, false);
+    let expected = mailbox_send_receipt_note(
+        &receipt.notification_disposition,
+        &receipt.message_id,
+        false,
+    );
     let noted = receipt.clone().with_receipt_note();
     assert_eq!(noted.receipt_note.as_deref(), Some(expected.as_str()));
     let encoded = serde_json::to_value(&noted).unwrap();
-    assert_eq!(encoded["notificationDisposition"], receipt.notification_disposition.as_str());
+    assert_eq!(
+        encoded["notificationDisposition"],
+        receipt.notification_disposition.as_str()
+    );
     assert_eq!(encoded["messageId"], receipt.message_id.as_str());
     assert_eq!(encoded["receiptNote"], expected.as_str());
 }
@@ -2014,14 +2110,23 @@ fn exact_read_moves_no_cursor_and_page_reads_carry_no_current_status() {
     };
     let (target_before, sender_before) = (cursor("session-target"), cursor("session-sender"));
     for _ in 0..2 {
-        store.read_message("session-target", &receipt.message_id).unwrap();
-        store.read_message("session-sender", &receipt.message_id).unwrap();
+        store
+            .read_message("session-target", &receipt.message_id)
+            .unwrap();
+        store
+            .read_message("session-sender", &receipt.message_id)
+            .unwrap();
     }
     assert_eq!(cursor("session-target"), target_before);
     assert_eq!(cursor("session-sender"), sender_before);
     assert!(
         store
-            .acknowledge("session-target", &receipt.mailbox_id, target_before, receipt.sequence)
+            .acknowledge(
+                "session-target",
+                &receipt.mailbox_id,
+                target_before,
+                receipt.sequence
+            )
             .is_err(),
         "an exact read issues no page, so it authorizes no acknowledgement"
     );
@@ -2029,8 +2134,16 @@ fn exact_read_moves_no_cursor_and_page_reads_carry_no_current_status() {
         .read_range("session-target", &receipt.mailbox_id, None, 10)
         .unwrap();
     assert!(!page.messages.is_empty());
-    assert!(page.messages.iter().all(|message| message.current_status.is_none()));
-    assert!(store.read_message("session-stranger", &receipt.message_id).is_err());
+    assert!(
+        page.messages
+            .iter()
+            .all(|message| message.current_status.is_none())
+    );
+    assert!(
+        store
+            .read_message("session-stranger", &receipt.message_id)
+            .is_err()
+    );
 }
 
 /// A remote mailbox home that cannot answer makes the exact read say that the
@@ -2044,12 +2157,20 @@ fn an_unanswered_mailbox_home_reads_as_current_status_unavailable() {
         StatusCode::SERVICE_UNAVAILABLE,
         StatusCode::GATEWAY_TIMEOUT,
     ] {
-        let error = mailbox_current_status_unavailable(ApiError::from_status(status, "peer link is down"));
+        let error =
+            mailbox_current_status_unavailable(ApiError::from_status(status, "peer link is down"));
         assert_eq!(error.status, status);
-        assert!(error.message.starts_with("current status unavailable:"), "{}", error.message);
+        assert!(
+            error.message.starts_with("current status unavailable:"),
+            "{}",
+            error.message
+        );
         assert!(error.message.contains("says nothing about delivery"));
         assert!(error.message.contains("peer link is down"));
-        assert_eq!(error.message, mailbox_current_status_unavailable_text("peer link is down"));
+        assert_eq!(
+            error.message,
+            mailbox_current_status_unavailable_text("peer link is down")
+        );
         assert!(error.message.contains("try the read again later"));
     }
     // Guidance written for another operation is cut from the cause: an exact
@@ -2059,20 +2180,36 @@ fn an_unanswered_mailbox_home_reads_as_current_status_unavailable() {
         "native mailbox relay reply identity/version mismatch; outcome unknown; retry the original request with the same idempotencyKey",
     ));
     assert!(
-        unknown
-            .message
-            .ends_with("try the read again later (native mailbox relay reply identity/version mismatch)"),
+        unknown.message.ends_with(
+            "try the read again later (native mailbox relay reply identity/version mismatch)"
+        ),
         "{}",
         unknown.message
     );
-    assert!(!unknown.message.contains("retry the original request"), "{}", unknown.message);
-    assert!(!unknown.message.contains("idempotencyKey"), "{}", unknown.message);
+    assert!(
+        !unknown.message.contains("retry the original request"),
+        "{}",
+        unknown.message
+    );
+    assert!(
+        !unknown.message.contains("idempotencyKey"),
+        "{}",
+        unknown.message
+    );
     // A relay link that is down or changed reads as unavailable; a membership
     // or enrollment change is left as it was.
     let stale = mailbox_relay_current_status_unavailable(federation_stale_link());
     assert_eq!(stale.status, StatusCode::SERVICE_UNAVAILABLE);
-    assert!(stale.message.starts_with("current status unavailable:"), "{}", stale.message);
-    assert!(!stale.message.contains("reconcile the original operation"), "{}", stale.message);
+    assert!(
+        stale.message.starts_with("current status unavailable:"),
+        "{}",
+        stale.message
+    );
+    assert!(
+        !stale.message.contains("reconcile the original operation"),
+        "{}",
+        stale.message
+    );
     for status in [
         StatusCode::BAD_GATEWAY,
         StatusCode::SERVICE_UNAVAILABLE,
@@ -2082,7 +2219,11 @@ fn an_unanswered_mailbox_home_reads_as_current_status_unavailable() {
             status,
             "relay transport gave no answer",
         ));
-        assert_eq!(transport.status, StatusCode::SERVICE_UNAVAILABLE, "{status}");
+        assert_eq!(
+            transport.status,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{status}"
+        );
         assert_eq!(
             transport.message,
             mailbox_current_status_unavailable_text("relay transport gave no answer")
@@ -2097,21 +2238,31 @@ fn an_unanswered_mailbox_home_reads_as_current_status_unavailable() {
         NATIVE_MAILBOX_RELAY_PEER_UNAVAILABLE,
     ));
     assert_eq!(unenrolled.status, StatusCode::SERVICE_UNAVAILABLE);
-    assert!(unenrolled.message.starts_with("current status unavailable:"));
+    assert!(
+        unenrolled
+            .message
+            .starts_with("current status unavailable:")
+    );
     let changed = mailbox_relay_current_status_unavailable(ApiError::conflict(
         "native mailbox enrollment/home changed; no fallback",
     ));
     assert_eq!(changed.status, StatusCode::CONFLICT);
-    assert_eq!(changed.message, "native mailbox enrollment/home changed; no fallback");
-    let not_found = mailbox_current_status_unavailable(ApiError::not_found("mailbox message not found"));
+    assert_eq!(
+        changed.message,
+        "native mailbox enrollment/home changed; no fallback"
+    );
+    let not_found =
+        mailbox_current_status_unavailable(ApiError::not_found("mailbox message not found"));
     assert_eq!(not_found.message, "mailbox message not found");
 
     let root = MailboxTestRoot::new();
     let store = MailboxStore::open(&root.database_path()).unwrap();
     let receipt = store.append(&test_input()).unwrap();
-    assert!(store
-        .read_message("session-sender", &receipt.message_id)
-        .unwrap()
-        .current_status
-        .is_some());
+    assert!(
+        store
+            .read_message("session-sender", &receipt.message_id)
+            .unwrap()
+            .current_status
+            .is_some()
+    );
 }

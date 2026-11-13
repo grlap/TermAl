@@ -14,6 +14,58 @@ artifact adapter: see [Declared Test Commands](declared-test-commands.md).
 
 ## Shared registration and command visibility
 
+### Selecting an original test request
+
+`full` and `focused` accept optional `--request-message-id MESSAGE_ID` for an
+actual retained native mailbox request. The exact selector is a lowercase
+`mailbox-message-<UUID>` or a `relay-message-<base64url locator>` (1–1024 locator
+characters). Empty, null, whitespace-padded, malformed and duplicate selectors
+are refused. Standalone invocations refuse selection before source probes or
+test stages. Category and live runs do not accept it.
+
+The launcher stores `requestMessageId` in immutable `request.json`, includes it
+in launch identity only when present, and sends the same value in registration.
+The host reads the exact original through its existing authenticated mailbox
+reader. It checks the native recipient, payload, requested full/focused mode and
+committed-input requirement. Focus, prose and the newest message are never
+substitutes. The existing registration write retains causal custody and confirms
+it through both registration and full-run GET responses. A missing or changed
+echo stops execution. Ordinary requests keep their previous identity bytes.
+
+The same unchanged run can recover its original acknowledgement. Another run
+cannot consume that request, including after compaction or restart, and an
+ordinary registration cannot acquire a later selector. A replacement run needs
+a new original causal message. Registration captures no tested commit/tree and
+creates no verification record. Native completion and destination qualification
+remain separate owners. Remote observer identities omit causal custody and
+refuse injected custody rather than turning it into observer identity.
+
+### Custody storage upgrade and rollback
+
+The MAIN predecessor ending in `-direct-prompt-1-direct-prompt-delivery-1`
+advances to the same floor plus `-test-request-custody-1`. Its already activated
+`-import-reconciliation-1` successor advances directly to the new custody floor
+plus `-import-reconciliation-1`; it never passes through an unactivated floor.
+COORD advances from `8-direct-prompt-1` to
+`8-direct-prompt-1-test-request-custody-1`. Existing older migrations remain
+ordered. Custody presence, including null, under an unsupported MAIN header is
+refused before typed loading. COORD adds nullable public payload and host-private
+scope columns to existing message and sender-intent tables; ordinary rows stay
+NULL. A whole-store backup preserves both columns. A relay receiver explicitly
+stores no sender-private mapping; public input cannot reconstruct it. There is
+no new partial coordination import or repair path: unsupported layouts,
+malformed custody and orphaned private mappings are refused without cleanup or
+silent field loss. MAIN import-reconciliation activation and metadata writers
+retain causal registration fields under their current floor. No cross-database
+atomicity is claimed.
+
+**Old TermAl binaries refuse both upgraded stores.** Before installation retain
+paired pre-install MAIN and COORD backups. Rollback restores both matching
+backups with the old executable; swapping the executable alone is insufficient.
+Each store's own migration transaction rolls back its header and data together
+on failure, but it does not roll back the other store. Migration creates no
+test verification credit or live remote association.
+
 The global Test Runs list and left-rail active-run badge include both launcher runs and
 recognized provider commands, including declared tests. A command appears when
 its start is observed, before its result artifact exists. If a provider supplies

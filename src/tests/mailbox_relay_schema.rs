@@ -295,11 +295,30 @@ fn executor_outcome_floor_upgrades_the_relay_floor_and_refuses_unknown_futures()
 
 #[test]
 fn delegation_review_custody_index_upgrades_step_six_and_bounds_orphan_lookup() {
+    let columns = |connection: &rusqlite::Connection, table: &str| {
+        connection
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
     let root = TestTempRoot::create("review-custody-index-upgrade");
     let path = root.path().join("coordination.sqlite");
     let mut connection = rusqlite::Connection::open(&path).unwrap();
     historical(&connection, "6-executor-outcomes-1");
     let before = coordination_schema_objects(&connection).unwrap();
+    let original_columns = ["mailbox_messages", "mailbox_relay_intents"]
+        .into_iter()
+        .map(|table| (table, columns(&connection, table)))
+        .collect::<BTreeMap<_, _>>();
     let identity = mailbox_relay_store_id(&connection).unwrap();
     let body = "x".repeat(128 * 1024);
     let rows = 512;
@@ -322,10 +341,29 @@ fn delegation_review_custody_index_upgrades_step_six_and_bounds_orphan_lookup() 
     transaction.commit().unwrap();
     drop(connection);
     let size = fs::metadata(&path).unwrap().len();
+    let original_schema = before.clone();
+    let original_store = identity.clone();
+    let original_path = path.clone();
+    TEST_COORDINATION_BEFORE_UPGRADE.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(move || {
+            let original = rusqlite::Connection::open(&original_path).unwrap();
+            assert_eq!(version(&original), "6-executor-outcomes-1");
+            assert_eq!(
+                coordination_schema_objects(&original).unwrap(),
+                original_schema,
+                "historical definitions remain byte-identical until the floor upgrade starts"
+            );
+            assert_eq!(mailbox_relay_store_id(&original).unwrap(), original_store);
+        }));
+    });
     // Measure a disposable 64 MiB message fixture, never the live store. This
     // includes existing schema admission and its one-time index construction.
     let started = std::time::Instant::now();
     let reopened = bootstrap_coordination_database(&path).unwrap();
+    assert!(
+        TEST_COORDINATION_BEFORE_UPGRADE.with(|slot| slot.borrow().is_none()),
+        "the pre-floor boundary witness must be reached"
+    );
     eprintln!(
         "REVIEW_CUSTODY_INDEX_COST rows={rows} body_bytes={} store_bytes={size} boot_upgrade_us={}",
         body.len(),
@@ -344,6 +382,8 @@ fn delegation_review_custody_index_upgrades_step_six_and_bounds_orphan_lookup() 
             .map(|object| object.name.as_str())
             .collect::<BTreeSet<_>>(),
         BTreeSet::from([
+            "mailbox_messages",
+            "mailbox_relay_intents",
             "mailbox_messages_topic_key_sender",
             "remote_prompt_intents",
             "remote_prompt_receives",
@@ -352,9 +392,43 @@ fn delegation_review_custody_index_upgrades_step_six_and_bounds_orphan_lookup() 
         ])
     );
     assert!(
-        before.iter().all(|object| after.contains(object)),
-        "step six objects stay frozen"
+        before
+            .iter()
+            .filter(|object| !matches!(
+                object.name.as_str(),
+                "mailbox_messages" | "mailbox_relay_intents"
+            ))
+            .all(|object| after.contains(object)),
+        "all unaffected step six objects stay frozen"
     );
+    for (table, old) in original_columns {
+        let current = columns(&reopened, table);
+        assert_eq!(
+            current.len(),
+            old.len() + 2,
+            "exactly two nullable columns are added to {table}"
+        );
+        assert_eq!(
+            &current[..old.len()],
+            old.as_slice(),
+            "original {table} columns stay unchanged"
+        );
+        assert_eq!(
+            &current[old.len()..],
+            &[
+                (
+                    String::from("test_request_json"),
+                    String::from("TEXT"),
+                    0_i64
+                ),
+                (
+                    String::from("test_request_scope_json"),
+                    String::from("TEXT"),
+                    0_i64
+                ),
+            ]
+        );
+    }
     assert_eq!(
         reopened
             .query_row(

@@ -46,7 +46,9 @@ const SQLITE_DIRECT_PROMPT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-una
 const SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-import-reconciliation-1";
 const SQLITE_DIRECT_PROMPT_DELIVERY_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1";
 const SQLITE_DIRECT_PROMPT_DELIVERY_IMPORT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-import-reconciliation-1";
-const SQLITE_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-direct-prompt-delivery-1";
+const SQLITE_TEST_REQUEST_CUSTODY_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-direct-prompt-delivery-1";
+const SQLITE_TEST_REQUEST_CUSTODY_IMPORT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-direct-prompt-delivery-1-import-reconciliation-1";
+const SQLITE_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-direct-prompt-delivery-1-test-request-custody-1";
 const SQLITE_METADATA_KEY: &str = "metadataState";
 const SQLITE_PROMPT_HISTORY_STORAGE_KEY: &str = "prompt_history_storage_version";
 const SQLITE_PROMPT_HISTORY_STORAGE_VERSION: &str = "1";
@@ -1048,6 +1050,7 @@ include!("persist_metadata_units.rs");
 include!("persist_sqlite_schema.rs");
 include!("persist_sqlite_obligations.rs");
 include!("persist_native_test_completion.rs");
+include!("persist_test_request_custody.rs");
 include!("persist_direct_prompt.rs");
 
 include!("persist_sqlite_overview.rs");

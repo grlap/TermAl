@@ -115,6 +115,8 @@ fn legacy_relay_bytes() -> String {
 fn payload() -> MailboxTestPayload {
     MailboxTestPayload {
         schema_version: 1,
+        request_send_key: "legacy-send".into(),
+        recipient: Some(principal('4', '5', '6', "session-2")),
         requester: principal('1', '2', '3', "session-1"),
         mode: MailboxTestMode::Focused,
         targets: vec![MailboxTestCapturedTarget {
@@ -183,105 +185,115 @@ fn native_origin_and_compacted_registration_keep_legacy_bytes() {
 }
 
 #[test]
-fn every_preparatory_serde_ingress_refuses_supplied_custody() {
-    for supplied in [
-        json!({}),
-        serde_json::to_value(payload()).unwrap(),
-        json!("malformed"),
-    ] {
+fn every_custody_ingress_refuses_malformed_or_incomplete_values() {
+    let mut wrong_version = serde_json::to_value(payload()).unwrap();
+    wrong_version["schemaVersion"] = json!(2);
+    for supplied in [json!({}), wrong_version, json!("malformed")] {
         let mut mailbox: Value = serde_json::from_str(legacy_mailbox_bytes()).unwrap();
         mailbox["testRequest"] = supplied.clone();
-        assert!(
-            serde_json::from_value::<MailboxMessage>(mailbox)
-                .unwrap_err()
-                .to_string()
-                .contains(TEST_REQUEST_CUSTODY_UNAVAILABLE)
-        );
-
+        assert!(serde_json::from_value::<MailboxMessage>(mailbox).is_err());
         let mut relay: Value = serde_json::from_str(&legacy_relay_bytes()).unwrap();
         relay["testRequest"] = supplied.clone();
-        assert!(
-            serde_json::from_value::<MailboxRelayAppend>(relay)
-                .unwrap_err()
-                .to_string()
-                .contains(TEST_REQUEST_CUSTODY_UNAVAILABLE)
-        );
-
+        assert!(serde_json::from_value::<MailboxRelayAppend>(relay).is_err());
         let mut origin: Value = serde_json::from_str(&legacy_origin_bytes()).unwrap();
         origin["causalRequest"] = supplied.clone();
-        assert!(
-            serde_json::from_value::<TestRunNativeOrigin>(origin)
-                .unwrap_err()
-                .to_string()
-                .contains(TEST_REQUEST_CUSTODY_UNAVAILABLE)
-        );
-
+        assert!(serde_json::from_value::<TestRunNativeOrigin>(origin).is_err());
         let mut registration: Value = serde_json::from_str(&legacy_registration_bytes()).unwrap();
         registration["nativeOrigin"]["causalRequest"] = supplied.clone();
-        assert!(
-            serde_json::from_value::<TestRunRegistration>(registration)
-                .unwrap_err()
-                .to_string()
-                .contains(TEST_REQUEST_CUSTODY_UNAVAILABLE)
-        );
-
+        assert!(serde_json::from_value::<TestRunRegistration>(registration).is_err());
         let mut compacted: Value = serde_json::from_str(&legacy_compacted_bytes()).unwrap();
         compacted["registration"]["nativeOrigin"]["causalRequest"] = supplied;
-        assert!(
-            serde_json::from_value::<TestRunCompacted>(compacted)
-                .unwrap_err()
-                .to_string()
-                .contains(TEST_REQUEST_CUSTODY_UNAVAILABLE)
-        );
+        assert!(serde_json::from_value::<TestRunCompacted>(compacted).is_err());
     }
 }
 
 #[test]
-fn programmatic_relay_payload_cannot_bypass_inactive_custody_guard() {
+fn programmatic_relay_custody_is_validated_and_changes_only_selected_digests() {
     let mut relay: MailboxRelayAppend = serde_json::from_str(&legacy_relay_bytes()).unwrap();
+    let ordinary = relay.digest().unwrap();
     relay.test_request = Some(payload());
-    assert_eq!(
-        relay.input().unwrap_err().message,
-        TEST_REQUEST_CUSTODY_UNAVAILABLE
-    );
-    assert_eq!(
-        relay.digest().unwrap_err().message,
-        TEST_REQUEST_CUSTODY_UNAVAILABLE
-    );
+    relay.input().unwrap();
+    assert_ne!(relay.digest().unwrap(), ordinary);
+    let mut wrong = payload();
+    wrong.recipient = Some(wrong.requester.clone());
+    relay.test_request = Some(wrong);
+    assert!(relay.input().is_err());
+    assert!(relay.digest().is_err());
+    relay.test_request = Some(payload());
+    relay.idempotency_key = "a-different-send".into();
+    assert!(relay.input().is_err());
+    assert!(relay.digest().is_err());
 }
 
 #[test]
-fn nested_mailbox_pages_and_relay_rpc_cannot_discard_supplied_custody() {
+fn nested_mailbox_pages_and_relay_rpc_retain_validated_custody() {
+    let expected = payload();
     let mut message: Value = serde_json::from_str(legacy_mailbox_bytes()).unwrap();
-    message["testRequest"] = serde_json::to_value(payload()).unwrap();
+    message["testRequest"] = serde_json::to_value(&expected).unwrap();
     let command = CoordinationCliCommand::MailboxReadMessage {
         as_session: "session-2".into(),
         message_id: message["id"].as_str().unwrap().into(),
     };
-    assert!(
-        validate_coordination_cli_output(&command, &message)
-            .unwrap_err()
-            .to_string()
-            .contains(TEST_REQUEST_CUSTODY_UNAVAILABLE)
-    );
-    let page = json!({"messages":[message],"afterSequence":0,"processedThrough":0});
-    assert!(
-        serde_json::from_value::<MailboxReadResponse>(page)
-            .unwrap_err()
-            .to_string()
-            .contains(TEST_REQUEST_CUSTODY_UNAVAILABLE)
-    );
-
+    validate_coordination_cli_output(&command, &message).unwrap();
+    let decoded: MailboxMessage = serde_json::from_value(message.clone()).unwrap();
+    assert_eq!(decoded.test_request.as_ref(), Some(&expected));
+    let page: MailboxReadResponse = serde_json::from_value(json!({
+        "messages":[message],"afterSequence":0,"processedThrough":0
+    }))
+    .unwrap();
+    assert_eq!(page.messages[0].test_request.as_ref(), Some(&expected));
     let mut append: Value = serde_json::from_str(&legacy_relay_bytes()).unwrap();
-    append["testRequest"] = serde_json::to_value(payload()).unwrap();
-    let rpc = json!({
+    append["testRequest"] = serde_json::to_value(&expected).unwrap();
+    let rpc: MailboxRelayRequest = serde_json::from_value(json!({
         "version":MAILBOX_RELAY_VERSION, "requestId":"77777777-7777-4777-8777-777777777777",
         "operation":{"operation":"send","append":append}
+    }))
+    .unwrap();
+    let MailboxRelayOperation::Send { append } = rpc.operation else {
+        panic!("wrong operation")
+    };
+    assert_eq!(append.test_request.as_ref(), Some(&expected));
+    append.input().unwrap();
+}
+
+#[test]
+fn captured_associations_are_closed_and_cannot_hide_an_unexplained_target() {
+    let mut value = serde_json::to_value(payload()).unwrap();
+    value["targets"][0]["target"]["workRef"] = json!("w-aaaaaaaaaaaa");
+    value["targets"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("uncreditedReason");
+    value["targets"][0]["association"] = json!({
+        "binding":{
+            "root_execution_id":"11111111-1111-4111-8111-111111111111",
+            "work_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "run_id":"22222222-2222-4222-8222-222222222222",
+            "work_revision":1,"claim_id":"33333333-3333-4333-8333-333333333333","claim_fence":1
+        },
+        "root":{"workspace_id":"fixture-worktree","generation":1,"state":"named"}
     });
-    let error = serde_json::from_value::<MailboxRelayRequest>(rpc)
-        .err()
-        .expect("the HTTP relay request must refuse inactive custody");
-    assert!(error.to_string().contains(TEST_REQUEST_CUSTODY_UNAVAILABLE));
+    serde_json::from_value::<MailboxTestPayload>(value.clone()).unwrap();
+    for level in ["binding", "root"] {
+        let mut invalid = value.clone();
+        invalid["targets"][0]["association"][level]["injected"] = json!(true);
+        assert!(serde_json::from_value::<MailboxTestPayload>(invalid).is_err());
+    }
+    let mut both = value.clone();
+    both["targets"][0]["uncreditedReason"] = json!("association_stale");
+    assert!(serde_json::from_value::<MailboxTestPayload>(both).is_err());
+    value["targets"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("association");
+    assert!(serde_json::from_value::<MailboxTestPayload>(value).is_err());
+    let mut draft = serde_json::to_value(payload()).unwrap();
+    draft.as_object_mut().unwrap().remove("recipient");
+    assert!(serde_json::from_value::<MailboxTestPayload>(draft).is_err());
+    assert!(
+        !format!("{:?}", payload()).contains("legacy-send"),
+        "Debug must redact the captured send key"
+    );
 }
 
 #[test]

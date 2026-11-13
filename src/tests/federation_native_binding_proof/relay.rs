@@ -11,6 +11,9 @@ mod review;
 #[path = "relay_production_shape.rs"]
 mod production_shape;
 
+#[path = "relay_test_request.rs"]
+mod test_request;
+
 struct RelayHandleGuard(Vec<AppState>);
 impl Drop for RelayHandleGuard {
     fn drop(&mut self) {

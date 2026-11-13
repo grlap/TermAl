@@ -164,9 +164,7 @@ fn delegation_control_plane_capability_for_codex_elicitation(
     .then_some(DelegationControlPlaneCapability::SubmitReviewResult)
 }
 
-fn parse_delegation_mcp_mode_args(
-    args: impl Iterator<Item = String>,
-) -> Result<Mode> {
+fn parse_delegation_mcp_mode_args(args: impl Iterator<Item = String>) -> Result<Mode> {
     let mut parent_session_id: Option<String> = None;
     let mut base_url: Option<String> = None;
     let mut args = args.peekable();
@@ -603,7 +601,10 @@ impl AppState {
             let Some(index) = inner.find_session_index(parent_session_id) else {
                 return Ok((config, engram_enabled));
             };
-            if !inner.sessions[index].runtime.matches_runtime_token(runtime_token) {
+            if !inner.sessions[index]
+                .runtime
+                .matches_runtime_token(runtime_token)
+            {
                 return Ok((config, engram_enabled));
             }
             let read_only_child =
@@ -614,7 +615,11 @@ impl AppState {
                 // A resumed thread must not retain an explicitly set value
                 // removed since its previous runtime selection.
                 for name in inner.sessions[index].project_environment.values.0.keys() {
-                    applied.values.0.entry(project_environment_key(name)).or_default();
+                    applied
+                        .values
+                        .0
+                        .entry(project_environment_key(name))
+                        .or_default();
                 }
                 inner.sessions[index].project_environment = applied.clone();
             }
@@ -1342,19 +1347,29 @@ impl TermalDelegationMcpBridge {
     fn tool_get_session_result(&self, arguments: Value) -> Result<Value> {
         let delegation_id =
             required_path_identifier(arguments.get("delegationId"), "delegationId")?;
-        let attempt = arguments.get("submissionAttempt")
+        let attempt = arguments
+            .get("submissionAttempt")
             .map(|value| required_u64(Some(value), "submissionAttempt"))
             .transpose()?;
         if attempt.is_some_and(|attempt| attempt == 0 || attempt > u32::MAX as u64) {
             bail!("submissionAttempt must be a positive 32-bit integer");
         }
-        let result_id = arguments.get("resultId")
+        let result_id = arguments
+            .get("resultId")
             .map(|value| required_path_identifier(Some(value), "resultId"))
             .transpose()?;
-        if result_id.is_some() && attempt.is_none() { bail!("resultId requires submissionAttempt"); }
-        let selection = format!("{}{}",
-            attempt.map(|a| format!("&submissionAttempt={a}")).unwrap_or_default(),
-            result_id.map(|id| format!("&resultId={}", encode_uri_component(&id))).unwrap_or_default());
+        if result_id.is_some() && attempt.is_none() {
+            bail!("resultId requires submissionAttempt");
+        }
+        let selection = format!(
+            "{}{}",
+            attempt
+                .map(|a| format!("&submissionAttempt={a}"))
+                .unwrap_or_default(),
+            result_id
+                .map(|id| format!("&resultId={}", encode_uri_component(&id)))
+                .unwrap_or_default()
+        );
         let output_offset = arguments
             .get("outputOffset")
             .map(|value| required_u64(Some(value), "outputOffset"))
@@ -1371,8 +1386,11 @@ impl TermalDelegationMcpBridge {
                 self.serving_session_id, delegation_id
             ));
         }
-        let query = if selection.is_empty() { String::new() }
-            else { format!("?{}", selection.trim_start_matches('&')) };
+        let query = if selection.is_empty() {
+            String::new()
+        } else {
+            format!("?{}", selection.trim_start_matches('&'))
+        };
         self.get_json(&format!(
             "/api/sessions/{}/delegations/{}/result{query}",
             self.serving_session_id, delegation_id
@@ -1453,6 +1471,18 @@ impl TermalDelegationMcpBridge {
         if idempotency_key.len() > 256 {
             bail!("idempotencyKey exceeds 256 bytes");
         }
+        // Decode before discovery or delivery. A typed request is never silently
+        // downgraded to an ordinary message, including explicit null input.
+        let test_request = arguments
+            .get("testRequest")
+            .map(|value| {
+                let request: MailboxTestRequest =
+                    serde_json::from_value(value.clone()).context("invalid testRequest")?;
+                validate_mailbox_test_request(&request)
+                    .map_err(|err| anyhow::anyhow!(err.message))?;
+                Ok::<_, anyhow::Error>(request)
+            })
+            .transpose()?;
         // Agents routinely pass a session NAME here ("LegalCodex") rather than a TermAl id,
         // so resolve a name to its id before delivering. A value that already looks like a
         // TermAl id ("session-…") is used directly.
@@ -1464,6 +1494,12 @@ impl TermalDelegationMcpBridge {
         );
         body.insert("message".to_owned(), Value::String(message));
         body.insert("idempotencyKey".to_owned(), Value::String(idempotency_key));
+        if let Some(test_request) = test_request {
+            body.insert(
+                "testRequest".to_owned(),
+                serde_json::to_value(test_request)?,
+            );
+        }
         insert_optional_string(&mut body, "topic", arguments.get("topic"));
         insert_optional_string(&mut body, "stateStamp", arguments.get("stateStamp"));
         if let Some(class) = optional_string(arguments.get("class")) {
@@ -1508,7 +1544,11 @@ impl TermalDelegationMcpBridge {
         ))?;
         // Older hosts return the legacy array; new hosts explicitly separate
         // unavailable remote homes without inventing unread counts/history.
-        if mailboxes.is_array() { Ok(json!({ "mailboxes": mailboxes })) } else { Ok(mailboxes) }
+        if mailboxes.is_array() {
+            Ok(json!({ "mailboxes": mailboxes }))
+        } else {
+            Ok(mailboxes)
+        }
     }
 
     fn tool_board_list(&self, arguments: Value) -> Result<Value> {
@@ -1650,10 +1690,18 @@ impl TermalDelegationMcpBridge {
             "hasMore": range.has_more,
             "nextAfterSequence": range.next_after_sequence
         });
-        if let Some(state) = range.receipt_state { result["receiptState"] = json!(state); }
-        if let Some(key) = range.read_key { result["readKey"] = json!(key); }
-        if let Some(id) = range.page_id { result["pageId"] = json!(id); }
-        if let Some(generation) = range.cursor_generation { result["cursorGeneration"] = json!(generation); }
+        if let Some(state) = range.receipt_state {
+            result["receiptState"] = json!(state);
+        }
+        if let Some(key) = range.read_key {
+            result["readKey"] = json!(key);
+        }
+        if let Some(id) = range.page_id {
+            result["pageId"] = json!(id);
+        }
+        if let Some(generation) = range.cursor_generation {
+            result["cursorGeneration"] = json!(generation);
+        }
         Ok(result)
     }
 
@@ -1667,8 +1715,13 @@ impl TermalDelegationMcpBridge {
 
     fn tool_acknowledge_mailbox(&self, arguments: Value) -> Result<Value> {
         let mailbox_id = required_path_identifier(arguments.get("mailboxId"), "mailboxId")?;
-        let no_continuation = arguments.get("noContinuation")
-            .map(|value| value.as_bool().ok_or_else(|| anyhow!("noContinuation must be a boolean")))
+        let no_continuation = arguments
+            .get("noContinuation")
+            .map(|value| {
+                value
+                    .as_bool()
+                    .ok_or_else(|| anyhow!("noContinuation must be a boolean"))
+            })
             .transpose()?
             .unwrap_or(false);
         if no_continuation && arguments.get("receipt").is_none() {
@@ -1736,9 +1789,11 @@ impl TermalDelegationMcpBridge {
     fn resolve_session_reference(&self, reference: &str) -> Result<String> {
         if let Some(handle) = mailbox_reference_handle(reference)? {
             let value = self.get_json(&format!(
-                "/api/sessions/{}/mailbox-references/{handle}/resolve", self.serving_session_id,
+                "/api/sessions/{}/mailbox-references/{handle}/resolve",
+                self.serving_session_id,
             ))?;
-            let participant = value["participantId"].as_str()
+            let participant = value["participantId"]
+                .as_str()
                 .filter(|id| id.starts_with("domain-session-"))
                 .ok_or_else(|| anyhow!("invalid mailbox reference resolution"))?;
             if value["id"].as_str() != Some(handle.as_str())
@@ -1763,14 +1818,20 @@ impl TermalDelegationMcpBridge {
 
         // Keep the explicit native locator for backend relay admission. Turning
         // it into a domain principal would change delivery and wake ownership.
-        if matches!(FederationMailboxAlias::parse(reference, None),
-            Ok(FederationMailboxAlias::HostNative { .. })) {
+        if matches!(
+            FederationMailboxAlias::parse(reference, None),
+            Ok(FederationMailboxAlias::HostNative { .. })
+        ) {
             return Ok(reference.to_owned());
         }
         let state = self.get_json("/api/state")?;
-        if let Some((participants, unavailable, basis)) = self.domain_mailbox_participants_with_basis(&state, true)? {
+        if let Some((participants, unavailable, basis)) =
+            self.domain_mailbox_participants_with_basis(&state, true)?
+        {
             if !federation_directory_alias_available(reference, &unavailable, basis.as_ref()) {
-                bail!("mailbox alias inventory is unavailable; use a known exact participant id or an explicit host: target on an available host");
+                bail!(
+                    "mailbox alias inventory is unavailable; use a known exact participant id or an explicit host: target on an available host"
+                );
             }
             return resolve_domain_mailbox_reference_with_basis(
                 &participants,
@@ -1868,14 +1929,24 @@ impl TermalDelegationMcpBridge {
     /// (docs/features/test-runs.md, run waits): a wait never mixes
     /// delegations and runs.
     fn tool_resume_after_test_runs(&self, arguments: Value) -> Result<Value> {
-        let array = arguments.get("runIds").and_then(Value::as_array)
+        let array = arguments
+            .get("runIds")
+            .and_then(Value::as_array)
             .context("runIds must be an array")?;
-        let run_ids = array.iter().map(|value| {
-            let reference = required_string(Some(value), "runIds")?;
-            if remote_test_run_reference(&reference).map_err(|error| anyhow!(error.message))?.is_some() {
-                Ok(reference)
-            } else { required_path_identifier(Some(value), "runIds") }
-        }).collect::<Result<Vec<_>>>()?;
+        let run_ids = array
+            .iter()
+            .map(|value| {
+                let reference = required_string(Some(value), "runIds")?;
+                if remote_test_run_reference(&reference)
+                    .map_err(|error| anyhow!(error.message))?
+                    .is_some()
+                {
+                    Ok(reference)
+                } else {
+                    required_path_identifier(Some(value), "runIds")
+                }
+            })
+            .collect::<Result<Vec<_>>>()?;
         let mut body = serde_json::Map::new();
         body.insert(
             "runIds".to_owned(),
@@ -2852,6 +2923,7 @@ fn mcp_tools_list_result() -> Value {
                         "idempotencyKey": { "type": "string", "maxLength": 256 },
                         "topic": { "type": "string" },
                         "stateStamp": { "type": "string" },
+                        "testRequest": mailbox_test_request_input_schema(),
                         "class": {
                             "type": "string",
                             "enum": ["routine"],

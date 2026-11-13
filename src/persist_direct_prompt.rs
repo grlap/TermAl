@@ -26,7 +26,10 @@ fn reject_unversioned_direct_prompt_delivery(
 ) -> Result<()> {
     if matches!(
         version,
-        SQLITE_SCHEMA_VERSION | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION
+        SQLITE_SCHEMA_VERSION
+            | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION
+            | SQLITE_TEST_REQUEST_CUSTODY_PREDECESSOR
+            | SQLITE_TEST_REQUEST_CUSTODY_IMPORT_PREDECESSOR
     ) {
         return Ok(());
     }
@@ -106,6 +109,8 @@ fn reject_unversioned_direct_prompt_policy(
     if matches!(
         version,
         SQLITE_SCHEMA_VERSION
+            | SQLITE_TEST_REQUEST_CUSTODY_PREDECESSOR
+            | SQLITE_TEST_REQUEST_CUSTODY_IMPORT_PREDECESSOR
             | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION
             | SQLITE_DIRECT_PROMPT_DELIVERY_PREDECESSOR
             | SQLITE_DIRECT_PROMPT_DELIVERY_IMPORT_PREDECESSOR
@@ -169,6 +174,7 @@ fn reject_unversioned_direct_prompt_policy(
 // is carried byte-for-byte to its sole corresponding successor.
 fn advance_sqlite_direct_prompt_reader_floor(connection: &rusqlite::Connection) -> Result<()> {
     let version = required_state_meta_value(connection, "schema_version")?;
+    reject_unversioned_test_request_custody(connection, &version)?;
     let successor = match version.as_str() {
         SQLITE_DIRECT_PROMPT_PREDECESSOR | SQLITE_DIRECT_PROMPT_DELIVERY_PREDECESSOR => {
             SQLITE_SCHEMA_VERSION

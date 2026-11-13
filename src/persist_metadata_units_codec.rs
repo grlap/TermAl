@@ -413,6 +413,8 @@ fn persisted_metadata_storage_version(connection: &rusqlite::Connection) -> Resu
             | SQLITE_CHECKPOINT_RESULT_PREDECESSOR
             | SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR
             | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR
+            | SQLITE_TEST_REQUEST_CUSTODY_PREDECESSOR
+            | SQLITE_TEST_REQUEST_CUSTODY_IMPORT_PREDECESSOR
             | SQLITE_SCHEMA_VERSION
             | SQLITE_DIRECT_PROMPT_PREDECESSOR
             | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR
@@ -456,6 +458,8 @@ fn read_persisted_metadata_json(connection: &rusqlite::Connection) -> Result<Opt
     let units = if matches!(
         version.as_str(),
         SQLITE_SCHEMA_VERSION
+            | SQLITE_TEST_REQUEST_CUSTODY_PREDECESSOR
+            | SQLITE_TEST_REQUEST_CUSTODY_IMPORT_PREDECESSOR
             | SQLITE_CHECKPOINT_RESULT_PREDECESSOR
             | SQLITE_DIRECT_PROMPT_PREDECESSOR
             | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR

@@ -26,7 +26,7 @@ import { captureCommitInputStatus, sourceBinaryPath, sourceIdsEqual, sourceIdDif
   sourceOwnerPinValid, sourceIdLimitations, encodeRunRecord, encodeTerminalRunResult,
   refuseRunSource } from "./test-launcher-input.mjs";
 import { processMayBeAlive } from "./test-temp-root.mjs";
-import { registerTestRun, validateRunRegistration, validateRegistrationContext, boundedStateLockEvidence, sourceOwnerMetadata } from "./test-run-registration.mjs";
+import { registerTestRun, validateRunRegistration, validateRegistrationContext, boundedStateLockEvidence, sourceOwnerMetadata, hasTermalContext, validateRequestMessageId } from "./test-run-registration.mjs";
 import {
   durationReportKinds,
   durationBudgetMs,
@@ -76,6 +76,7 @@ export const helperTestFiles = Object.freeze([
   "scripts/test-categories-plan.test.mjs",
   "scripts/test-durations.test.mjs",
   "scripts/test-launcher.test.mjs",
+  "scripts/test-launcher-request-message.test.mjs",
   "scripts/test-launcher-panic-journal.test.mjs",
   "scripts/test-launcher-plan.test.mjs",
   "scripts/test-launcher-source.test.mjs",
@@ -652,12 +653,21 @@ export async function createRun({
   scope,
   detached = false,
   input: runInput,
+  requestMessageId,
   automaticInput = false,
   onRunCreated,
   // The committed-input status reader; tests replace it to act between the
   // reads.
   commitInputStatus = captureCommitInputStatus,
 }, env = process.env) {
+  if (requestMessageId !== undefined) {
+    validateRequestMessageId(requestMessageId);
+    if (scope !== undefined || liveEngram !== undefined) {
+      throw new Error("selected test requests support only full or focused mode");
+    }
+    if (!hasTermalContext(env)) throw new Error("selected test requests require their native TermAl host");
+    validateRegistrationContext(env);
+  }
   if (runInput !== undefined && !["commit", "plain"].includes(runInput)) {
     throw new Error(`unsupported run input: ${runInput}`);
   }
@@ -718,6 +728,7 @@ export async function createRun({
     // The ordinary committed-input flow (docs/test.md); absent is the
     // staged/freeze lane.
     ...(runInput === "commit" ? { input: runInput } : {}),
+    ...(requestMessageId === undefined ? {} : { requestMessageId }),
     // Read by TermAl's run index (docs/features/test-runs.md): whether the
     // stages run in a detached worker, and the process that stands for the
     // run until a worker records its own pid in results.json.
@@ -1166,6 +1177,11 @@ function validateInitialRequest(runDir, request, env) {
   }
   if (request.input !== undefined && request.input !== "commit") {
     throw new Error("worker request names an unsupported input");
+  }
+  if (request.requestMessageId !== undefined) {
+    validateRequestMessageId(request.requestMessageId);
+    if (typeof request.full !== "boolean" || request.scope !== undefined || request.liveEngram !== undefined
+        || !hasTermalContext(env)) throw new Error("invalid selected worker mode or native host context");
   }
   if (typeof request.sourceBinary !== "string" || !isAbsolute(request.sourceBinary)
       || (request.sourceOwner !== undefined && (!sourceOwnerPinValid(request.sourceOwner)
@@ -2274,11 +2290,16 @@ function parseCommon(args) {
   let liveBinary;
   let liveSha256;
   let input;
+  let requestMessageId;
   const requiredBinaryEnv = [];
   while (args.length && args[0] !== "--") {
     const flag = args.shift();
     if (flag === "--detach") detach = true;
     else if (flag === "--input" && ["commit", "plain"].includes(args[0])) input = args.shift();
+    else if (flag === "--request-message-id") {
+      if (requestMessageId !== undefined || !args.length) throw new Error("request-message-id requires one non-duplicate message id");
+      requestMessageId = validateRequestMessageId(args.shift());
+    }
     else if (flag === "--notify" && args.length) notifyTo = args.shift();
     else if (flag === "--require-binary-env" && /^[A-Z][A-Z0-9_]*$/u.test(args[0] ?? "")) {
       requiredBinaryEnv.push(args.shift());
@@ -2287,7 +2308,7 @@ function parseCommon(args) {
     else throw new Error(`invalid option: ${flag}`);
   }
   if (args[0] === "--") args.shift();
-  return { notifyTo, detach, liveBinary, liveSha256, input, requiredBinaryEnv, rest: args };
+  return { notifyTo, detach, liveBinary, liveSha256, input, requestMessageId, requiredBinaryEnv, rest: args };
 }
 
 async function main(args) {
@@ -2320,7 +2341,7 @@ async function main(args) {
     return;
   }
   if (!["full", "focused", "live", "category"].includes(mode)) {
-    throw new Error("usage: test-launcher.mjs full|focused|live [--notify SESSION] [--detach] [--input commit|plain] [--require-binary-env NAME] [--engram-binary ABSOLUTE --engram-sha256 SHA256] [-- COMMAND ARGS... | -- LIVE_TEST_PATH...] | category NAME [--notify SESSION] [--detach] [--input commit|plain] | summary|notify|recover RUN_DIR | plan INPUT_JSON");
+    throw new Error("usage: test-launcher.mjs full|focused|live [--notify SESSION] [--detach] [--input commit|plain] [--request-message-id MESSAGE_ID (full/focused only)] [--require-binary-env NAME] [--engram-binary ABSOLUTE --engram-sha256 SHA256] [-- COMMAND ARGS... | -- LIVE_TEST_PATH...] | category NAME [--notify SESSION] [--detach] [--input commit|plain] | summary|notify|recover RUN_DIR | plan INPUT_JSON");
   }
   // A category is resolved, or refused, before any run directory exists.
   let category;
@@ -2332,6 +2353,9 @@ async function main(args) {
     category = resolveCategory(await loadCategoryManifest(repository), name);
   }
   const options = parseCommon(args);
+  if (options.requestMessageId !== undefined && !["full", "focused"].includes(mode)) {
+    throw new Error("request-message-id is supported only by full and focused");
+  }
   if (mode === "category" && (options.rest.length || options.liveBinary || options.liveSha256 ||
       options.requiredBinaryEnv.length)) {
     throw new Error("category takes only NAME, --notify and --detach, plus --input commit or plain");
@@ -2378,6 +2402,7 @@ async function main(args) {
       ? { path: options.liveBinary, expectedSha256: options.liveSha256 }
       : undefined,
     full: mode === "full",
+    ...(options.requestMessageId === undefined ? {} : { requestMessageId: options.requestMessageId }),
     detached: Boolean(options.detach),
     ...(options.input ? { input: options.input } : {}),
     automaticInput: ORDINARY_COMMIT_INPUT_DEFAULT && options.input === undefined,

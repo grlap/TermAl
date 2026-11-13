@@ -35,6 +35,7 @@ fn federation_delivery_version_two_upgrade_preserves_messages_cursors_and_read_r
         .unwrap();
     let before = {
         let connection = state.mailbox_store.connection().unwrap();
+        remove_empty_test_request_custody_columns_for_test(&connection);
         connection
             .execute_batch(
                 "DROP TABLE remote_prompt_intents;
