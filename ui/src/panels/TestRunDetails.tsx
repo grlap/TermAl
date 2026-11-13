@@ -5,7 +5,7 @@ import { TestRunsContext } from "../test-runs-context";
 import type { TestRunViewRevision } from "../test-run-overview";
 import { copyTextToClipboard } from "../clipboard";
 import { readTestRun, readTestRunLog } from "../test-runs-api";
-import { testRunStageLabel, type TestRunSummary } from "../test-runs";
+import { testRunStageLabel, testRunTrackingLabel, type TestRunSummary } from "../test-runs";
 
 export function TestRunDuration({ start, end, running = false }: { start: string | null; end: string | null; running?: boolean }) {
   if (!start || (!end && !running)) return <>duration unknown</>;
@@ -50,7 +50,7 @@ export function TestRunDetails(props: { run: TestRunSummary } | { runId: string;
   return <section className="test-run-details" aria-label={`Run details ${run.runId}`}>
     <h3>{run.runId}</h3>
     <p>State: {run.state}{run.interrupted ? " (interrupted)" : ""} · Exit: {run.exitCode ?? "not recorded"}</p>
-    <p>Tracking: {run.registrationState ?? "discovered"} · {run.trackingDurability ?? "unconfirmed"}</p>
+    <p>Tracking: {testRunTrackingLabel(run)}</p>
     <p>Restart evidence impact: {run.restartWouldVoidEvidence === true ? "would void evidence" : run.restartWouldVoidEvidence === false ? "no pending evidence" : "unknown"}. {run.restartEvidenceReason ?? "Exact verification correlation is unavailable."}</p>
     {run.monitoringInterruptedAt ? <p>Monitoring interrupted at {run.monitoringInterruptedAt}.</p> : null}
     {run.plannedStageNames?.length ? <p>Planned stages: {run.plannedStageNames.join(", ")}. Actual progress comes from the result artifact.</p> : null}

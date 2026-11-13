@@ -27,6 +27,9 @@ export interface TestRunSummary {
   artifactLocations?: string[];
   trackingProvenances?: string[];
   supersededRunIds?: string[];
+  /** Merged observations whose own save failed; trackingDurability still
+   * describes the registration. Older hosts omit it. */
+  failedObservationIds?: string[];
   startTimeOrigin?: "launcherRequest" | "hostCommandStart" | null;
   plannedStageNames?: string[];
   runId: string;
@@ -148,6 +151,13 @@ export function testRunMatchesSession(run: TestRunSummary, sessionId: string) {
 }
 export function testRunSessionMarker(runs: readonly TestRunSummary[], sessionId: string) {
   return testRunActivityLabel(activityFromRuns(runs, sessionId));
+}
+/** Registration state and durability, plus any merged observation whose save
+ * failed: a durable registration must not hide an unsaved observation. */
+export function testRunTrackingLabel(run: TestRunSummary) {
+  const failed = run.failedObservationIds?.length ?? 0;
+  return `${run.registrationState ?? "discovered"} · ${run.trackingDurability ?? "unconfirmed"}`
+    + (failed ? ` · observation save failed (${failed})` : "");
 }
 export function testRunStageLabel(run: TestRunSummary, stage: TestRunStageSummary) {
   return stage.state === "running" && (run.state === "unknown" || run.interrupted) ? "interrupted" : stage.state;

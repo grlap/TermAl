@@ -158,8 +158,12 @@ observed command merges with a launcher row only through its explicitly returned
 run locator and matching immutable request identity, or the existing validated
 terminal digest. Time, PID or similar command text never chooses a run. An exact
 merge lists `supersededRunIds` so the live client replaces provider-only rows in
-one update; losing that proof restores the original durable observation. Command
-start timestamps are labelled separately from launcher request timestamps.
+one update; losing that proof restores the original durable observation. The
+merged card's `trackingDurability` keeps describing its registration, so the
+card also lists `failedObservationIds`: each merged observation whose own save
+failed. The list and the details show it as "observation save failed (N)". A
+durable registration never hides an unsaved observation. Command start
+timestamps are labelled separately from launcher request timestamps.
 
 Registration and observation grant no test credit. `restartWouldVoidEvidence` is
 `true`, `false` or `null`, with a reason. Exact pending verification and a recorded

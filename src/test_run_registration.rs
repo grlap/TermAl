@@ -157,6 +157,11 @@ struct TestRunRegistrationView {
     // atomically in the client's projection; it never deletes durable evidence.
     #[serde(default)]
     superseded_run_ids: Vec<String>,
+    // Merged observations whose own save failed. `tracking_durability` keeps
+    // describing the registration, so without this list a card would show a
+    // durable registration and hide that a merged observation was not saved.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    failed_observation_ids: Vec<String>,
     #[serde(default)]
     start_time_origin: Option<String>,
     #[serde(default)]

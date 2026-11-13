@@ -3,7 +3,8 @@
 // writers: an evidence batch whose stopped-worker synchronous save fails, and
 // the single-row writer. Every changed row publishes at its own allocated
 // revision; row persistence failures remain distinct from the public artifact
-// card's registration durability, and no revision is reused. Does not own
+// card's registration durability, the card names each merged row whose save
+// failed, and no revision is reused. Does not own
 // the batch's fences or durable saves (test_run_lifecycle_batch.rs) or delta
 // allocation itself (sse_broadcast.rs). New file, not split from another.
 use super::*;
@@ -117,6 +118,10 @@ fn every_row_of_a_failed_stopped_worker_batch_publishes_its_failure_at_its_own_r
     for (_, run) in &published {
         assert_eq!(run.registration.superseded_run_ids, expected_observations);
         assert_eq!(
+            run.registration.failed_observation_ids, expected_observations,
+            "the published card names every merged observation whose save failed"
+        );
+        assert_eq!(
             run.registration.tracking_durability.as_deref(),
             Some("durable"),
             "the registration was durable before observation persistence failed"
@@ -216,6 +221,16 @@ fn the_single_row_writer_still_publishes_a_failed_save_at_its_allocated_revision
         Some("failed")
     );
     assert!(published[0].1.registration.superseded_run_ids.contains(&id));
+    assert_eq!(
+        published[0].1.registration.superseded_run_ids.len(),
+        2,
+        "both rows are merged into the card"
+    );
+    assert_eq!(
+        published[0].1.registration.failed_observation_ids,
+        [id.clone()],
+        "only the row whose save failed is listed; its unsaved sibling is pending, not failed"
+    );
     assert_eq!(
         published[0].1.registration.tracking_durability.as_deref(),
         Some("durable"),

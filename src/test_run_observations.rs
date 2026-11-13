@@ -1049,7 +1049,10 @@ impl AppState {
                     None => {
                         // A stopped worker's synchronous save can fail after
                         // this row's revision was allocated: publish the
-                        // row's factual failed tracking there all the same.
+                        // row's summary there all the same. A row merged into
+                        // its artifact publishes the artifact card, which lists
+                        // the row in failedObservationIds; its registration
+                        // tracking still describes the registration.
                         let before = inner.revision;
                         let _ = self.commit_delta_locked(inner);
                         (inner.revision != before).then_some(inner.revision)
@@ -1421,9 +1424,13 @@ fn test_run_enrich_artifact_summary_from_observations<'a>(
         });
     let mut positive = run.registration.restart_would_void_evidence == Some(true);
     let mut unknown = !base_covered;
+    let mut failed_observations = Vec::new();
     for row in associations {
         merged.insert(row.execution_id.clone());
         let observed = test_run_observation_summary(inner, row);
+        if observed.registration.tracking_durability.as_deref() == Some("failed") {
+            failed_observations.push(row.execution_id.clone());
+        }
         positive |= observed.registration.restart_would_void_evidence == Some(true);
         unknown |= observed.registration.restart_would_void_evidence.is_none();
         run.registration
@@ -1457,6 +1464,9 @@ fn test_run_enrich_artifact_summary_from_observations<'a>(
     run.registration.source_fingerprints.dedup();
     run.registration.superseded_run_ids = merged.iter().cloned().collect();
     run.registration.superseded_run_ids.sort();
+    failed_observations.sort();
+    failed_observations.dedup();
+    run.registration.failed_observation_ids = failed_observations;
     run.registration.restart_would_void_evidence = if positive {
         Some(true)
     } else if unknown {

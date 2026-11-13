@@ -49,6 +49,20 @@ describe("Test Runs panel", () => {
     expect(screen.queryByText("legacy-value-that-cannot-prove-source")).not.toBeInTheDocument();
   });
 
+  it("shows a failed observation save on a card whose registration is durable", async () => {
+    const run = makeTestRun({ registrationState: "registered", trackingDurability: "durable",
+      supersededRunIds: ["observed-a", "observed-b"], failedObservationIds: ["observed-a", "observed-b"] });
+    const healthy = makeTestRun({ runId: "test-healthy", registrationState: "registered",
+      trackingDurability: "durable", supersededRunIds: ["observed-c"] });
+    vi.mocked(api.readTestRun).mockResolvedValue({ run, detail: makeTestRunDetail() });
+    render(view([run, healthy]));
+    const rows = screen.getByLabelText("Discovered runs");
+    expect(within(rows).getByText("Tracking: registered · durable · observation save failed (2)")).toBeInTheDocument();
+    expect(within(rows).getByText("Tracking: registered · durable")).toBeInTheDocument();
+    selectRun();
+    const details = await screen.findByLabelText("Run details test-one");
+    expect(details).toHaveTextContent("Tracking: registered · durable · observation save failed (2)");
+  });
   it("keeps session-link scope and state filtering without a session picker or execution controls", () => {
     render(view([
       makeTestRun(),

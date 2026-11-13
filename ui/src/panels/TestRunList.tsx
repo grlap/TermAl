@@ -1,7 +1,7 @@
 // Owns measured run-row rendering and keyboard traversal. Logical filtering,
 // canonical history and selected evidence remain with the panel and its reader.
 import { Fragment, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import type { TestRunSummary } from "../test-runs";
+import { testRunTrackingLabel, type TestRunSummary } from "../test-runs";
 import { TestRunDuration } from "./TestRunDetails";
 import { useWorkWindow } from "./use-work-window";
 
@@ -70,7 +70,7 @@ export function TestRunList({ runs, names, selectedId, onSelect, queryKey, ready
                 <span>{run.runId}</span><span title={run.worktree}>{run.worktree || "Worktree not recorded"}</span>
                 <span>Owner: {run.ownerSessionId ? names.get(run.ownerSessionId) ?? run.ownerSessionId : "not recorded"}</span>
                 <span>Notify: {run.notifySessionId ? names.get(run.notifySessionId) ?? run.notifySessionId : run.notifyTo ?? "none"}</span>
-                <span>Tracking: {run.registrationState ?? "discovered"} · {run.trackingDurability ?? "unconfirmed"}</span>
+                <span>Tracking: {testRunTrackingLabel(run)}</span>
                 <span>Observed through: {run.trackingProvenances?.join(", ") ?? "discovery"}</span>
                 <span>Creator PID: {run.creatorPid ?? "unknown"} · Runner PID: {run.runnerPid ?? "unknown"}</span>
                 <span>Evidence impact on restart: {run.restartWouldVoidEvidence === true ? "would void evidence" : run.restartWouldVoidEvidence === false ? "no pending evidence" : "unknown"}</span>
