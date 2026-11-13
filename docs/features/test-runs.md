@@ -1143,6 +1143,20 @@ of the reviewed `/review-changes` contract.
     remains a separate representation. A wait itself grants no credit.
     Focused and full native completions are supported; a live-preset run or
     legacy registration without original native provenance remains pending.
+    The Engram adapter has a closed `remote_verification_record` wire bridge
+    for `committed_input` uses (`verification` or `landing_gate`) and
+    `authorized_test_ref` landing gates. New requests accept only the retained
+    SourceId input; they never convert historical commit/fingerprint records.
+    Native result, finish time and both complete nullable endpoints pass through
+    unchanged. Engram alone judges mode, input equality, destination authority
+    and completion-time currency; the adapter checks receipt structure and
+    preserves the returned qualification and record ids. Capability discovery
+    reuses the ordinary connection/current-child cache and requires exactly
+    `remote_verification_record_v1`, independently of native verification support.
+    This bridge adds no sender, activation or durable storage shape. Remote waits
+    remain uncredited until the causal delivery and destination settlement path
+    is enabled on supported consumers; the capability alone does not prove that
+    all consumers have restarted onto a compatible build.
     Retaining a completion does not replace the acknowledged registration:
     concurrent registration, query and turn-closing identity checks tolerate
     that append. Publishing the completion and retiring its active custody

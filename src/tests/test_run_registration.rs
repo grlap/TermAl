@@ -194,6 +194,9 @@ mod source_owner;
 #[path = "test_run_native_completion.rs"]
 mod native_completion;
 
+#[path = "engram_remote_verification.rs"]
+mod remote_verification;
+
 #[tokio::test]
 async fn http_registration_returns_the_versioned_durable_contract_and_one_global_row_on_retry() {
     let fixture = RunFixture::new("registration-http-contract");

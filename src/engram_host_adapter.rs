@@ -686,6 +686,12 @@ enum EngramControlRequest {
         #[serde(flatten)]
         record: Value,
     },
+    /// Closed SourceId-only bridge. Delivery/recovery owns the frozen key,
+    /// native provenance and destination; Engram alone decides credit.
+    RemoteVerificationRecord {
+        #[serde(flatten)]
+        record: engram_remote_verification::Request,
+    },
 }
 
 impl EngramControlRequest {
@@ -700,6 +706,7 @@ impl EngramControlRequest {
             Self::NamedRootBind { .. } => "named_root_bind",
             Self::VerificationBind { .. } => "verification_bind",
             Self::VerificationRecord { .. } => "verification_record",
+            Self::RemoteVerificationRecord { .. } => "remote_verification_record",
         }
     }
 }
@@ -1318,7 +1325,7 @@ impl EngramControlTransport for ScriptedEngramControlTransport {
                     "scripted Engram transport has no response for request",
                 )))
             });
-        let ScriptedEngramControlResponse::Reply(mut reply) = response;
+        let ScriptedEngramControlResponse::Reply(reply) = response;
         reply
     }
 
@@ -1556,6 +1563,7 @@ fn retry_engram_cli_command_on_locked_store(
     Ok(first)
 }
 
+#[cfg(all(test, windows))]
 fn run_engram_json_command(
     connection: &EngramConnectionConfig,
     args: &[&str],
@@ -1974,6 +1982,15 @@ impl EngramHostAdapter {
         &self, connection: &EngramConnectionConfig,
     ) -> EngramVerificationRecordSupport {
         self.capabilities.work_session_verification_record(
+            connection, self.transport.connection_generation(&connection.session_id),
+        )
+    }
+
+    #[allow(dead_code)] // Capability read alone never activates delivery.
+    fn remote_verification_record_route_support(
+        &self, connection: &EngramConnectionConfig,
+    ) -> EngramVerificationRecordSupport {
+        self.capabilities.work_session_remote_verification_record(
             connection, self.transport.connection_generation(&connection.session_id),
         )
     }

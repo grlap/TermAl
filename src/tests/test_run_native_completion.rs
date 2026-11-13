@@ -3,7 +3,7 @@
 use super::observed_terminal::{LAUNCH, assert_no_credit, finish_artifact, launcher, start};
 use super::*;
 
-fn native_run(label: &str, observed: bool) -> (RunFixture, String, String, PathBuf) {
+pub(super) fn native_run(label: &str, observed: bool) -> (RunFixture, String, String, PathBuf) {
     let fixture = RunFixture::new(label);
     let session = running_owner(&fixture, "native-completion-runtime");
     native_origin::bind_native_host(&fixture);

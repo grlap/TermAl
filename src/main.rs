@@ -1269,6 +1269,7 @@ include!("test_runs_disk.rs");
 include!("test_run_committed_input.rs");
 include!("engram_capabilities.rs");
 include!("engram_verification_record.rs");
+mod engram_remote_verification;
 include!("test_runs_api.rs");
 include!("test_run_cards.rs");
 include!("test_run_waits.rs");
