@@ -58,6 +58,7 @@ fn stable_text_hash(value: &str) -> String {
 fn empty_state_events_response(server_instance_id: String) -> StateResponse {
     debug_assert!(!server_instance_id.trim().is_empty());
     StateResponse {
+        remote_transport_statuses: Vec::new(),
         revision: 0,
         server_instance_id,
         codex: CodexState::default(),
@@ -137,6 +138,17 @@ struct WorkspaceFilesChangedEvent {
     summary: Option<WorkspacePublicationSummary>,
 }
 
+fn workspace_files_covering_invalidation(revision: u64) -> WorkspaceFilesChangedEvent {
+    WorkspaceFilesChangedEvent {
+        revision,
+        summary: None,
+        changes: vec![WorkspaceFileChangeEvent {
+            path: String::new(), kind: WorkspaceFileChangeKind::Subtree,
+            root_path: None, session_id: None, mtime_ms: None, size_bytes: None,
+        }],
+    }
+}
+
 fn fallback_state_events_response(
     revision: u64,
     server_instance_id: String,
@@ -153,7 +165,7 @@ fn fallback_state_events_payload(
     revision: u64,
     server_instance_id: String,
 ) -> Result<String, ApiError> {
-    serde_json::to_string(&fallback_state_events_response(
+    encode_sse_json("state", &fallback_state_events_response(
         revision,
         server_instance_id,
     ))
@@ -166,12 +178,14 @@ fn fallback_state_events_payload(
 
 /// Serializes a metadata-first state snapshot for SSE on the blocking pool
 /// because summary_snapshot() acquires the synchronous app-state mutex.
-async fn state_snapshot_payload_for_sse(state: AppState) -> String {
+async fn state_snapshot_payload_for_sse(state: AppState) -> Result<String, ApiError> {
     let fallback_server_instance_id = state.server_instance_id.clone();
+    let budget = output_budget_bytes();
     run_blocking_api(move || {
         let snapshot = state.summary_snapshot();
-        match serde_json::to_string(&snapshot) {
+        match encode_sse_json_with_limit("state", &snapshot, budget) {
             Ok(payload) => Ok(payload),
+            Err(error @ OutputEncodingError::Limit { .. }) => Err(output_encoding_api_error(error, "sse_recovery")),
             Err(err) => {
                 eprintln!(
                     "state events warning> failed to serialize SSE state snapshot at revision {}: {}",
@@ -186,13 +200,13 @@ async fn state_snapshot_payload_for_sse(state: AppState) -> String {
         }
     })
     .await
-    .unwrap_or_else(|err| {
+    .or_else(|err| {
+        if matches!(err.kind, Some(ApiErrorKind::OutputLimitExceeded { .. })) { return Err(err); }
         eprintln!(
             "state events warning> failed to build SSE fallback state snapshot: {}",
             err.message
         );
         fallback_state_events_payload(0, fallback_server_instance_id)
-            .expect("fallback SSE state payload should serialize")
     })
 }
 
@@ -213,7 +227,7 @@ async fn wait_for_shutdown_signal(rx: &mut tokio::sync::watch::Receiver<bool>) {
     }
 }
 
-async fn lagged_recovery_events(state: AppState) -> (Event, Event) {
+fn lagged_state_recovery_marker() -> Event {
     // Lagged means the consumer fell past broadcast channel capacity, so some
     // events were dropped before the client could read them. Emit a non-empty
     // marker first so the client force-adopts the following state snapshot even
@@ -224,11 +238,7 @@ async fn lagged_recovery_events(state: AppState) -> (Event, Event) {
     // dispatched event. Clients must NOT parse this body; it is reserved as a
     // control marker. The file-change receiver deliberately does not use this
     // helper because workspace file events are non-authoritative hints.
-    let payload = state_snapshot_payload_for_sse(state).await;
-    (
-        Event::default().event("lagged").data("1"),
-        Event::default().event("state").data(payload),
-    )
+    Event::default().event("lagged").data("1")
 }
 
 /// `GET /api/events` query. Only `stateDiff=1` opts in; an absent, unknown or
@@ -387,7 +397,17 @@ async fn state_events_stream(
         if already_shutting_down {
             return;
         }
-        yield Ok(Event::default().event("state").data(initial_payload));
+        match initial_payload {
+            Ok(payload) => yield Ok(Event::default().event("state").data(payload)),
+            Err(error) => {
+                if matches!(error.kind, Some(ApiErrorKind::OutputLimitExceeded { .. })) {
+                    yield Ok(output_limit_sse_event());
+                } else {
+                    eprintln!("state events warning> initial state unavailable: {}", error.message);
+                }
+                return;
+            }
+        }
 
         // Re-check after the initial yield: shutdown may have flipped
         // during snapshot serialization. Without this loop's exit branch
@@ -453,9 +473,18 @@ async fn state_events_stream(
                             // this body — it is reserved as a control marker.
                             // See bugs.md "Empty-data `lagged` SSE marker may
                             // not dispatch in browsers".
-                            let (lagged, recovery) = lagged_recovery_events(state.clone()).await;
-                            yield Ok(lagged);
-                            yield Ok(recovery);
+                            yield Ok(lagged_state_recovery_marker());
+                            match state_snapshot_payload_for_sse(state.clone()).await {
+                                Ok(payload) => yield Ok(Event::default().event("state").data(payload)),
+                                Err(error) => {
+                                    if matches!(error.kind, Some(ApiErrorKind::OutputLimitExceeded { .. })) {
+                                        yield Ok(output_limit_sse_event());
+                                    } else {
+                                        eprintln!("state events warning> recovery state unavailable: {}", error.message);
+                                    }
+                                    break;
+                                }
+                            }
                         }
                         Err(broadcast::error::RecvError::Closed) => break,
                     }
@@ -467,16 +496,15 @@ async fn state_events_stream(
                         Err(broadcast::error::RecvError::Lagged(_)) => {
                             // Lost exact paths become a covering invalidation,
                             // rather than an apparently quiet workspace.
-                            let recovery = WorkspaceFilesChangedEvent {
-                                revision: state.file_events_revision.load(Ordering::Relaxed),
-                                summary: None,
-                                changes: vec![WorkspaceFileChangeEvent {
-                                    path: String::new(), kind: WorkspaceFileChangeKind::Subtree,
-                                    root_path: None, session_id: None, mtime_ms: None, size_bytes: None,
-                                }],
-                            };
-                            yield Ok(Event::default().event("workspaceFilesChanged")
-                                .data(serde_json::to_string(&recovery).expect("workspace recovery serializes")));
+                            let recovery = workspace_files_covering_invalidation(state.file_events_revision.load(Ordering::Relaxed));
+                            match encode_sse_json("workspaceFilesChanged", &recovery) {
+                                Ok(payload) => yield Ok(Event::default().event("workspaceFilesChanged").data(payload)),
+                                Err(error) => {
+                                    observe_output_limit("sse_workspace_recovery", &error, Some(recovery.revision));
+                                    yield Ok(output_limit_sse_event());
+                                    break;
+                                }
+                            }
                         }
                         Err(broadcast::error::RecvError::Closed) => break,
                     }

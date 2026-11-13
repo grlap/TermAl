@@ -12,6 +12,19 @@ afterEach(() => {
 });
 
 describe("api-request", () => {
+  it("preserves an output encoding failure and never resubmits a committed mutation", async () => {
+    const fetchMock = vi.fn(async () => Response.json({
+      error: "The operation completed, but its response exceeded the output limit. Do not repeat the operation; refresh its status.",
+      code: "output_limit_exceeded", limitBytes: 67108864,
+      phase: "response_encoding", mutationOutcome: "committed",
+    }, { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(request("/api/example", { method: "POST" })).rejects.toMatchObject({
+      kind: "request-failed", status: 500, code: "output_limit_exceeded",
+      phase: "response_encoding", limitBytes: 67108864, mutationOutcome: "committed",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
   it("applies JSON headers and parses successful JSON responses", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), {

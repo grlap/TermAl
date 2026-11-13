@@ -747,6 +747,7 @@ impl RemoteRegistry {
         timeout: Option<Duration>,
     ) -> Result<(BlockingHttpResponse, RemoteRequestLease), ApiError> {
         self.ensure_lease_current(&lease)?;
+        lease.connection.ensure_request_output_available()?;
         let available = lease
             .connection
             .ensure_available(self.client.client(), &lease.pinned);
@@ -762,6 +763,9 @@ impl RemoteRegistry {
         if let Some(payload) = body {
             request = request.json(&payload);
         }
+        // Availability checks can perform IO. Recheck the terminal latch at
+        // the send boundary so a stopped mirror cannot accept new mutations.
+        lease.connection.ensure_request_output_available()?;
         let response = match request.send() {
             Ok(response) => response,
             Err(err) => {
@@ -895,6 +899,9 @@ impl RemoteRegistry {
             (connection, retired_connection)
         };
         desired_event_bridges.insert(remote_id.to_owned());
+        if connection.output_limited() {
+            return Ok(None);
+        }
         connection
             .event_bridge_shutdown
             .store(false, Ordering::SeqCst);
@@ -914,6 +921,10 @@ impl RemoteRegistry {
         Ok(Some(connection))
     }
 }
+
+const REMOTE_STREAM_PENDING: u8 = 0;
+const REMOTE_STREAM_LIVE: u8 = 1;
+const REMOTE_STREAM_OUTPUT_LIMIT: u8 = 2;
 
 /// Represents remote connection.
 struct RemoteConnection {
@@ -935,6 +946,8 @@ struct RemoteConnection {
     process: Mutex<Option<RemoteProcessHandle>>,
     event_bridge_started: AtomicBool,
     event_bridge_shutdown: AtomicBool,
+    // Only replacement by an explicit settings change resets a terminal latch.
+    event_stream_status: AtomicU8,
 }
 
 impl RemoteConnection {
@@ -949,11 +962,23 @@ impl RemoteConnection {
             process: Mutex::new(None),
             event_bridge_started: AtomicBool::new(false),
             event_bridge_shutdown: AtomicBool::new(false),
+            event_stream_status: AtomicU8::new(REMOTE_STREAM_PENDING),
         }
     }
 
     fn config(&self) -> RemoteConfig {
         self.config.clone()
+    }
+
+    fn output_limited(&self) -> bool {
+        self.event_stream_status.load(Ordering::SeqCst) == REMOTE_STREAM_OUTPUT_LIMIT
+    }
+
+    fn ensure_request_output_available(&self) -> Result<(), ApiError> {
+        if self.output_limited() {
+            return Err(ApiError::conflict("Remote live output is stopped after an output limit. No remote request was sent; disable and re-enable the remote to resume."));
+        }
+        Ok(())
     }
 
     fn disconnect(&self) {
@@ -1202,6 +1227,9 @@ impl RemoteConnection {
                 if let Err(err) =
                     process_remote_event_stream(&state, &remote, &connection, response)
                 {
+                    if err.downcast_ref::<RemoteOutputLimitTerminal>().is_some() {
+                        break;
+                    }
                     eprintln!("remote event bridge `{}` disconnected: {err:#}", remote.id);
                 }
                 if !state.clear_remote_bridge_continuity_if_current(&remote, &connection) {

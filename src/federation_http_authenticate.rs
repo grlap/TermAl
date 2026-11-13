@@ -244,6 +244,17 @@ async fn federation_authenticate_message(
                 }
         }
     };
+    // Normalize output failure before signing the exact final status and bytes.
+    let response = if response_limit < MAX_ENCODED_OUTPUT_BYTES {
+        // Smaller protocol limits retain their route-specific refusal and
+        // unknown-outcome handling below; they already enforce the global cap.
+        response
+    } else { match state.channel.control.clock.timeout_at(deadline,
+        bound_finite_http_response_with_limit(response, false, response_limit.min(MAX_ENCODED_OUTPUT_BYTES))).await {
+        Ok(response) => response,
+        Err(_) => return Ok(federation_request_timeout()),
+    }};
+    let response = restore_output_failure(response);
     let (mut parts, body) = response.into_parts();
     let body =
         match state.channel.control.clock.timeout_at(deadline, axum::body::to_bytes(body, response_limit)).await {

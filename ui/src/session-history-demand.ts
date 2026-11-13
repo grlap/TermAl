@@ -243,7 +243,12 @@ export function addSessionHistoryPageDemandListener(
   for (const demand of [...pendingHistoryPageDemands.values()]) {
     emitToListener(demand);
   }
-  return () => {
+  const cancelPending = () => {
+    for (const requestId of [...acceptedCompletionIds]) {
+      completeSessionHistoryPageDemand(requestId, false);
+    }
+  };
+  const removeListener = () => {
     window.removeEventListener(SESSION_HISTORY_PAGE_DEMAND_EVENT, handleDemand);
     activeHistoryDemandListenerIds.delete(listenerId);
     acceptedCompletionIdsByListener.delete(listenerId);
@@ -256,4 +261,5 @@ export function addSessionHistoryPageDemandListener(
       }
     }
   };
+  return Object.assign(removeListener, { cancelPending });
 }

@@ -1008,6 +1008,7 @@ fn human_prompt_remote_choice_translates_only_the_exact_cached_projection_versio
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(false),
                 event_bridge_shutdown: AtomicBool::new(false),
+                event_stream_status: AtomicU8::new(0),
             }),
         );
         let selected = {

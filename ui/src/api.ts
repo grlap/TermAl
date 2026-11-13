@@ -53,6 +53,9 @@ import {
 } from "./api-request";
 
 export type StateResponse = {
+  remoteTransportStatuses?: Array<{
+    remoteId: string; code: string; stale: boolean; detail: string; recoveryAction: string;
+  }>;
   testRunWaits?: import("./test-run-waits").TestRunWaitRecord[];
   testRuns?: import("./test-runs").TestRunSummary[];
   testRunOverview?: import("./test-run-overview").TestRunOverview;

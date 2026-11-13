@@ -50,6 +50,7 @@ mod codex_read_only_tracker;
 mod codex_reviewer_mcp_startup;
 mod codex_root_mcp_approvals;
 mod commit_hidden_retain_cost;
+mod output_encoding_routes;
 pub(crate) use codex_reviewer_mcp_startup::run_settlement_gap_hook;
 mod capture_lifetime;
 mod capture_shutdown_regressions;
@@ -1319,6 +1320,7 @@ fn insert_test_remote_connection(
                     TestRemoteBridgeOwnership::Claimed
                 )),
                 event_bridge_shutdown: AtomicBool::new(false),
+                event_stream_status: AtomicU8::new(0),
             }),
         );
 }
@@ -1507,6 +1509,7 @@ fn sample_remote_orchestrator_state(
     TestRemoteState {
         sessions,
         state: StateResponse {
+            remote_transport_statuses: Vec::new(),
             revision,
             // Tests simulate a remote snapshot; a stable stub id is fine
             // since remote-state sync doesn't consume the field today.
@@ -2294,7 +2297,7 @@ async fn spawn_terminal_stream_worker_reports_panics_as_error_events() {
         .expect("panic recovery should emit an event")
         .expect("panic recovery should keep the event channel open for the error");
     match event {
-        TerminalCommandStreamEvent::Error { error, status } => {
+        TerminalCommandStreamEvent::Error { error, status, .. } => {
             assert_eq!(error, "terminal stream task panicked");
             assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR.as_u16());
         }
@@ -3276,7 +3279,7 @@ async fn read_and_write_file_accept_project_id_without_session() {
         Some(read_response.content.len() as u64)
     );
 
-    let Json(write_response) = write_file(
+    let write_response = write_file(
         State(state),
         Json(WriteFileRequest {
             path: new_file.to_string_lossy().into_owned(),
@@ -3291,6 +3294,9 @@ async fn read_and_write_file_accept_project_id_without_session() {
     )
     .await
     .unwrap();
+    assert_eq!(write_response.status(), StatusCode::OK);
+    let write_response: FileResponse =
+        serde_json::from_slice(&to_bytes(write_response.into_body(), 2048).await.unwrap()).unwrap();
     assert_eq!(
         write_response.path,
         normalize_user_facing_path(&new_file).to_string_lossy()
@@ -3424,7 +3430,7 @@ async fn write_file_rejects_stale_base_hash() {
         "fn main() { println!(\"agent\"); }\n"
     );
 
-    let Json(overwrite_response) = write_file(
+    let overwrite_response = write_file(
         State(state),
         Json(WriteFileRequest {
             path: existing_file.to_string_lossy().into_owned(),
@@ -3436,6 +3442,13 @@ async fn write_file_rejects_stale_base_hash() {
         }),
     )
     .await
+    .unwrap();
+    assert_eq!(overwrite_response.status(), StatusCode::OK);
+    let overwrite_response: FileResponse = serde_json::from_slice(
+        &to_bytes(overwrite_response.into_body(), 2048)
+            .await
+            .unwrap(),
+    )
     .unwrap();
 
     assert_eq!(

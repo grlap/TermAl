@@ -1438,6 +1438,7 @@ async fn terminal_run_route_limits_concurrent_commands() {
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
                 event_bridge_shutdown: AtomicBool::new(false),
+                event_stream_status: AtomicU8::new(0),
             }),
         );
     let mut permits = (0..TERMINAL_LOCAL_COMMAND_CONCURRENCY_LIMIT)

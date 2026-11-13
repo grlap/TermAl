@@ -67,6 +67,7 @@ async fn federation_security_receiver_hold_settled_before_signing_keeps_mailbox_
     let unknown = outcome.err().map(|error| {
         let guidance = error.message.contains("same idempotencyKey");
         let raw: anyhow::Error = TermalDelegationApiError {
+            output_limit: None,
             status: error.status,
             message: error.message,
         }
@@ -100,6 +101,7 @@ async fn federation_security_receiver_hold_settled_before_signing_keeps_mailbox_
         .map(|error| {
             let status = error.status;
             let raw: anyhow::Error = TermalDelegationApiError {
+                output_limit: None,
                 status,
                 message: error.message,
             }

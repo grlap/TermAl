@@ -48,12 +48,13 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::net::SocketAddr;
 use std::path::{Path as FsPath, PathBuf};
 use std::process::{Child, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Condvar, LazyLock, Mutex, OnceLock, RwLock};
 use std::time::{Duration, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
+use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Path as AxumPath, Query, State};
@@ -61,7 +62,6 @@ use axum::http::{HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post};
-use axum::{Json, Router};
 use base64::Engine as _;
 use chrono::Local;
 #[cfg(not(test))]
@@ -172,10 +172,13 @@ async fn run_server() -> Result<()> {
     // and held until the process exits, after every background writer.
     let state = AppState::new_server(cwd.clone())?;
     let shutdown_state = state.clone();
-    let app = app_router(state.clone())
+    let static_files = Router::new()
         .fallback_service(
             ServeDir::new(ui_dist_dir).not_found_service(ServeFile::new(ui_index_file)),
         )
+        .layer(axum::middleware::from_fn(output_limit_http_guard));
+    let app = app_router(state.clone())
+        .fallback_service(static_files)
         .layer(axum::middleware::from_fn(output_size_http_observer))
         // Last response adapter, including static fallback and compressed bodies.
         .layer(axum::middleware::from_fn(chunk_http_response_writes));
@@ -817,6 +820,7 @@ fn app_router_with_acceptance_policy_limiter(
         ))))
         // One 10 MiB image expands to about 13.4 MiB when base64-encoded.
         .layer(DefaultBodyLimit::max(MAX_JSON_REQUEST_BODY_BYTES))
+        .layer(axum::middleware::from_fn(output_limit_http_guard))
         .layer(axum::middleware::from_fn(output_size_http_observer))
         .layer(CompressionLayer::new())
         .layer(cors)
@@ -1388,6 +1392,7 @@ include!("api_files.rs");
 include!("api_sse.rs");
 include!("api_review.rs");
 include!("wire.rs");
+include!("output_encoding.rs");
 include!("output_size.rs");
 include!("wire_git.rs");
 include!("wire_terminal.rs");

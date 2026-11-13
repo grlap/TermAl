@@ -1464,6 +1464,12 @@ fn dispatch_remote_event_with_recovery_and_authority(
     // Data-bearing events self-guard against empty bodies below. Control-only
     // events like `lagged` intentionally dispatch from the event name alone.
     match event_name {
+        "outputLimit" => {
+            if let Some((remote, connection)) = bridge_authority {
+                state.latch_remote_output_limit(remote, connection)?;
+            }
+            return Err(RemoteOutputLimitTerminal.into());
+        }
         "lagged" => {
             recovery.lagged_recovery_baseline_revision = {
                 let inner = state.inner.lock().expect("state mutex poisoned");
@@ -1632,6 +1638,52 @@ fn dispatch_remote_event_with_recovery_and_authority(
         _ => {}
     }
     Ok(())
+}
+
+#[derive(Debug)]
+struct RemoteOutputLimitTerminal;
+
+impl std::fmt::Display for RemoteOutputLimitTerminal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Remote live output exceeded its limit; data may be stale. Disable and re-enable the remote to retry.")
+    }
+}
+impl std::error::Error for RemoteOutputLimitTerminal {}
+
+impl RemoteRegistry {
+    fn transport_statuses(&self) -> Vec<RemoteTransportStatus> {
+        let configs = self.configs.lock().expect("remote configs poisoned");
+        let connections = self.connections.lock().expect("remote connections poisoned");
+        let mut statuses = Vec::new();
+        for remote in configs.values().filter(|remote| remote.transport == RemoteTransport::Ssh) {
+            let status = connections.get(&remote.id).map(|connection| connection.event_stream_status.load(Ordering::SeqCst)).unwrap_or(REMOTE_STREAM_PENDING);
+            if remote.enabled && status == REMOTE_STREAM_LIVE { continue; }
+            let (code, detail, recovery_action) = if !remote.enabled {
+                ("remote_disabled", "Remote live updates are disabled; displayed data may be stale.", "enable_remote")
+            } else if status == REMOTE_STREAM_OUTPUT_LIMIT {
+                ("output_limit_exceeded", "Remote live updates exceeded the output limit; displayed data may be stale.", "disable_then_enable_remote")
+            } else {
+                ("remote_resync_pending", "Waiting for authoritative remote state; displayed data may be stale.", "wait_for_full_state")
+            };
+            statuses.push(RemoteTransportStatus { remote_id: remote.id.clone(), code: code.to_owned(), stale: true, detail: detail.to_owned(), recovery_action: recovery_action.to_owned() });
+        }
+        statuses.sort_by(|a, b| a.remote_id.cmp(&b.remote_id));
+        statuses
+    }
+}
+
+impl AppState {
+    fn latch_remote_output_limit(&self, remote: &RemoteConfig, connection: &RemoteConnection) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        self.ensure_remote_apply_authority_locked(&inner, remote, Some(connection))
+            .map_err(|error| anyhow!(error.message))?;
+        connection.event_stream_status.store(REMOTE_STREAM_OUTPUT_LIMIT, Ordering::SeqCst);
+        connection.invalidate_state_continuity();
+        self.clear_remote_applied_revision_locked(&mut inner, &remote.id);
+        self.clear_remote_sse_fallback_resync(&remote.id);
+        self.commit_locked(&mut inner)?;
+        Ok(())
+    }
 }
 
 fn resync_remote_state_snapshot_with_authority(

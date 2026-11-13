@@ -181,6 +181,7 @@ async fn satellite_monitor_keeps_its_link_when_four_mailbox_slots_are_admitted()
 fn relayed_central503_keeps_unknown_append_outcome_and_original_key_guidance() {
     let response = federation_mailbox_rpc_error(StatusCode::SERVICE_UNAVAILABLE);
     let raw: anyhow::Error = TermalDelegationApiError {
+        output_limit: None,
         status: response.status,
         message: response.message,
     }
@@ -196,6 +197,7 @@ fn relayed_central503_keeps_unknown_append_outcome_and_original_key_guidance() {
     assert!(error.to_string().contains("same idempotencyKey"));
     // An ordinary explicit no-commit admission refusal stays known.
     let refused: anyhow::Error = TermalDelegationApiError {
+        output_limit: None,
         status: StatusCode::SERVICE_UNAVAILABLE,
         message: "mailbox writer busy; no mailbox write was committed".to_owned(),
     }
@@ -244,6 +246,7 @@ async fn unusable_successful_central_reply_is_an_unknown_mailbox_outcome() {
     stop.send_replace(true);
     server.await.unwrap();
     let raw: anyhow::Error = TermalDelegationApiError {
+        output_limit: None,
         status: error.status,
         message: error.message,
     }

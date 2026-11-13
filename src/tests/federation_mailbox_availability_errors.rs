@@ -58,6 +58,25 @@ fn writer_envelope(case: &MailboxCase) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn oversized_authenticated_mailbox_reply_keeps_unknown_outcome() {
+    let case = MailboxCase::new().await;
+    let result = classified_reply(
+        &case,
+        StatusCode::OK,
+        json!({"payload":"x".repeat(FEDERATION_MAILBOX_RESPONSE_BYTES + 1)}),
+    )
+    .await;
+    case.pair.finish().await;
+    let error = result.expect_err("an oversized reply cannot certify the operation");
+    assert!(
+        error.message.contains(FEDERATION_MAILBOX_UNKNOWN_OUTCOME),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.kind, None);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn verified_allowlisted_envelope_retains_only_its_safe_no_write_class() {
     let case = MailboxCase::new().await;
     let result = classified_reply(

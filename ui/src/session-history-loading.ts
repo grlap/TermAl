@@ -45,6 +45,7 @@ export type SessionHistoryLoadingContext = {
   getLastSeenServerInstanceId: () => string | null;
   getSession: (sessionId: string) => Session | undefined;
   inFlightOlderLoads: OlderHistoryLoadRegistry;
+  // The owner also fences this predicate by transport stop/generation.
   isMounted: () => boolean;
   publishSession: (session: Session) => boolean;
   reportRequestError: (error: unknown) => void;
@@ -83,6 +84,7 @@ export function loadOlderHistoryPageOnce({
   requestedBefore: string;
   sessionId: string;
 }): Promise<OlderHistoryLoadResult> {
+  if (!context.isMounted()) return Promise.resolve({ kind: "unavailable" });
   // The exact promise owns publication and removes only itself. Clearing the
   // registry during unmount/instance change is therefore safe, and every
   // terminal path permits a later retry for the same exclusive boundary.

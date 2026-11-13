@@ -402,7 +402,11 @@ fn handle_remote_terminal_sse_frame_with_authority(
                 }
                 None => format!("remote terminal stream error: {}", payload.error),
             };
-            let result = if payload.status == Some(StatusCode::TOO_MANY_REQUESTS.as_u16()) {
+            let result = if let Some(limit) = output_limit_details(&Value::Object(payload.details)) {
+                Err(ApiError::from_status(StatusCode::INTERNAL_SERVER_ERROR, detail).with_kind(
+                    ApiErrorKind::OutputLimitExceeded { limit: limit.limit, outcome: limit.outcome },
+                ))
+            } else if payload.status == Some(StatusCode::TOO_MANY_REQUESTS.as_u16()) {
                 Err(ApiError::from_status(StatusCode::TOO_MANY_REQUESTS, detail))
             } else {
                 Err(ApiError::bad_gateway(detail))

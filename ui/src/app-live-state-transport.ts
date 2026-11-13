@@ -13,6 +13,7 @@
 
 import {
   useEffect,
+  useRef,
   type Dispatch,
   type MutableRefObject,
   type SetStateAction,
@@ -23,7 +24,7 @@ import {
   requestStateCut,
   type StateResponse,
 } from "./api";
-import { isBackendUnavailableError } from "./api-request";
+import { isBackendUnavailableError, isOutputLimitError } from "./api-request";
 import { createLiveEventSource } from "./live-event-source";
 import { LiveStreamLiveness } from "./live-stream-liveness";
 import {
@@ -81,6 +82,8 @@ import type { HydrationDeltaObservation } from "./session-hydration-adoption";
 import type { SessionReadRef, TranscriptRepairAuthority } from "./transcript-repair-authority";
 
 type UseAppLiveStateTransportParams = {
+  resetOutputLimitHydrationFailures?: () => void;
+  stopOutputLimitHydration?: () => void;
   sessionAuthority: TranscriptRepairAuthority;
   requestSessionTailRead: (sessionId: string) => void;
   /** The periodic tail-read backstop for visible sessions, spaced out per session by its owner. */
@@ -186,6 +189,8 @@ export function confirmAuthoritativeSnapshotReconnectRecovery({
 export function useAppLiveStateTransport(
   params: UseAppLiveStateTransportParams,
 ) {
+  const outputLimitStoppedRef = useRef(false);
+  const retryOutputLimitRef = useRef(false);
   const {
     observeHydrationDelta,
     hasPartialTailAppendProof,
@@ -233,6 +238,15 @@ export function useAppLiveStateTransport(
   } = params;
 
   useEffect(() => {
+    if (outputLimitStoppedRef.current) {
+      requestBackendReconnectRef.current = () => {
+        params.resetOutputLimitHydrationFailures?.();
+        retryOutputLimitRef.current = true;
+        outputLimitStoppedRef.current = false;
+        setSseEpoch(current => current + 1);
+      };
+      return () => { requestBackendReconnectRef.current = () => {}; };
+    }
     let cancelled = false;
     let initialStateResyncRetryTimeoutId: ReturnType<
       typeof window.setTimeout
@@ -272,11 +286,35 @@ export function useAppLiveStateTransport(
       number
     >();
     let lastWatchdogResyncAttemptAt: number | null = null;
-    const eventSource = createLiveEventSource(sseEpoch > 0);
+    const eventSource = createLiveEventSource(sseEpoch > 0, retryOutputLimitRef.current);
+    retryOutputLimitRef.current = false;
     // One outstanding `stateDiff` alignment request per connection. A new
     // connection registers itself for a marked full state server-side.
     const stateDiffAlignmentPendingRef = { current: false };
     const waitRepairRetry = createWaitSnapshotRepairRetry(requestStateResync, readNavigatorOnline);
+
+    function stopForOutputLimit() {
+      if (cancelled || outputLimitStoppedRef.current) return;
+      outputLimitStoppedRef.current = true;
+      params.stopOutputLimitHydration?.();
+      markTranscriptsDirty();
+      params.stateDiffBaselineRevisionRef.current = null;
+      stateDiffAlignmentPendingRef.current = false;
+      stateResyncPendingRef.current = false;
+      pendingStateResyncOptionsRef.current = null;
+      waitRepairRetry.dispose();
+      clearInitialStateResyncRetryTimeout();
+      clearReconnectStateResyncTimeout();
+      resetReconnectStateResyncBackoff();
+      if (sseRecoveryTimerRef.current !== null) {
+        window.clearTimeout(sseRecoveryTimerRef.current);
+        sseRecoveryTimerRef.current = null;
+      }
+      eventSource.close();
+      setBackendConnectionState("output-limited");
+      setBackendConnectionIssueDetail("Live updates exceeded the output limit. The displayed data may be stale. Retry explicitly after reducing the result size.");
+      setIsLoading(false);
+    }
 
     function clearInitialStateResyncRetryTimeout() {
       if (initialStateResyncRetryTimeoutId === null) {
@@ -292,7 +330,7 @@ export function useAppLiveStateTransport(
       initialStateResyncRetryTimeoutId = window.setTimeout(() => {
         initialStateResyncRetryTimeoutId = null;
         if (
-          cancelled ||
+          cancelled || outputLimitStoppedRef.current ||
           !readNavigatorOnline() ||
           latestStateRevisionRef.current !== null
         ) {
@@ -350,7 +388,7 @@ export function useAppLiveStateTransport(
       const delayMs = Math.min(500 * 2 ** attempt, 5000);
       sseRecoveryTimerRef.current = window.setTimeout(() => {
         sseRecoveryTimerRef.current = null;
-        if (cancelled) {
+        if (cancelled || outputLimitStoppedRef.current) {
           return;
         }
         if (stillNeeded && !stillNeeded()) {
@@ -394,7 +432,7 @@ export function useAppLiveStateTransport(
       initialStateResyncRetryTimeoutId = window.setTimeout(() => {
         initialStateResyncRetryTimeoutId = null;
         if (
-          cancelled ||
+          cancelled || outputLimitStoppedRef.current ||
           !readNavigatorOnline() ||
           latestStateRevisionRef.current !== requestedRevision
         ) {
@@ -541,7 +579,7 @@ export function useAppLiveStateTransport(
         reconnectStateResyncTimeoutId = null;
         reconnectStateResyncBackoffRef.current.dueAt = null;
         if (
-          cancelled ||
+          cancelled || outputLimitStoppedRef.current ||
           !readNavigatorOnline() ||
           latestStateRevisionRef.current === null
         ) {
@@ -619,7 +657,7 @@ export function useAppLiveStateTransport(
 
     function startStateResyncLoop() {
       if (
-        cancelled ||
+        cancelled || outputLimitStoppedRef.current ||
         stateResyncInFlightRef.current ||
         !stateResyncPendingRef.current
       ) {
@@ -629,7 +667,7 @@ export function useAppLiveStateTransport(
       stateResyncInFlightRef.current = true;
       void (async () => {
         try {
-          while (!cancelled && stateResyncPendingRef.current) {
+          while (!cancelled && !outputLimitStoppedRef.current && stateResyncPendingRef.current) {
             stateResyncPendingRef.current = false;
             const resyncOptions = consumePendingStateResyncOptions(pendingStateResyncOptionsRef);
             const {
@@ -655,7 +693,7 @@ export function useAppLiveStateTransport(
 
             try {
               const state = await fetchState();
-              if (cancelled) {
+              if (cancelled || outputLimitStoppedRef.current) {
                 break;
               }
 
@@ -946,7 +984,8 @@ export function useAppLiveStateTransport(
                 }
               }
             } catch (error) {
-              if (!cancelled) {
+              if (isOutputLimitError(error)) { stopForOutputLimit(); break; }
+              if (!cancelled && !outputLimitStoppedRef.current) {
                 setBackendConnectionIssueDetail(
                   describeBackendConnectionIssueDetail(error),
                 );
@@ -997,13 +1036,13 @@ export function useAppLiveStateTransport(
               }
               break;
             } finally {
-              if (!cancelled) {
+              if (!cancelled && !outputLimitStoppedRef.current) {
                 setIsLoading(latestStateRevisionRef.current === null);
               }
             }
           }
         } finally {
-          if (!cancelled) {
+          if (!cancelled && !outputLimitStoppedRef.current) {
             // Clear before restarting so startStateResyncLoop's entry guard passes.
             stateResyncInFlightRef.current = false;
             if (stateResyncPendingRef.current) {
@@ -1015,7 +1054,7 @@ export function useAppLiveStateTransport(
     }
 
     function requestStateResync(options?: RequestStateResyncOptions) {
-      if (cancelled) {
+      if (cancelled || outputLimitStoppedRef.current) {
         return;
       }
       if (options?.waitRepair) {
@@ -1067,7 +1106,14 @@ export function useAppLiveStateTransport(
     }
 
     requestBackendReconnectRef.current = () => {
-      if (cancelled || !readNavigatorOnline()) {
+      if (outputLimitStoppedRef.current) {
+        params.resetOutputLimitHydrationFailures?.();
+        retryOutputLimitRef.current = true;
+        outputLimitStoppedRef.current = false;
+        setSseEpoch(current => current + 1);
+        return;
+      }
+      if (cancelled || outputLimitStoppedRef.current || !readNavigatorOnline()) {
         return;
       }
 
@@ -1087,7 +1133,7 @@ export function useAppLiveStateTransport(
       });
     };
     requestActionRecoveryResyncRef.current = (options) => {
-      if (cancelled || !readNavigatorOnline()) {
+      if (cancelled || outputLimitStoppedRef.current || !readNavigatorOnline()) {
         // Preserve hydration restart intent across offline observations; the
         // next online recovery should still be allowed to adopt a replacement
         // server instance.
@@ -1157,7 +1203,7 @@ export function useAppLiveStateTransport(
 
     function resumeStateIfNeeded() {
       if (
-        cancelled ||
+        cancelled || outputLimitStoppedRef.current ||
         !shouldResyncOnResume ||
         !readNavigatorOnline() ||
         latestStateRevisionRef.current === null
@@ -1174,7 +1220,7 @@ export function useAppLiveStateTransport(
 
     function handleLiveSessionResumeWatchdogTick() {
       const now = Date.now();
-      if (cancelled) {
+      if (cancelled || outputLimitStoppedRef.current) {
         return;
       }
 
@@ -1308,7 +1354,7 @@ export function useAppLiveStateTransport(
       confirmReconnectRecoveryFromStateEvent,
       enqueueWorkspaceFilesChangedEvent,
       forceAdoptNextStateEventRef,
-      isCancelled: () => cancelled,
+      isCancelled: () => cancelled || outputLimitStoppedRef.current,
       laggedRecoveryBaselineRevisionRef,
       lastSeenServerInstanceIdRef,
       lastLiveTransportActivityAtBySessionId,
@@ -1373,6 +1419,7 @@ export function useAppLiveStateTransport(
     const streamLiveness = new LiveStreamLiveness();
     const detachStreamLiveness = streamLiveness.attach(eventSource);
     eventSource.addEventListener("snapshotRequired", handleSharedSnapshotRequired);
+    eventSource.addEventListener("outputLimit", stopForOutputLimit);
     eventSource.addEventListener("state", handleStateEvent as EventListener);
     eventSource.addEventListener("stateDiff", handleStateDiffEvent as EventListener);
     eventSource.addEventListener("delta", handleDeltaEvent as EventListener);
@@ -1382,14 +1429,14 @@ export function useAppLiveStateTransport(
       handleWorkspaceFilesChangedEvent as EventListener,
     );
     eventSource.onopen = () => {
-      if (!cancelled) {
+      if (!cancelled && !outputLimitStoppedRef.current) {
         streamLiveness.markOpen();
         resetStateDiffContinuity();
         markEventSourceOpen();
       }
     };
     eventSource.onerror = () => {
-      if (cancelled) {
+      if (cancelled || outputLimitStoppedRef.current) {
         return;
       }
       resetStateDiffContinuity();
@@ -1460,7 +1507,7 @@ export function useAppLiveStateTransport(
     if (inheritedReconnectStateResyncDueAt !== null) scheduleReconnectStateResync();
     liveSessionResumeWatchdogIntervalId = window.setInterval(
       () => {
-        if (cancelled) return;
+        if (cancelled || outputLimitStoppedRef.current) return;
         // A missed edge notification must not strand standing body demand.
         // This sibling runs before the watchdog's independent policy guards;
         // browser throttling controls when actual interval firings occur.
@@ -1484,7 +1531,7 @@ export function useAppLiveStateTransport(
     // the client gets stuck".
     let sseStaleSinceMs: number | null = null;
     const sseHealthWatchdogIntervalId = window.setInterval(() => {
-      if (cancelled) {
+      if (cancelled || outputLimitStoppedRef.current) {
         return;
       }
       if (!readNavigatorOnline()) {
@@ -1592,6 +1639,7 @@ export function useAppLiveStateTransport(
       window.removeEventListener("pageshow", handlePageShow);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       eventSource.removeEventListener("snapshotRequired", handleSharedSnapshotRequired);
+      eventSource.removeEventListener("outputLimit", stopForOutputLimit);
       eventSource.removeEventListener(
         "state",
         handleStateEvent as EventListener,

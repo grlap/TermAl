@@ -120,6 +120,79 @@ fn only_diff(receiver: &mut broadcast::Receiver<SseStreamEvent>) -> Value {
     events.into_iter().next().unwrap().1
 }
 
+#[test]
+fn rejected_cut_or_delta_signals_loss_without_acknowledging_alignment_or_reusing_a_base() {
+    let senders = diff_senders();
+    let mut receiver = senders.stream_events.subscribe();
+    let template = template_summary();
+    let a = summary(&template, "a");
+    let mut producer = StateDiffProducer::default();
+    forward_cut(&mut producer, &senders, cut(1, &[&a]));
+    assert_eq!(kinds(&emitted(&mut receiver)), ["state"]);
+    assert!(producer.base.is_some());
+    request_state_diff_base(&senders);
+    {
+        let _budget = TestOutputBudget::new(64);
+        forward_cut(&mut producer, &senders, cut(2, &[&a]));
+        assert_eq!(kinds(&emitted(&mut receiver)), ["lagged"]);
+        assert!(producer.base.is_none());
+        assert_eq!(producer.satisfied_generation, 0);
+    }
+    forward_cut(&mut producer, &senders, cut(2, &[&a]));
+    let recovered = emitted(&mut receiver);
+    assert_eq!(kinds(&recovered), ["state"]);
+    assert_eq!(recovered[0].1["stateDiffBase"], true);
+    assert_eq!(producer.satisfied_generation, 1);
+    {
+        let _budget = TestOutputBudget::new(64);
+        producer.forward(
+            StateBroadcastWork::Delta(DeltaEvent::TestRunRemoved {
+                revision: 3,
+                run_id: "longer-than-the-injected-frame-budget".repeat(4),
+            }),
+            &senders,
+        );
+        assert_eq!(kinds(&emitted(&mut receiver)), ["lagged"]);
+        assert!(producer.base.is_none());
+    }
+    forward_cut(&mut producer, &senders, cut(3, &[&a]));
+    assert_eq!(kinds(&emitted(&mut receiver)), ["state"]);
+    {
+        // A diff can exceed the budget even when its compact full replacement fits.
+        let mut changed = (*a).clone();
+        changed.name = "changed".to_owned();
+        let changed = Arc::new(changed);
+        let full_size = serde_json::to_vec(&MarkedStateResponse {
+            state: &cut(4, &[&changed]).materialize(),
+            state_diff_base: true,
+        })
+        .unwrap()
+        .len()
+            + "event: state\ndata: \n\n".len();
+        let next = cut(4, &[&changed]);
+        let diff_size = serde_json::to_vec(&state_diff_payload(
+            producer.base.as_ref().unwrap(),
+            &next,
+            &producer.touched,
+        ))
+        .unwrap()
+        .len()
+            + "event: stateDiff\ndata: \n\n".len();
+        assert!(
+            diff_size > full_size,
+            "fixture must distinguish a rejected diff from a fitting full recovery"
+        );
+        let _budget = TestOutputBudget::new(full_size);
+        forward_cut(&mut producer, &senders, cut(4, &[&changed]));
+        let events = emitted(&mut receiver);
+        assert_eq!(kinds(&events), ["lagged"]);
+        assert!(producer.base.is_none());
+        assert_eq!(producer.satisfied_generation, 1);
+        forward_cut(&mut producer, &senders, cut(4, &[&changed]));
+        assert_eq!(kinds(&emitted(&mut receiver)), ["state"]);
+    }
+}
+
 fn ids(rows: &Value, key: &str) -> Vec<String> {
     rows.as_array()
         .unwrap()

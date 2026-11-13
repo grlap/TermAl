@@ -778,6 +778,7 @@ fn removing_remote_stops_event_bridge_worker_and_resets_started_guard() {
         process: Mutex::new(None),
         event_bridge_started: AtomicBool::new(false),
         event_bridge_shutdown: AtomicBool::new(false),
+        event_stream_status: AtomicU8::new(0),
     });
     state
         .remote_registry
@@ -872,6 +873,7 @@ fn remote_event_bridge_retry_clears_fallback_resync_tracking() {
         process: Mutex::new(None),
         event_bridge_started: AtomicBool::new(false),
         event_bridge_shutdown: AtomicBool::new(false),
+        event_stream_status: AtomicU8::new(0),
     });
     state
         .remote_registry
@@ -947,6 +949,7 @@ fn remote_event_bridge_retry_clears_applied_revision_tracking() {
         process: Mutex::new(None),
         event_bridge_started: AtomicBool::new(false),
         event_bridge_shutdown: AtomicBool::new(false),
+        event_stream_status: AtomicU8::new(0),
     });
     state
         .remote_registry
@@ -2588,6 +2591,7 @@ fn remote_review_put_sends_scope_via_query_params() {
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(false),
                 event_bridge_shutdown: AtomicBool::new(false),
+                event_stream_status: AtomicU8::new(0),
             }),
         );
     let server = std::thread::spawn(move || {

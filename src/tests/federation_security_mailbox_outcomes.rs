@@ -35,6 +35,7 @@ async fn committed_outcome(replay: bool) {
     let error = outcome.err();
     let observed = error.as_ref().map(|error| {
         let raw: anyhow::Error = TermalDelegationApiError {
+            output_limit: None,
             status: error.status,
             message: error.message.clone(),
         }

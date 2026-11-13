@@ -34,9 +34,9 @@ export class SharedLiveEventSource extends EventTarget {
   private nextProbeId = 0;
   private pendingProbeId: number | null = null;
 
-  constructor(worker: SharedWorker, reconnect: boolean, private readonly makeWorker = createWorker) {
+  constructor(worker: SharedWorker, reconnect: boolean, private readonly makeWorker = createWorker, retryOutputLimit = false) {
     super();
-    this.attachWorker(worker, reconnect);
+    this.attachWorker(worker, reconnect, retryOutputLimit);
     window.addEventListener("pagehide", this.handlePageHide);
     window.addEventListener("pageshow", this.handlePageShow);
     document.addEventListener("visibilitychange", this.handleVisibilityChange);
@@ -50,7 +50,7 @@ export class SharedLiveEventSource extends EventTarget {
     this.dispatchEvent(event);
   }
 
-  private attachWorker(worker: SharedWorker, reconnect: boolean) {
+  private attachWorker(worker: SharedWorker, reconnect: boolean, retryOutputLimit = false) {
     this.worker = worker;
     this.lastWorkerMessageAt = Date.now();
     this.readyState = 0;
@@ -73,6 +73,7 @@ export class SharedLiveEventSource extends EventTarget {
         catch { this.fallbackToNative(); }
       } else if (message.type === "event") {
         this.dispatchEvent(new MessageEvent(message.eventType, { data: message.data }));
+        if (message.eventType === "outputLimit") this.close();
       } else if (message.type === "snapshotRequired") {
         this.dispatchEvent(new Event("snapshotRequired"));
       } else if (message.type === "status") {
@@ -88,7 +89,7 @@ export class SharedLiveEventSource extends EventTarget {
     worker.port.onmessageerror = () => { if (this.worker === worker) this.fallbackToNative(); };
     try {
       worker.port.start();
-      sendClientLiveEvent(worker.port, { type: "start", reconnect });
+      sendClientLiveEvent(worker.port, { type: "start", reconnect, ...(retryOutputLimit ? { retryOutputLimit: true } : {}) });
     } catch {
       this.fallbackToNative();
     }
@@ -127,6 +128,7 @@ export class SharedLiveEventSource extends EventTarget {
         native.addEventListener(type, (event) => {
           if (this.native === native) {
             this.dispatchEvent(new MessageEvent(type, { data: (event as MessageEvent).data }));
+            if (type === "outputLimit") this.close();
           }
         });
       }
@@ -195,10 +197,10 @@ export class SharedLiveEventSource extends EventTarget {
   }
 }
 
-export function createLiveEventSource(reconnect = false) {
+export function createLiveEventSource(reconnect = false, retryOutputLimit = false) {
   if (typeof SharedWorker === "undefined") return new EventSource(LIVE_EVENTS_URL);
   try {
-    return new SharedLiveEventSource(createWorker(), reconnect);
+    return new SharedLiveEventSource(createWorker(), reconnect, createWorker, retryOutputLimit);
   } catch {
     // Embedded browsers can expose SharedWorker while denying its constructor.
     return new EventSource(LIVE_EVENTS_URL);

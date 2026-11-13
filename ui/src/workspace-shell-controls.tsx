@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 
 import { primaryModifierLabel } from "./app-utils";
 import type { ThemeKind } from "./themes";
+import type { BackendConnectionState } from "./backend-connection";
 
 export function ThemeModeToggle({
   effectiveThemeKind,
@@ -33,8 +34,6 @@ export function ThemeModeToggle({
     </button>
   );
 }
-
-type BackendConnectionState = "connecting" | "connected" | "reconnecting" | "offline";
 
 type BackendConnectionDescriptor = {
   detail: string;
@@ -75,6 +74,13 @@ function describeBackendConnectionState(
         label: "Offline",
         tone: "error",
       };
+    case "output-limited":
+      return {
+        detail: "Live updates exceeded the output limit. Displayed data may be stale. Automatic retries are stopped; retry explicitly after reducing the result size.",
+        icon: "offline",
+        label: "Output limit",
+        tone: "error",
+      };
   }
 }
 
@@ -95,8 +101,8 @@ export function ControlPanelConnectionIndicator({
     return null;
   }
 
-  const canRetry = onRetry !== null && (state === "connecting" || state === "reconnecting");
-  const showSpinner = descriptor.icon === "spinner" || issueDetail !== null;
+  const canRetry = onRetry !== null && (state === "connecting" || state === "reconnecting" || state === "output-limited");
+  const showSpinner = state !== "output-limited" && (descriptor.icon === "spinner" || issueDetail !== null);
   const showGenericIssueLabel = issueDetail !== null && state === "connected";
   const displayLabel = showGenericIssueLabel ? "Issue" : descriptor.label;
   const ariaLabel = showGenericIssueLabel
@@ -197,7 +203,7 @@ export function BackendConnectionStatus({
   const hasIssue = descriptor.tone === "error" || issueDetail !== null;
   const tooltipDetail = issueDetail ?? (state === "connected" ? null : descriptor.detail);
   const hasTooltip = tooltipDetail !== null;
-  const canRetry = onRetry !== null && (state === "connecting" || state === "reconnecting");
+  const canRetry = onRetry !== null && (state === "connecting" || state === "reconnecting" || state === "output-limited");
 
   return (
     <div

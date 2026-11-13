@@ -65,7 +65,7 @@ import {
   SESSION_HISTORY_PAGE_MESSAGE_COUNT,
   SESSION_TAIL_WINDOW_MESSAGE_COUNT,
 } from "./session-tail-policy";
-import { ApiRequestError } from "./api-request";
+import { ApiRequestError, isOutputLimitError } from "./api-request";
 import { repairSessionTailFromHistoryPage } from "./session-history";
 import { decideHttpSessionAdoption, applyHttpSessionEffects } from "./transcript-http-adoption";
 import {
@@ -351,6 +351,7 @@ export function useAppLiveState(
   const queuedTailRepairSessionIdsRef = useRef<Set<string>>(new Set());
   const queuedTextRepairHydrationSessionIdsRef = useRef<Set<string>>(new Set());
   const olderHistoryLoadsRef = useRef<OlderHistoryLoadRegistry>(new Map());
+  const historyDemandListenerRef = useRef<ReturnType<typeof addSessionHistoryPageDemandListener> | null>(null);
   const lastFullStateServerInstanceIdRef = useRef<string | null>(
     lastSeenServerInstanceIdRef.current,
   );
@@ -359,6 +360,7 @@ export function useAppLiveState(
   const hydrationRetryTimersRef = useRef<Map<string, {
     timerId: number;
     masterRetryOwed: boolean;
+    terminalOutputLimit?: boolean;
   }>>(new Map());
   const hydrationRetryAttemptsRef = useRef<Map<string, number>>(new Map());
   const hydrationCappedRetryAttemptsRef = useRef<Map<string, number>>(
@@ -601,28 +603,31 @@ export function useAppLiveState(
     };
   }, []);
 
-  useEffect(
-    () =>
-      addSessionHistoryPageDemandListener((demand) => {
-        const { sessionId } = demand;
-        invalidatePartialTailProof(sessionId);
-        if (
-          demand.direction !== "older" ||
-          demand.requestId !== undefined
-        ) {
-          void loadBoundedSessionHistoryWindow({
-            context: createSessionHistoryLoadingContext(),
-            demand,
-          });
-          return;
-        }
-        if (!isMountedRef.current || !sessionStillNeedsHydration(sessionId)) {
-          return;
-        }
-        startSessionHydration(sessionId, { queueAfterCurrent: true });
-      }),
-    [],
-  );
+  useEffect(() => {
+    const listener = addSessionHistoryPageDemandListener((demand) => {
+      const { sessionId } = demand;
+      invalidatePartialTailProof(sessionId);
+      if (
+        demand.direction !== "older" ||
+        demand.requestId !== undefined
+      ) {
+        void loadBoundedSessionHistoryWindow({
+          context: createSessionHistoryLoadingContext(),
+          demand,
+        });
+        return;
+      }
+      if (!isMountedRef.current || !sessionStillNeedsHydration(sessionId)) {
+        return;
+      }
+      startSessionHydration(sessionId, { queueAfterCurrent: true });
+    });
+    historyDemandListenerRef.current = listener;
+    return () => {
+      historyDemandListenerRef.current = null;
+      listener();
+    };
+  }, []);
 
   function cancelStaleSendResponseRecoveryPollForSessions(
     sessionIds: Iterable<string>,
@@ -1121,21 +1126,30 @@ export function useAppLiveState(
   }
 
   function createSessionHistoryLoadingContext(): SessionHistoryLoadingContext {
+    const generation = hydrationTransportGenerationRef.current;
+    const isCurrent = () => isMountedRef.current && !transportOutputLimitedRef.current &&
+      generation === hydrationTransportGenerationRef.current;
     return {
       getLastSeenServerInstanceId: () => lastSeenServerInstanceIdRef.current,
       getSession: id => sessionsRef.current.find(session => session.id === id),
       inFlightOlderLoads: olderHistoryLoadsRef.current,
-      isMounted: () => isMountedRef.current,
-      publishSession: publishHistorySession,
-      reportRequestError,
-      requestActionRecoveryResync: options => requestActionRecoveryResyncRef.current(options),
+      isMounted: isCurrent,
+      publishSession: session => isCurrent() && publishHistorySession(session),
+      reportRequestError: error => { if (isCurrent()) reportRequestError(error); },
+      requestActionRecoveryResync: options => {
+        if (isCurrent()) requestActionRecoveryResyncRef.current(options);
+      },
     };
   }
+
+  const transportOutputLimitedRef = useRef(false);
+  const hydrationTransportGenerationRef = useRef(0);
 
   function startSessionHydration(
     sessionId: string,
     options?: SessionHydrationOptions,
   ) {
+    if (transportOutputLimitedRef.current || hydrationRetryTimersRef.current.get(sessionId)?.terminalOutputLimit) return;
     if (
       options?.forceTailRepair || options?.allowDivergentTextRepairAfterNewerRevision
     ) {
@@ -1164,6 +1178,7 @@ export function useAppLiveState(
     }
 
     hydratingSessionIdsRef.current.add(sessionId);
+    const requestGeneration = hydrationTransportGenerationRef.current;
     const requestContext = captureHydrationRequestContext(sessionId, options);
     if (!requestContext) {
       releaseSessionHydrationFlight(hydratingSessionIdsRef.current, sessionId);
@@ -1194,7 +1209,7 @@ export function useAppLiveState(
             sessionId,
             SESSION_TAIL_WINDOW_MESSAGE_COUNT,
           );
-          if (!isMountedRef.current) {
+          if (!isMountedRef.current || transportOutputLimitedRef.current || requestGeneration !== hydrationTransportGenerationRef.current) {
             return;
           }
           if (tailResponse.session.id !== sessionId) {
@@ -1313,7 +1328,7 @@ export function useAppLiveState(
             before: null,
             limit: SESSION_HISTORY_PAGE_MESSAGE_COUNT,
           });
-          if (!isMountedRef.current) {
+          if (!isMountedRef.current || transportOutputLimitedRef.current || requestGeneration !== hydrationTransportGenerationRef.current) {
             return;
           }
           if (
@@ -1369,7 +1384,13 @@ export function useAppLiveState(
         requestRecovery();
         return;
       } catch (error) {
-        if (!isMountedRef.current) {
+        if (!isMountedRef.current || transportOutputLimitedRef.current || requestGeneration !== hydrationTransportGenerationRef.current) {
+          return;
+        }
+        if (isOutputLimitError(error)) {
+          clearHydrationRetry(sessionId);
+          hydrationRetryTimersRef.current.set(sessionId, { timerId: 0, masterRetryOwed: false, terminalOutputLimit: true });
+          reportRequestError(error);
           return;
         }
         // 404 is a benign race: the session was deleted, hidden,
@@ -1429,6 +1450,7 @@ export function useAppLiveState(
   }
 
   function requestSessionTailRead(sessionId: string, options?: { fromBackstop?: boolean }) {
+    if (transportOutputLimitedRef.current) return;
     const inFlight = hydratingSessionIdsRef.current.has(sessionId);
     // A read wanted while another is in flight is still new demand: if that
     // flight ends without certifying, the backstop serves it at 3 s, not at
@@ -1444,6 +1466,17 @@ export function useAppLiveState(
       forceTailRepair: true, ownerTailRead: true, backstopTailRead: options?.fromBackstop === true,
     });
   }
+
+  // Selecting or reopening a session is an explicit retry of its own stopped
+  // tail read. Passive renders and transport watchdogs retain the stop marker.
+  useEffect(() => {
+    const id = activeSession?.id;
+    if (!id || transportOutputLimitedRef.current) return;
+    if (hydrationRetryTimersRef.current.get(id)?.terminalOutputLimit) {
+      clearHydrationRetry(id);
+      requestSessionTailRead(id);
+    }
+  }, [activeSession?.id]);
 
   // The periodic backstop: the same owner read for each visible session,
   // spaced out per session while the same demand stands, so a tail that never
@@ -1551,7 +1584,7 @@ export function useAppLiveState(
   }
 
   function adoptState(nextState: StateResponse, options?: AdoptStateOptions) {
-    if (!isMountedRef.current) {
+    if (!isMountedRef.current || transportOutputLimitedRef.current) {
       return false;
     }
 
@@ -1721,6 +1754,7 @@ export function useAppLiveState(
 
   // Header slices, shared by full and diff adoption; both pass absolute slices.
   function adoptStateHeaderSlices(nextState: StateResponse) {
+    params.onRemoteTransportStatuses?.(nextState.remoteTransportStatuses ?? []);
     const currentCodexState = codexStateRef.current;
     const currentAgentReadiness = agentReadinessRef.current;
     const currentProjects = projectsRef.current;
@@ -1800,7 +1834,7 @@ export function useAppLiveState(
   // and a baseline equal to the diff's base are the caller's admission; this
   // folds the diff into current state the way `adoptState` adopts a full one.
   function adoptStateDiff(diff: StateDiffEvent) {
-    if (!isMountedRef.current) {
+    if (!isMountedRef.current || transportOutputLimitedRef.current) {
       return false;
     }
     // Invalidated before any slice changes: a throw below leaves no baseline.
@@ -1873,6 +1907,23 @@ export function useAppLiveState(
   }
 
   useAppLiveStateTransport({
+    stopOutputLimitHydration: () => {
+      transportOutputLimitedRef.current = true;
+      hydrationTransportGenerationRef.current += 1;
+      historyDemandListenerRef.current?.cancelPending();
+      olderHistoryLoadsRef.current.clear();
+      cancelHydrationRetries();
+    },
+    resetOutputLimitHydrationFailures: () => {
+      hydrationTransportGenerationRef.current += 1;
+      historyDemandListenerRef.current?.cancelPending();
+      olderHistoryLoadsRef.current.clear();
+      transportOutputLimitedRef.current = false;
+      for (const [id, retry] of hydrationRetryTimersRef.current) {
+        if (retry.terminalOutputLimit) clearHydrationRetry(id);
+      }
+      for (const id of visibleHydrationSessionIdsRef.current) requestSessionTailRead(id);
+    },
     sessionAuthority: params.sessionAuthority,
     requestSessionTailRead,
     runTailReadBackstop,

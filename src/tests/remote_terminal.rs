@@ -143,6 +143,7 @@ async fn remote_terminal_stream_rejects_successful_non_sse_without_json_fallback
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
                 event_bridge_shutdown: AtomicBool::new(false),
+                event_stream_status: AtomicU8::new(0),
             }),
         );
     let app = app_router(state);
@@ -509,12 +510,168 @@ async fn remote_terminal_stream_proxies_successful_sse_output() {
     );
 }
 
-// Pins parse_terminal_sse_frame's handling of default `message` event
-// names, `:` comment lines, CRLF line endings, multi-line `data:`
-// concatenation via `\n`, and the mixed-delimiter detection in
-// find_sse_frame_delimiter.
-// Guards against subtle SSE-parser regressions that would drop comment
-// lines or mis-join multi-line data fields.
+// Drive the real terminal proxy and final client SSE body for both remote
+// error representations; neither is permission to execute the command again.
+#[tokio::test]
+async fn terminal_proxy_preserves_output_limit_outcomes_without_reexecuting() {
+    for (sse, outcome) in [(true, "accepted"), (false, "committed"), (true, "unknown")] {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let captured = requests.clone();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            loop {
+                let mut stream = accept_test_connection(&listener, "typed terminal error");
+                let request = read_test_http_request(&mut stream);
+                captured.lock().unwrap().push(request.request_line.clone());
+                if request.request_line.starts_with("GET /api/health ") {
+                    write_test_http_response(
+                        &mut stream,
+                        StatusCode::OK,
+                        "application/json",
+                        r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
+                    );
+                    continue;
+                }
+                assert!(
+                    request
+                        .request_line
+                        .starts_with("POST /api/terminal/run/stream ")
+                );
+                let error = json!({"error":"response too large", "status":500,
+                "code":"output_limit_exceeded", "phase":"response_encoding",
+                "limitBytes":4096, "mutationOutcome":outcome});
+                if sse {
+                    write_test_http_response(
+                        &mut stream,
+                        StatusCode::OK,
+                        "text/event-stream",
+                        &format!("event: error\ndata: {error}\n\n"),
+                    );
+                } else {
+                    write_test_http_response(
+                        &mut stream,
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "application/json",
+                        &error.to_string(),
+                    );
+                }
+                break;
+            }
+        });
+        let state = test_app_state();
+        let remote = typed_terminal_test_remote();
+        let project_id = create_test_remote_project(
+            &state,
+            &remote,
+            "/remote/repo",
+            "Typed terminal",
+            "typed-terminal-project",
+        );
+        insert_test_remote_connection(
+            &state,
+            &remote,
+            port,
+            TestRemoteBridgeOwnership::RequestOnly,
+        );
+        let response = request_response(
+            &app_router(state),
+            Request::post("/api/terminal/run/stream")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"command":"echo once", "projectId":project_id,
+                "workdir":"/remote/repo"})
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let events = collect_sse_events(response).await;
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0].0, "error");
+        let error: Value = serde_json::from_str(&events[0].1).unwrap();
+        assert_eq!(error["code"], "output_limit_exceeded");
+        assert_eq!(error["phase"], "response_encoding");
+        assert_eq!(error["limitBytes"], 4096);
+        assert_eq!(error["mutationOutcome"], outcome);
+        join_test_server(server);
+        assert_eq!(
+            requests
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|line| line.starts_with("POST "))
+                .count(),
+            1
+        );
+    }
+}
+
+fn typed_terminal_test_remote() -> RemoteConfig {
+    RemoteConfig {
+        id: "typed-terminal".to_owned(),
+        name: "Typed terminal".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.invalid".to_owned()),
+        port: Some(22),
+        user: None,
+    }
+}
+
+#[tokio::test]
+async fn latched_remote_terminal_mutation_sends_no_http_request() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let state = test_app_state();
+    let remote = typed_terminal_test_remote();
+    let project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Latched terminal",
+        "latched-terminal-project",
+    );
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        listener.local_addr().unwrap().port(),
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
+    let lease = state.remote_registry.connection(&remote).unwrap();
+    state
+        .latch_remote_output_limit(&remote, &lease.connection)
+        .unwrap();
+    let app = app_router(state);
+    for _ in 0..2 {
+        let (status, error): (StatusCode, Value) = request_json(
+            &app,
+            Request::post("/api/terminal/run")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"command":"echo once", "projectId":project_id,
+                    "workdir":"/remote/repo"})
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{error}");
+        assert!(
+            error["error"]
+                .as_str()
+                .unwrap()
+                .contains("No remote request was sent")
+        );
+        assert!(
+            matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+        );
+    }
+}
+
+// Comments, default event names, CRLF, multi-line data and mixed delimiters
+// retain their normal SSE parser behavior.
 #[test]
 fn terminal_sse_parser_handles_default_events_comments_and_multiline_data() {
     assert_eq!(
@@ -1001,7 +1158,7 @@ async fn interruptible_remote_stream_reader_rejects_queued_bytes_after_endpoint_
         .try_recv()
         .expect("terminal error event should emit")
     {
-        TerminalCommandStreamEvent::Error { error, status } => {
+        TerminalCommandStreamEvent::Error { error, status, .. } => {
             assert_eq!(status, StatusCode::CONFLICT.as_u16());
             assert_eq!(error, REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST);
         }
@@ -1087,7 +1244,7 @@ async fn terminal_stream_error_event_preserves_unknown_remote_status_after_remov
         .try_recv()
         .expect("terminal error event should emit")
     {
-        TerminalCommandStreamEvent::Error { error, status } => {
+        TerminalCommandStreamEvent::Error { error, status, .. } => {
             assert_eq!(status, StatusCode::BAD_REQUEST.as_u16());
             assert_eq!(error, format!("unknown remote `{}`", remote.id));
         }
@@ -1240,6 +1397,7 @@ async fn remote_terminal_frame_dispatch_rechecks_authority_during_backpressure()
             .try_send(TerminalCommandStreamEvent::Error {
                 error: "sentinel".to_owned(),
                 status: StatusCode::IM_A_TEAPOT.as_u16(),
+                kind: None,
             })
             .is_ok()
     );
@@ -1277,7 +1435,7 @@ async fn remote_terminal_frame_dispatch_rechecks_authority_during_backpressure()
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert_eq!(error.message, REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST);
     match event_rx.try_recv().expect("sentinel should remain queued") {
-        TerminalCommandStreamEvent::Error { error, status } => {
+        TerminalCommandStreamEvent::Error { error, status, .. } => {
             assert_eq!(error, "sentinel");
             assert_eq!(status, StatusCode::IM_A_TEAPOT.as_u16());
         }
@@ -1709,6 +1867,7 @@ async fn terminal_run_route_proxies_valid_remote_multibyte_commands() {
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
                 event_bridge_shutdown: AtomicBool::new(false),
+                event_stream_status: AtomicU8::new(0),
             }),
         );
     let app = app_router(state);

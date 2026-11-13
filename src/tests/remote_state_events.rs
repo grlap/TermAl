@@ -10,6 +10,126 @@ use super::remote::{
 use super::remote_delta_replay::local_replay_test_remote;
 use super::*;
 
+#[test]
+fn terminal_remote_output_limit_keeps_the_mirror_stale_and_requires_connection_replacement() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "bounded-remote".to_owned(),
+        name: "Bounded remote".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.invalid".to_owned()),
+        port: Some(22),
+        user: None,
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote project",
+        "remote-project-1",
+    );
+    let lease = state.remote_registry.connection(&remote).unwrap();
+    let prior = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .into_state_response();
+    state
+        .apply_remote_state_snapshot_for_request(
+            &lease,
+            prior.clone(),
+            RemoteSnapshotApplyMode::GateBySnapshotRevision,
+        )
+        .unwrap();
+    let before = state.full_snapshot();
+    let error = dispatch_remote_event_with_recovery_and_authority(
+        &state,
+        &remote.id,
+        Some((&remote, &lease.connection)),
+        "outputLimit",
+        &[],
+        &mut RemoteEventStreamRecovery::default(),
+    )
+    .unwrap_err();
+    assert!(error.downcast_ref::<RemoteOutputLimitTerminal>().is_some());
+    assert_eq!(
+        lease.connection.event_stream_status.load(Ordering::SeqCst),
+        2
+    );
+    assert_ne!(
+        lease.state_continuity_generation,
+        lease
+            .connection
+            .state_continuity_generation
+            .load(Ordering::SeqCst)
+    );
+    assert!(
+        state
+            .remote_registry
+            .claim_event_bridge(&remote.id)
+            .unwrap()
+            .is_none()
+    );
+    assert!(!state.clear_remote_bridge_continuity_if_current(&remote, &lease.connection));
+    let error = state
+        .apply_remote_state_snapshot_for_request(
+            &lease,
+            prior,
+            RemoteSnapshotApplyMode::GateBySnapshotRevision,
+        )
+        .unwrap_err();
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        error.kind,
+        Some(ApiErrorKind::OutputLimitExceeded {
+            limit: MAX_ENCODED_OUTPUT_BYTES,
+            outcome: ResponseMutationOutcome::Unknown,
+        })
+    );
+    let after = state.full_snapshot();
+    assert_eq!(after.sessions.len(), before.sessions.len());
+    for (a, b) in after.sessions.iter().zip(&before.sessions) {
+        assert_eq!(a.id, b.id);
+        assert_eq!(a.status, b.status);
+        assert_eq!(a.preview, b.preview);
+    }
+    let transport = state.snapshot();
+    assert_eq!(transport.remote_transport_statuses.len(), 1);
+    assert_eq!(
+        transport.remote_transport_statuses[0].code,
+        "output_limit_exceeded"
+    );
+    state
+        .remote_registry
+        .reconcile(std::slice::from_ref(&remote));
+    assert!(Arc::ptr_eq(
+        &lease.connection,
+        &state
+            .remote_registry
+            .connection(&remote)
+            .unwrap()
+            .connection
+    ));
+    let mut disabled = remote.clone();
+    disabled.enabled = false;
+    state.remote_registry.reconcile(&[disabled]);
+    state
+        .remote_registry
+        .reconcile(std::slice::from_ref(&remote));
+    let replacement = state.remote_registry.connection(&remote).unwrap();
+    assert!(!Arc::ptr_eq(&lease.connection, &replacement.connection));
+    assert_eq!(
+        replacement
+            .connection
+            .event_stream_status
+            .load(Ordering::SeqCst),
+        0
+    );
+}
+
 // Pins the current TermAl-to-TermAl wire contract at deserialization time.
 // Remote peers must send both their process identity and the byte boundary
 // needed to apply an incremental text append safely; neither field has a
@@ -499,6 +619,7 @@ fn remote_state_event_dedupes_marked_sse_fallback_resyncs_by_revision() {
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(false),
                 event_bridge_shutdown: AtomicBool::new(false),
+                event_stream_status: AtomicU8::new(0),
             }),
         );
 

@@ -135,6 +135,7 @@ enum TerminalCommandStreamEvent {
     Error {
         error: String,
         status: u16,
+        kind: Option<ApiErrorKind>,
     },
 }
 
@@ -158,4 +159,6 @@ struct TerminalStreamErrorPayload {
     error: String,
     #[serde(default)]
     status: Option<u16>,
+    #[serde(flatten)]
+    details: serde_json::Map<String, Value>,
 }

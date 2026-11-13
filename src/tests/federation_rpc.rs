@@ -14,6 +14,8 @@ async fn host_utilization_authenticated_read_failures_do_not_retire_peer_health(
     let release = Arc::new(tokio::sync::Notify::new());
     let handler_mode = mode.clone();
     let handler_release = release.clone();
+    let reply_status = Arc::new(AtomicU16::new(0));
+    let observed_reply_status = reply_status.clone();
     let router = Router::new()
         .route("/federation/v1/health", get(federation_health))
         .route(
@@ -37,7 +39,16 @@ async fn host_utilization_authenticated_read_failures_do_not_retire_peer_health(
                 }
             }),
         );
-    let router = authenticated_router(satellite, router);
+    let router = authenticated_router(satellite, router).layer(axum::middleware::from_fn(
+        move |request: axum::extract::Request, next: axum::middleware::Next| {
+            let observed = observed_reply_status.clone();
+            async move {
+                let response = next.run(request).await;
+                observed.store(response.status().as_u16(), Ordering::SeqCst);
+                response
+            }
+        },
+    ));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let (stop, mut stopped) = tokio::sync::watch::channel(false);
@@ -62,6 +73,13 @@ async fn host_utilization_authenticated_read_failures_do_not_retire_peer_health(
                 .await
                 .is_err()
         );
+        if failure_mode == 4 {
+            assert_eq!(
+                reply_status.load(Ordering::SeqCst),
+                StatusCode::SERVICE_UNAVAILABLE.as_u16(),
+                "oversized telemetry retains its signed read refusal"
+            );
+        }
         assert!(lease.with_incarnation(|| Ok(())).is_ok());
         rpc.health(&lease)
             .await

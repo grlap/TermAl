@@ -21,6 +21,10 @@ export class ApiRequestError extends Error {
   readonly kind: ApiRequestErrorKind;
   readonly status: number | null;
   readonly restartRequired: boolean;
+  readonly code?: string;
+  readonly limitBytes?: number;
+  readonly mutationOutcome?: string;
+  readonly phase?: string;
 
   constructor(
     kind: ApiRequestErrorKind,
@@ -29,6 +33,10 @@ export class ApiRequestError extends Error {
       status?: number | null;
       restartRequired?: boolean;
       cause?: unknown;
+      code?: string;
+      limitBytes?: number;
+      mutationOutcome?: string;
+      phase?: string;
     },
   ) {
     // TypeScript's current lib target in this repo does not yet model the ES2022
@@ -39,8 +47,16 @@ export class ApiRequestError extends Error {
     this.kind = kind;
     this.status = options?.status ?? null;
     this.restartRequired = options?.restartRequired ?? false;
+    this.code = options?.code;
+    this.limitBytes = options?.limitBytes;
+    this.mutationOutcome = options?.mutationOutcome;
+    this.phase = options?.phase;
     Object.setPrototypeOf(this, new.target.prototype);
   }
+}
+
+export function isOutputLimitError(error: unknown): error is ApiRequestError {
+  return error instanceof ApiRequestError && error.code === "output_limit_exceeded";
 }
 
 export function isBackendUnavailableError(
@@ -261,6 +277,17 @@ export function createResponseError(
     preserveGatewayErrorBody?: boolean;
   },
 ) {
+  try {
+    const details = JSON.parse(raw) as { code?: unknown; limitBytes?: unknown; mutationOutcome?: unknown; phase?: unknown };
+    if (details.code === "output_limit_exceeded") {
+      return new ApiRequestError("request-failed", extractError(raw, status), {
+        status, code: "output_limit_exceeded",
+        limitBytes: typeof details.limitBytes === "number" ? details.limitBytes : undefined,
+        mutationOutcome: typeof details.mutationOutcome === "string" ? details.mutationOutcome : undefined,
+        phase: typeof details.phase === "string" ? details.phase : undefined,
+      });
+    }
+  } catch { /* Ordinary errors retain their existing classification. */ }
   if (status === 502 || status === 503 || status === 504) {
     if (options?.preserveGatewayErrorBody) {
       const gatewayError = extractIntentionalGatewayError(raw);

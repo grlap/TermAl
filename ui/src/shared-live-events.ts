@@ -12,6 +12,7 @@ export const LIVE_EVENT_TYPES = [
   // Sent every 15 s by the server; carries no state. It lets a client tell a
   // quiet stream from one that silently stopped delivering.
   "heartbeat",
+  "outputLimit",
 ] as const;
 
 // A stream that has proved it sends heartbeats and then delivers nothing for
@@ -31,7 +32,7 @@ export type SharedLiveEvent =
   | { type: "event"; eventType: string; data: string };
 
 export type ClientLiveEvent =
-  | { type: "start"; reconnect: boolean }
+  | { type: "start"; reconnect: boolean; retryOutputLimit?: boolean }
   | { type: "pong" | "close" }
   | { type: "probe"; probeId: number };
 
@@ -55,6 +56,7 @@ export function createSharedLiveEventHub(
   // proxy can stay OPEN with nothing arriving; only data tells them apart.
   let lastUpstreamEventAt = Date.now();
   let upstreamSendsHeartbeats = false;
+  let terminalOutputLimit: string | null = null;
 
   function disconnect(port: MessagePort) {
     ports.delete(port);
@@ -85,6 +87,7 @@ export function createSharedLiveEventHub(
   }
 
   function startSource() {
+    terminalOutputLimit = null;
     const previous = source;
     source = null;
     previous?.close();
@@ -119,6 +122,12 @@ export function createSharedLiveEventHub(
         if (source !== next) return;
         lastUpstreamEventAt = Date.now();
         if (eventType === "heartbeat") upstreamSendsHeartbeats = true;
+        if (eventType === "outputLimit") {
+          terminalOutputLimit = (event as MessageEvent<string>).data.slice(0, 2048);
+          source = null;
+          connectingSince = null;
+          next.close();
+        }
         broadcast({
           type: "event",
           eventType,
@@ -168,6 +177,10 @@ export function createSharedLiveEventHub(
         }
         if (event.data?.type !== "start" || peer.active) return;
         peer.active = true;
+        if (terminalOutputLimit !== null && !event.data.retryOutputLimit) {
+          send(port, { type: "event", eventType: "outputLimit", data: terminalOutputLimit });
+          return;
+        }
         if (!source || source.readyState === 2 || (
           event.data.reconnect === true && source.readyState === 0 &&
           connectingSince !== null &&
