@@ -189,7 +189,7 @@ fn measure<T>(label: &str, action: impl FnOnce() -> T) -> (T, usize) {
 }
 
 #[test]
-fn terminal_retention_completed_history_has_linear_preparation_and_no_matches() {
+fn terminal_retention_completed_history_needs_no_preparation_or_matches() {
     let visits = |count| {
         let fixture = populated_history(count);
         let mut inner = fixture.state.inner.lock().unwrap();
@@ -201,6 +201,7 @@ fn terminal_retention_completed_history_has_linear_preparation_and_no_matches() 
         let before = inner.test_run_observations.clone();
         TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.set(0));
         TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.set(0));
+        TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.set(0));
         TEST_TEST_RUN_PROJECTION_WORK.with(|count| count.set((0, 0, 0)));
         TEST_TEST_RUN_ASSOCIATION_VISITS.with(|count| count.set(0));
         fixture
@@ -212,15 +213,16 @@ fn terminal_retention_completed_history_has_linear_preparation_and_no_matches() 
         assert_eq!(inner.test_run_observations, before);
         assert_eq!(
             preparation,
-            (1, count, count),
-            "build one linear projection per pass"
+            (0, 0, 0),
+            "completed history must not rebuild a retention projection"
         );
-        assert_eq!(
-            inspected, count,
-            "completed rows must not be scanned once per entry"
-        );
+        assert_eq!(inspected, 0, "completed rows must not be scanned");
         assert_eq!(
             TEST_TEST_RUN_ASSOCIATION_VISITS.with(|count| count.get()),
+            0
+        );
+        assert_eq!(
+            TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.get()),
             0
         );
         eprintln!(
@@ -242,6 +244,7 @@ fn terminal_retention_completed_history_has_linear_preparation_and_no_matches() 
 
 #[test]
 fn terminal_retention_matches_only_the_unfinished_exact_association() {
+    let mut settlement_work = Vec::new();
     for count in [1, 65] {
         let mut fixture = populated_history(count);
         // Keep actual observation persistence queued, without acknowledging it.
@@ -264,7 +267,47 @@ fn terminal_retention_matches_only_the_unfinished_exact_association() {
             Some(&inner.test_runs.entries[0].disk),
             &before[id]
         ));
+        // Measure the production selection phase before real settlement.
+        // The latter still owns canonical publication and inline compaction.
         TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.set(0));
+        TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.set(0));
+        TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.set(0));
+        TEST_TEST_RUN_PROJECTION_WORK.with(|count| count.set((0, 0, 0)));
+        let selected = test_run_artifact_terminal_retention(&inner);
+        assert_eq!(selected.terminal.len(), 1);
+        assert_eq!(selected.terminal[0].0, id);
+        assert_eq!(selected.terminal[0].1.state, terminal.state);
+        assert_eq!(
+            Some(selected.terminal[0].2.as_str()),
+            terminal
+                .detail_version
+                .as_deref()
+                .and_then(|value| value.strip_prefix("sha256:"))
+        );
+        assert!(selected.native_completions.is_empty());
+        assert_eq!(inner.test_run_observations, before);
+        assert_eq!(
+            TEST_TEST_RUN_PROJECTION_WORK.with(|count| count.get()),
+            (0, 0, 0)
+        );
+        assert_eq!(
+            TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.get()),
+            1
+        );
+        assert_eq!(
+            TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.get()),
+            1
+        );
+        assert_eq!(
+            TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.get()),
+            1
+        );
+        drop(selected);
+
+        TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.set(0));
+        TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.set(0));
+        TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.set(0));
+        TEST_TEST_RUN_PROJECTION_WORK.with(|count| count.set((0, 0, 0)));
         fixture
             .state
             .retain_test_command_artifact_terminals_locked(&mut inner);
@@ -272,6 +315,19 @@ fn terminal_retention_matches_only_the_unfinished_exact_association() {
             TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.get()),
             1
         );
+        assert_eq!(
+            TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.get()),
+            1
+        );
+        assert_eq!(
+            TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.get()),
+            1
+        );
+        let settlement = TEST_TEST_RUN_PROJECTION_WORK.with(|count| count.get());
+        eprintln!(
+            "terminal_retention_profile history={count} selection_builds=0 selection_entries=1 selection_rows=1 selection_matches=1 settlement_projection_work={settlement:?}"
+        );
+        settlement_work.push(settlement);
         let after = &inner.test_run_observations[id];
         assert_eq!(after.execution_id, before[id].execution_id);
         assert_eq!(after.summary.run_id, before[id].summary.run_id);
@@ -310,6 +366,9 @@ fn terminal_retention_matches_only_the_unfinished_exact_association() {
                 .contains_key(id)
         );
         TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.set(0));
+        TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.set(0));
+        TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.set(0));
+        TEST_TEST_RUN_PROJECTION_WORK.with(|count| count.set((0, 0, 0)));
         fixture
             .state
             .retain_test_command_artifact_terminals_locked(&mut inner);
@@ -317,7 +376,38 @@ fn terminal_retention_matches_only_the_unfinished_exact_association() {
             TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.get()),
             0
         );
+        assert_eq!(
+            TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.get()),
+            0
+        );
+        assert_eq!(
+            TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.get()),
+            0
+        );
+        assert_eq!(
+            TEST_TEST_RUN_PROJECTION_WORK.with(|count| count.get()),
+            (0, 0, 0)
+        );
     }
+    let [small, large] = settlement_work.as_slice() else {
+        unreachable!()
+    };
+    assert!(
+        small.0 > 0,
+        "the full settlement path must remain exercised"
+    );
+    assert_eq!(
+        small.0, large.0,
+        "unrelated history must not add settlement projections"
+    );
+    // Existing canonical-summary construction, this fixture's synchronous
+    // invalidation serialization, and inline compaction each project history.
+    // Builds stay constant; their row visits can grow with retained history.
+    // Report that remaining work separately instead of calling settlement zero.
+    eprintln!(
+        "terminal_retention_settlement_history_growth histories=1,65 builds={},{} entry_visits={},{} observation_visits={},{}",
+        small.0, large.0, small.1, large.1, small.2, large.2
+    );
 }
 
 #[test]

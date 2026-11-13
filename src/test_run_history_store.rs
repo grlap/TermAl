@@ -152,10 +152,12 @@ mod test_run_history_store {
         /// each evidence association's store, binding root execution, work,
         /// run and claim ids and producer observation id (and the evidence
         /// list's membership); summary owner session and run id; grant and
-        /// tool identities; artifact presence and artifact run id. For
+        /// tool identities; artifact presence, artifact run id and whether
+        /// summary ended_at is present. For
         /// compacted proofs: summary run id, and each nested observation's
         /// execution id and association store and binding ids. For
-        /// registrations: run id. Only result-filling paths use it (lifecycle
+        /// registrations: run id, native-origin presence and native-completion
+        /// presence. Only result-filling paths use it (lifecycle
         /// read, verification record, checkpoint, confirmed cursor). Test
         /// builds rebuild the row's memberships before and after and panic
         /// on any difference.
@@ -393,6 +395,7 @@ mod test_run_history_store {
         check: BTreeMap<TestRunCheckBucket, BTreeSet<String>>,
         summary_run: BTreeMap<String, BTreeSet<String>>,
         artifact_run: BTreeMap<String, BTreeSet<String>>,
+        unfinished_artifact_run: BTreeMap<String, BTreeSet<String>>,
     }
 
     impl RowIndex<TestRunCommandObservation> for TestRunObservationIndex {
@@ -405,6 +408,9 @@ mod test_run_history_store {
             add_member(&mut self.summary_run, row.summary.run_id.clone(), key);
             if let Some(artifact) = &row.artifact {
                 add_member(&mut self.artifact_run, artifact.run_id.clone(), key);
+                if row.summary.ended_at.is_none() {
+                    add_member(&mut self.unfinished_artifact_run, artifact.run_id.clone(), key);
+                }
             }
         }
 
@@ -417,6 +423,9 @@ mod test_run_history_store {
             remove_member(&mut self.summary_run, &row.summary.run_id, key);
             if let Some(artifact) = &row.artifact {
                 remove_member(&mut self.artifact_run, &artifact.run_id, key);
+                if row.summary.ended_at.is_none() {
+                    remove_member(&mut self.unfinished_artifact_run, &artifact.run_id, key);
+                }
             }
         }
     }
@@ -436,6 +445,12 @@ mod test_run_history_store {
         }
         pub(super) fn artifact_run(&self, run_id: &str) -> impl Iterator<Item = &String> {
             members(&self.artifact_run, run_id)
+        }
+        pub(super) fn unfinished_artifact_runs(&self) -> impl Iterator<Item = &String> {
+            self.unfinished_artifact_run.keys()
+        }
+        pub(super) fn unfinished_artifact_rows(&self, run_id: &str) -> impl Iterator<Item = &String> {
+            members(&self.unfinished_artifact_run, run_id)
         }
     }
 
@@ -485,18 +500,29 @@ mod test_run_history_store {
     #[derive(Clone, Debug, Default, PartialEq, Eq)]
     pub(super) struct TestRunRegistrationIndex {
         run: BTreeMap<String, BTreeSet<String>>,
+        unfinished_native_run: BTreeSet<String>,
     }
 
     impl RowIndex<TestRunRegistration> for TestRunRegistrationIndex {
         fn add(&mut self, key: &str, row: &TestRunRegistration) {
             add_member(&mut self.run, row.run_id.clone(), key);
+            if row.native_origin.is_some() && row.native_completion.is_none() {
+                self.unfinished_native_run.insert(key.to_owned());
+            }
         }
         fn remove(&mut self, key: &str, row: &TestRunRegistration) {
             remove_member(&mut self.run, &row.run_id, key);
+            if row.native_origin.is_some() && row.native_completion.is_none() {
+                self.unfinished_native_run.remove(key);
+            }
         }
     }
 
     impl TestRunRegistrationIndex {
+        // Exact registration lookup uses the map key, even for re-keyed rows.
+        pub(super) fn unfinished_native_runs(&self) -> impl Iterator<Item = &String> {
+            self.unfinished_native_run.iter()
+        }
         pub(super) fn run(&self, run_id: &str) -> impl Iterator<Item = &String> {
             members(&self.run, run_id)
         }

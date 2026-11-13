@@ -9,6 +9,7 @@
 thread_local! {
     static TEST_TEST_RUN_TERMINAL_RETENTION_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static TEST_TEST_RUN_TERMINAL_RETENTION_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn test_run_observation_launch_unconfirmed(row: &mut TestRunCommandObservation) {
@@ -18,71 +19,92 @@ fn test_run_observation_launch_unconfirmed(row: &mut TestRunCommandObservation) 
     row.summary.exit_code = None;
 }
 
+struct TestRunArtifactTerminalRetention {
+    terminal: Vec<(String, TestRunSummary, String)>,
+    native_completions: Vec<(String, TestRunNativeCompletion)>,
+}
+
+// Select while holding the same state guard as application. This phase only
+// reads candidate rows; settlement below retains its existing persistence,
+// publication and compaction owners. The result never escapes that guard.
+fn test_run_artifact_terminal_retention(inner: &StateInner) -> TestRunArtifactTerminalRetention {
+    // The existing row stores maintain these derived buckets at startup
+    // and mutation. Visit only pending associations and native completions,
+    // preserving entry-vector order and each observation map's key order.
+    // Index membership is a candidate filter, never terminal proof.
+    let pending_runs = inner.test_run_observations.index().unfinished_artifact_runs()
+        .chain(inner.test_run_registrations.index().unfinished_native_runs());
+    let positions: std::collections::BTreeSet<usize> = pending_runs
+        .filter_map(|run_id| inner.test_runs.entries.positions.get(run_id))
+        .flatten().copied().collect();
+    let mut terminal = Vec::new();
+    let mut native_completions = Vec::new();
+    for position in positions {
+        #[cfg(test)]
+        TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.set(count.get() + 1));
+        let entry = &inner.test_runs.entries[position];
+        if !entry.disk.is_terminal()
+            || !matches!(
+                entry.summary.state,
+                TestRunState::Passed | TestRunState::Failed
+            )
+        {
+            continue;
+        }
+        if let Some(registration) = test_run_matching_registration(inner, &entry.disk)
+            .filter(|row| row.native_origin.is_some() && row.native_completion.is_none())
+        {
+            let mut candidates = inner.test_run_observations.index()
+                .artifact_run(&entry.summary.run_id)
+                .filter_map(|key| inner.test_run_observations.get(key)).filter_map(|row| {
+                    test_run_native_completion_from_settlement(inner, registration, row, entry)
+                });
+            if let Some(completion) = candidates.next() {
+                // Two provider executions are ambiguous, even when they
+                // repeat the same locator. Never choose the nearby one.
+                if candidates.next().is_none() {
+                    native_completions.push((registration.run_id.clone(), completion));
+                }
+            }
+        }
+        let Some(digest) = entry
+            .summary
+            .detail_version
+            .as_deref()
+            .and_then(|version| version.strip_prefix("sha256:"))
+        else {
+            continue;
+        };
+        for row in inner.test_run_observations.index()
+            .unfinished_artifact_rows(&entry.summary.run_id)
+            .filter_map(|key| inner.test_run_observations.get(key))
+            .filter(|row| {
+                #[cfg(test)]
+                TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.set(count.get() + 1));
+                row.summary.ended_at.is_none()
+            })
+        {
+            #[cfg(test)]
+            TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.set(count.get() + 1));
+            if test_run_observation_matches_run(inner, &entry.summary, Some(&entry.disk), row) {
+                terminal.push((
+                    row.execution_id.clone(),
+                    entry.summary.clone(),
+                    digest.to_owned(),
+                ));
+            }
+        }
+    }
+    TestRunArtifactTerminalRetention { terminal, native_completions }
+}
+
 impl AppState {
     // Retain factual terminal results before artifacts can disappear. Use the
     // same positive association as API/SSE alias suppression, with no I/O or
     // evidence settlement here. A native terminal proof is never rewritten.
     fn retain_test_command_artifact_terminals_locked(&self, inner: &mut StateInner) {
-        // Reuse the fresh per-cut projection's candidate index and BTreeMap
-        // row order. Its linear preparation still sees completed history,
-        // but only unfinished same-run candidates reach exact matching.
-        let projection = TestRunProjection::new(inner);
-        let mut terminal = Vec::new();
-        let mut native_completions = Vec::new();
-        for entry in &inner.test_runs.entries {
-            if !entry.disk.is_terminal()
-                || !matches!(
-                    entry.summary.state,
-                    TestRunState::Passed | TestRunState::Failed
-                )
-            {
-                continue;
-            }
-            if let Some(registration) = test_run_matching_registration(inner, &entry.disk)
-                .filter(|row| row.native_origin.is_some() && row.native_completion.is_none())
-            {
-                let mut candidates = projection.observations(&entry.summary.run_id)
-                    .iter().copied().filter_map(|row| {
-                        test_run_native_completion_from_settlement(inner, registration, row, entry)
-                    });
-                if let Some(completion) = candidates.next() {
-                    // Two provider executions are ambiguous, even when they
-                    // repeat the same locator. Never choose the nearby one.
-                    if candidates.next().is_none() {
-                        native_completions.push((registration.run_id.clone(), completion));
-                    }
-                }
-            }
-            let Some(digest) = entry
-                .summary
-                .detail_version
-                .as_deref()
-                .and_then(|version| version.strip_prefix("sha256:"))
-            else {
-                continue;
-            };
-            for row in projection
-                .observations(&entry.summary.run_id)
-                .iter()
-                .copied()
-                .filter(|row| {
-                    #[cfg(test)]
-                    TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.set(count.get() + 1));
-                    row.summary.ended_at.is_none()
-                })
-            {
-                #[cfg(test)]
-                TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.set(count.get() + 1));
-                if test_run_observation_matches_run(inner, &entry.summary, Some(&entry.disk), row) {
-                    terminal.push((
-                        row.execution_id.clone(),
-                        entry.summary.clone(),
-                        digest.to_owned(),
-                    ));
-                }
-            }
-        }
-        drop(projection);
+        let TestRunArtifactTerminalRetention { terminal, native_completions } =
+            test_run_artifact_terminal_retention(inner);
         let native_changed = !native_completions.is_empty();
         for (run_id, completion) in native_completions {
             inner.test_run_registrations.update(&run_id, |row| {

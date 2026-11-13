@@ -85,6 +85,35 @@ fn assert_buckets_equal_full_scan(inner: &StateInner, label: &str) {
             );
         }
     }
+    let expected_pending: std::collections::BTreeSet<_> = observations
+        .values()
+        .filter(|row| row.summary.ended_at.is_none())
+        .filter_map(|row| row.artifact.as_ref().map(|artifact| &artifact.run_id))
+        .collect();
+    assert_eq!(
+        observations
+            .index()
+            .unfinished_artifact_runs()
+            .collect::<Vec<_>>(),
+        expected_pending.into_iter().collect::<Vec<_>>(),
+        "pending artifact runs at {label}"
+    );
+    for row in observations.values() {
+        if let Some(artifact) = &row.artifact {
+            assert_eq!(
+                observations
+                    .index()
+                    .unfinished_artifact_rows(&artifact.run_id)
+                    .collect::<Vec<_>>(),
+                scan(observations, |other| other.summary.ended_at.is_none()
+                    && other
+                        .artifact
+                        .as_ref()
+                        .is_some_and(|other| other.run_id == artifact.run_id)),
+                "pending artifact rows at {label}"
+            );
+        }
+    }
     let compacted = &inner.test_run_compacted;
     for row in compacted.values() {
         for observation in &row.observations {
@@ -126,6 +155,19 @@ fn assert_buckets_equal_full_scan(inner: &StateInner, label: &str) {
             "registration run bucket at {label}"
         );
     }
+    let expected_native: std::collections::BTreeSet<_> = registrations
+        .iter()
+        .filter(|(_, row)| row.native_origin.is_some() && row.native_completion.is_none())
+        .map(|(key, _)| key)
+        .collect();
+    assert_eq!(
+        registrations
+            .index()
+            .unfinished_native_runs()
+            .collect::<Vec<_>>(),
+        expected_native.into_iter().collect::<Vec<_>>(),
+        "pending native runs at {label}"
+    );
     assert_eq!(
         observations.index().summary_run("absent-run").count(),
         0,
@@ -385,6 +427,149 @@ fn history_index_equals_a_full_rebuild_after_every_mutation_kind() {
     inner.test_runs.entries.clear();
     assert_history_indexes_consistent(&inner, "clear");
     assert_eq!(inner.test_run_observations.index(), &Default::default());
+}
+
+/// Closing, reopening, replacing and loading rows must update retention
+/// candidates without a history scan in the retention caller.
+#[test]
+fn terminal_candidates_follow_settlement_reopening_and_load() {
+    use native_test_completion::{Completion, Mode, NativeResult, Origin, Verdict};
+    let fixture = registered_history(2);
+    let mut inner = fixture.state.inner.lock().unwrap();
+    inner
+        .test_run_observations
+        .update("observed-history-0000", |row| {
+            row.summary.ended_at = None;
+        });
+    inner
+        .test_run_registrations
+        .update("test-history-0001", |row| {
+            row.native_origin = Some(TestRunNativeOrigin {
+                causal_request: None,
+                host: FederationHostIdentity {
+                    host_id: Uuid::new_v4().to_string(),
+                    host_generation: 1,
+                },
+                native_session_id: row.owning_session_id.clone(),
+                native_creation_id: Uuid::new_v4().to_string(),
+                project_id: fixture.project_id.clone(),
+                project_scope: None,
+            });
+        });
+    assert_history_indexes_consistent(&inner, "pending");
+    assert_eq!(
+        inner
+            .test_run_observations
+            .index()
+            .unfinished_artifact_runs()
+            .count(),
+        1
+    );
+    assert_eq!(
+        inner
+            .test_run_registrations
+            .index()
+            .unfinished_native_runs()
+            .count(),
+        1
+    );
+    let loaded = PersistedState::from_inner(&inner).into_inner().unwrap();
+    assert_history_indexes_consistent(&loaded, "pending reload");
+    assert_eq!(
+        loaded.test_run_observations.index(),
+        inner.test_run_observations.index()
+    );
+    assert_eq!(
+        loaded.test_run_registrations.index(),
+        inner.test_run_registrations.index()
+    );
+    let pending_observations = inner.test_run_observations.clone();
+    let pending_registrations = inner.test_run_registrations.clone();
+    inner
+        .test_run_observations
+        .update("observed-history-0000", |row| {
+            row.summary.ended_at = Some("2026-11-13T00:00:00Z".to_owned());
+        });
+    inner
+        .test_run_registrations
+        .update("test-history-0001", |row| {
+            let origin = row.native_origin.as_ref().unwrap();
+            row.native_completion = Some(TestRunNativeCompletion {
+                execution_id: "observed-history-0001".to_owned(),
+                completion: Completion {
+                    schema_version: 1,
+                    origin: Origin {
+                        host_id: origin.host.host_id.clone(),
+                        runner_session_id: origin.native_session_id.clone(),
+                    },
+                    run_id: row.run_id.clone(),
+                    mode: Mode::Focused,
+                    result: NativeResult {
+                        verdict: Verdict::Pass,
+                        terminal: true,
+                        exit: Some(0),
+                        reason: "passed".to_owned(),
+                    },
+                    input: Default::default(),
+                    finished_at: Some("2026-11-13T00:00:00Z".to_owned()),
+                },
+            });
+        });
+    assert_history_indexes_consistent(&inner, "settled");
+    assert_eq!(
+        inner
+            .test_run_observations
+            .index()
+            .unfinished_artifact_runs()
+            .count(),
+        0
+    );
+    assert_eq!(
+        inner
+            .test_run_registrations
+            .index()
+            .unfinished_native_runs()
+            .count(),
+        0
+    );
+    inner.test_run_observations = pending_observations;
+    inner.test_run_registrations = pending_registrations;
+    assert_history_indexes_consistent(&inner, "rollback to pending");
+    assert_eq!(
+        inner
+            .test_run_observations
+            .index()
+            .unfinished_artifact_runs()
+            .count(),
+        1
+    );
+    assert_eq!(
+        inner
+            .test_run_registrations
+            .index()
+            .unfinished_native_runs()
+            .count(),
+        1
+    );
+    inner.test_run_observations.remove("observed-history-0000");
+    inner.test_run_registrations.remove("test-history-0001");
+    assert_history_indexes_consistent(&inner, "pending removal");
+    assert_eq!(
+        inner
+            .test_run_observations
+            .index()
+            .unfinished_artifact_runs()
+            .count(),
+        0
+    );
+    assert_eq!(
+        inner
+            .test_run_registrations
+            .index()
+            .unfinished_native_runs()
+            .count(),
+        0
+    );
 }
 
 /// A load rebuilds every index from the persisted rows, and replacing a
