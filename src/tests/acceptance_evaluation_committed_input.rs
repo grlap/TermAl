@@ -38,6 +38,9 @@ mod metadata_window;
 #[path = "acceptance_committed_input_unheld.rs"]
 mod unheld;
 
+#[path = "acceptance_evaluation_root_rebind.rs"]
+mod root_rebind;
+
 /// The run every case registers.
 const COMMITTED_RUN_ID: &str = "test-committed-input-admission";
 
@@ -254,6 +257,7 @@ fn try_register_committed_run_with_source_as(
         acceptance_owner_reports(state, parent, named_root, Vec::new(), Vec::new());
     }
     let root = worktree(named_root);
+    let named_generation = state.inner.lock().unwrap().engram_work_source_roots[0].generation;
     let common = test_runs_git_common_dir(&root)
         .and_then(|common| fs::canonicalize(common).ok())
         .expect("the named root's common Git directory resolves");
@@ -305,7 +309,7 @@ fn try_register_committed_run_with_source_as(
             .named_root
             .as_ref()
             .map(|named| (named.workspace_id.as_str(), named.generation)),
-        Some((named_root, 1)),
+        Some((named_root, named_generation)),
         "the run is pinned to the named root"
     );
     Ok(registration)

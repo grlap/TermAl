@@ -4,7 +4,9 @@
 // its result, evaluations of that claim follow the committed flow for that
 // claim, fence and naming. A later plain run or `--input plain` does not undo
 // this. A dirty root is refused until the work is committed and a run passes
-// on that commit. A claim with no such run stays in the legacy flow.
+// on that commit. A claim with no such run stays in the legacy flow, unless
+// an acknowledged check belongs to a different name of that claim's root.
+// A new sighting cannot repair that check; re-naming needs a new check.
 // The request is admitted only
 // when the root is clean at a commit, the newest applicable terminal result
 // passed eligibly on exactly that commit, and Engram acknowledged that run's
@@ -81,6 +83,12 @@ enum AcceptanceCommittedInputDecision {
 /// never read in its place.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum AcceptanceCommittedInputRefusal {
+    /// An acknowledged check belongs to a different name of this claim's root.
+    RootRebound {
+        run_id: String,
+        checked: TestRunNamedRoot,
+        current: TestRunNamedRoot,
+    },
     /// The owner cannot establish the named root as clean at a commit.
     /// Dirty or unavailable input and unavailable ownership all refuse.
     NotClean,
@@ -118,6 +126,7 @@ impl AcceptanceCommittedInputRefusal {
     /// The refusal's stable code, which leads its message.
     fn code(&self) -> &'static str {
         match self {
+            Self::RootRebound { .. } => "registered_check_root_rebound",
             Self::NotClean => "committed_input_not_clean",
             Self::NativeLocalChanges { .. } => "native_input_local_changes",
             Self::NoEligibleRun { .. } => "committed_input_no_eligible_run",
@@ -130,6 +139,16 @@ impl AcceptanceCommittedInputRefusal {
 
     fn into_api_error(self, work_ref: &str) -> ApiError {
         let detail = match &self {
+            Self::RootRebound {
+                run_id,
+                checked,
+                current,
+            } => format!(
+                "registered check {run_id} for `{work_ref}` belongs to root `{}` generation {}; \
+                 the current root is `{}` generation {}. Run a new registered check in the \
+                 current root, then request evaluation again",
+                checked.workspace_id, checked.generation, current.workspace_id, current.generation,
+            ),
             Self::NotClean => format!(
                 "`{work_ref}`'s named source root is not clean at a commit; commit or remove \
                  its changes, run the gate on that commit, and request again"
@@ -720,6 +739,8 @@ impl AppState {
     /// `reader` and `store`, or a held claim is not the naming claim).
     /// An unheld requester scans the retained naming claim/fence instead;
     /// absence from its held list does not waive committed-input admission.
+    /// Before choosing Legacy, an acknowledged check for a different name of
+    /// the same claim's root refuses with both identities and a new-check remedy.
     /// Otherwise the request is in the committed flow: `Admitted` when the
     /// root is clean at HEAD, the newest applicable terminal result passed
     /// eligibly and cleanly on that very commit, and Engram acknowledged its
@@ -772,7 +793,7 @@ impl AppState {
                 )
                 .is_some_and(|entry| claim.is_none_or(|claim| claim.same_claim(entry)))
         };
-        let candidates = {
+        let (candidates, rebound) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if !current(&inner) {
                 return Ok(Decision::Legacy);
@@ -786,7 +807,7 @@ impl AppState {
                 return Ok(Decision::Legacy);
             };
             let indexed = test_run_indexed_ids(&inner.test_runs);
-            let mut candidates = inner
+            let registrations = inner
                 .test_run_registrations
                 .values()
                 .filter(|registration| inner.test_runs.registered.contains(&registration.run_id))
@@ -803,7 +824,50 @@ impl AppState {
                                 })
                         })
                         .filter_map(|row| row.registration.as_ref()),
-                )
+                );
+            // Filtering by the new name must not erase an acknowledged check
+            // and turn it into a legacy request. A current-name run still has
+            // its ordinary admission rules; this guard only closes fallback.
+            let rebound = registrations
+                .clone()
+                .filter(|registration| {
+                    registration.authority_store.as_ref() == Some(store)
+                        && registration.work_binding.as_ref().is_some_and(|binding| {
+                            binding.work_id == work_id && binding.claim_id == entry.claim_id
+                        })
+                        && registration.named_root.as_ref().is_some_and(|named| {
+                            named.workspace_id != entry.root || named.generation != entry.generation
+                        })
+                        && registration
+                            .verification_record
+                            .as_ref()
+                            .is_some_and(|ack| {
+                                matches!(
+                                    ack,
+                                    TestRunVerificationAck::Received { .. }
+                                        | TestRunVerificationAck::Settled { .. }
+                                ) && ack.body_digest().is_some()
+                            })
+                })
+                .max_by(|a, b| {
+                    a.registered_at
+                        .cmp(&b.registered_at)
+                        .then_with(|| b.run_id.cmp(&a.run_id))
+                })
+                .and_then(|registration| {
+                    registration
+                        .named_root
+                        .as_ref()
+                        .map(|checked| Refusal::RootRebound {
+                            run_id: registration.run_id.clone(),
+                            checked: checked.clone(),
+                            current: TestRunNamedRoot {
+                                workspace_id: entry.root.clone(),
+                                generation: entry.generation,
+                            },
+                        })
+                });
+            let mut candidates = registrations
                 .filter(|registration| {
                     acceptance_committed_input_registration_matches_requester(
                         registration,
@@ -823,7 +887,7 @@ impl AppState {
                     .cmp(&a.registered_at)
                     .then_with(|| a.run_id.cmp(&b.run_id))
             });
-            candidates
+            (candidates, rebound)
         };
         // Only a run that started on a clean checkout selects the committed
         // flow; a refused or never-started one leaves the task where it was.
@@ -849,7 +913,7 @@ impl AppState {
             // was shown never to have started; an incomplete scan, or a run
             // whose results show neither, never decides it.
             return if scanned == total && observed.is_empty() {
-                Ok(Decision::Legacy)
+                rebound.map_or(Ok(Decision::Legacy), Err)
             } else {
                 Err(Refusal::ScanIncomplete)
             };

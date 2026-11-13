@@ -376,10 +376,17 @@ fn a_new_naming_generation_does_not_reuse_the_original_evidence() {
         entry.generation += 1;
         entry.claim_fence = recovered.claim_fence;
     };
-    assert_eq!(
+    let rebound = assert_refused_without_a_sighting(
+        &transport,
         decide_task(&state, &parent, &task, deadline()),
-        Ok(AcceptanceCommittedInputDecision::Legacy),
-        "an explicit release and new naming generation needs its own check"
+        "registered_check_root_rebound",
+        "an explicit release and new naming generation needs its own check",
+    );
+    let conflict = rebound.into_api_error("w-task");
+    assert!(conflict.message.contains("generation 1") && conflict.message.contains("generation 2"));
+    assert!(
+        conflict.message.contains("new registered check")
+            && conflict.message.contains("current root")
     );
     assert_eq!(current_registration(&state).named_root, original.named_root);
     assert_eq!(
@@ -412,11 +419,22 @@ fn a_new_naming_generation_does_not_reuse_the_original_evidence() {
                     .push_str("-other");
             }
         }
-        assert_eq!(
-            decide_task(&state, &parent, &task, deadline()),
-            Ok(AcceptanceCommittedInputDecision::Legacy),
-            "{case}"
-        );
+        let decision = decide_task(&state, &parent, &task, deadline());
+        if case == "registration store" {
+            assert_eq!(
+                decision,
+                Ok(AcceptanceCommittedInputDecision::Legacy),
+                "{case}"
+            );
+        } else {
+            let rebound = assert_refused_without_a_sighting(
+                &transport,
+                decision,
+                "registered_check_root_rebound",
+                case,
+            );
+            assert!(rebound.into_api_error("w-task").message.contains("-other"));
+        }
         *state
             .inner
             .lock()
