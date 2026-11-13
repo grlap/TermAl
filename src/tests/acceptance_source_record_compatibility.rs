@@ -2,7 +2,7 @@
 // and notice boundaries as retained Commit records, without changing credit.
 use super::*;
 
-fn owner_run(progress: &str) -> (AppState, String, String, String, TestRunRegistration) {
+pub(super) fn owner_run(progress: &str) -> (AppState, String, String, String, TestRunRegistration) {
     let (state, parent, _store, named_root) = named_root_parent();
     let head = commit_named_root(&named_root);
     let root = worktree(&named_root);

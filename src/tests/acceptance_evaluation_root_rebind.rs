@@ -1,17 +1,31 @@
 // Acceptance requests must not replace a registered check's root identity
-// with a later name, even when the workspace and commit have not changed.
+// with a later name. Historical commit-only evidence cannot prove the narrow
+// complete-source equivalence required to retain a predecessor generation.
 // Owns this admission boundary; naming and registration use the parent
 // fixtures, and no live host or Engram store is accessed.
 use super::*;
 
+#[path = "acceptance_same_path_recovery.rs"]
+mod same_path_recovery;
+
 /// Arrange the completed second naming and publish its canonical proof.
 /// The registration is deliberately untouched: its root is historical fact.
 fn rename_same_workspace(state: &AppState, parent: &str, store: &EngramAuthorityStoreKey) {
+    rename_same_workspace_with_binding(state, parent, store, named_parent_binding());
+}
+
+fn rename_same_workspace_with_binding(
+    state: &AppState,
+    parent: &str,
+    store: &EngramAuthorityStoreKey,
+    binding: EngramControlWorkBinding,
+) {
     let entry = {
         let mut inner = state.inner.lock().unwrap();
         let entry = &mut inner.engram_work_source_roots[0];
         assert_eq!(entry.generation, 1);
         entry.generation = 2;
+        entry.claim_fence = binding.claim_fence;
         entry.named_at = "2026-09-27T00:01:00.000Z".into();
         let entry = entry.clone();
         let index = inner.find_session_index(parent).unwrap();
@@ -20,9 +34,9 @@ fn rename_same_workspace(state: &AppState, parent: &str, store: &EngramAuthority
             generation: 2,
             named_at: entry.named_at,
         });
+        inner.sessions[index].engram.work_binding = Some(binding.clone());
         inner.engram_work_source_roots[0].clone()
     };
-    let binding = named_parent_binding();
     // Supply the new naming's canonical read explicitly. Registration can
     // retain other historical reads, including an unbound proof at index 0.
     let proof: EngramNamedRootReadResponse = serde_json::from_value(json!({

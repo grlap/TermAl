@@ -6,7 +6,9 @@
 // this. A dirty root is refused until the work is committed and a run passes
 // on that commit. A claim with no such run stays in the legacy flow, unless
 // an acknowledged check belongs to a different name of that claim's root.
-// A new sighting cannot repair that check; re-naming needs a new check.
+// A new sighting cannot repair that check. A held recovery on the same path
+// can retain an older generation's evidence only with the same run identity
+// and the complete unchanged source from its acknowledged original body.
 // The request is admitted only
 // when the root is clean at a commit, the newest applicable terminal result
 // passed eligibly on exactly that commit, and Engram acknowledged that run's
@@ -63,8 +65,9 @@ thread_local! {
 struct AcceptanceCommittedInputAdmission {
     run_id: String,
     commit: String,
-    // Native evidence retains its complete identity through the request's
-    // independent owner capture; commit equality alone never admits it.
+    // Native and predecessor-generation evidence retain their complete identity
+    // through the request's independent owner capture; commit equality alone
+    // never admits either route.
     native_source: Option<EngramSourceId>,
 }
 
@@ -451,7 +454,7 @@ fn acceptance_committed_input_result_start(
 fn acceptance_committed_input_record_acknowledged(
     registration: &TestRunRegistration,
     commit: &str,
-) -> Result<(), AcceptanceCommittedInputRefusal> {
+) -> Result<EngramVerificationRecordBody, AcceptanceCommittedInputRefusal> {
     let run_id = registration.run_id.as_str();
     let run_dir = FsPath::new(&registration.run_directory);
     let unacknowledged = |state: String| AcceptanceCommittedInputRefusal::RecordNotAcknowledged {
@@ -537,7 +540,8 @@ fn acceptance_committed_input_record_acknowledged(
         unacknowledged(format!(
             "acknowledged with a receipt that does not answer it: {error}"
         ))
-    })
+    })?;
+    Ok(frozen.body)
 }
 
 /// The evaluated work's claim as the requester's live held-claims read
@@ -566,27 +570,6 @@ impl AcceptanceCurrentClaim {
     fn same_claim(&self, entry: &EngramWorkSourceRoot) -> bool {
         entry.claim_id == self.claim_id
     }
-}
-
-/// Whether `registration` is a durably registered committed-input run of the
-/// work `work_id` under the claim that named `entry`, pinned to that root and
-/// generation, in `store`. Its original naming fence stays pinned; recovery
-/// may advance the live fence only when the live binding proves the same
-/// work run and root execution. Evidence is never relabelled to that fence.
-fn acceptance_committed_input_registration_matches(
-    registration: &TestRunRegistration,
-    store: &EngramAuthorityStoreKey,
-    work_id: &str,
-    entry: &EngramWorkSourceRoot,
-    current: &AcceptanceCurrentClaim,
-) -> bool {
-    acceptance_committed_input_registration_matches_requester(
-        registration,
-        store,
-        work_id,
-        entry,
-        Some(current),
-    )
 }
 
 // An unheld requester can inspect retained evidence without claiming its
@@ -618,6 +601,36 @@ fn acceptance_committed_input_registration_matches_requester(
                         },
                     )
                 })
+        })
+}
+
+/// A held recovery may inspect the original registration at a strictly older
+/// generation of the exact same workspace. This only selects candidates:
+/// their terminal result, acknowledged body and complete source are checked
+/// off-lock before admission. No receipt or binding is relabelled.
+fn acceptance_committed_input_predecessor_matches(
+    registration: &TestRunRegistration,
+    store: &EngramAuthorityStoreKey,
+    work_id: &str,
+    entry: &EngramWorkSourceRoot,
+    current: Option<&AcceptanceCurrentClaim>,
+) -> bool {
+    let Some(current) = current else { return false };
+    let Some(live) = current.binding.as_ref() else { return false };
+    registration.authority_store.as_ref() == Some(store)
+        && current.same_claim(entry)
+        && live.work_id == work_id
+        && live.claim_fence == current.claim_fence
+        && live.claim_fence >= entry.claim_fence
+        && registration.named_root.as_ref().is_some_and(|named| {
+            named.workspace_id == entry.root && named.generation < entry.generation
+        })
+        && registration.work_binding.as_ref().is_some_and(|binding| {
+            binding.work_id == work_id
+                && binding.claim_id == entry.claim_id
+                && binding.claim_fence <= entry.claim_fence
+                && engram_same_recovery_run(live, binding)
+                && live.work_revision >= binding.work_revision
         })
 }
 
@@ -741,6 +754,9 @@ impl AppState {
     /// absence from its held list does not waive committed-input admission.
     /// Before choosing Legacy, an acknowledged check for a different name of
     /// the same claim's root refuses with both identities and a new-check remedy.
+    /// A held same-path predecessor may instead join the candidate scan, but
+    /// only its verified complete SourceId can prove unchanged input; a
+    /// commit-only historical body never establishes that equivalence.
     /// Otherwise the request is in the committed flow: `Admitted` when the
     /// root is clean at HEAD, the newest applicable terminal result passed
     /// eligibly and cleanly on that very commit, and Engram acknowledged its
@@ -875,6 +891,8 @@ impl AppState {
                         work_id,
                         entry,
                         claim,
+                    ) || acceptance_committed_input_predecessor_matches(
+                        registration, store, work_id, entry, claim,
                     )
                 })
                 .cloned()
@@ -934,6 +952,7 @@ impl AppState {
         };
         let commit = source.commit.clone();
         let mut admitting: Option<TestRunRegistration> = None;
+        let mut predecessor_source = None;
         #[cfg(test)]
         TEST_ACCEPTANCE_COMMITTED_INPUT_BEFORE_SELECTION.with(|slot| {
             if let Some(step) = slot.borrow_mut().take() {
@@ -953,7 +972,24 @@ impl AppState {
             if !admits {
                 return Err(Refusal::NoEligibleRun { commit });
             }
-            acceptance_committed_input_record_acknowledged(&registration, &commit)?;
+            let body = acceptance_committed_input_record_acknowledged(&registration, &commit)?;
+            if let Some(checked) = registration.named_root.as_ref()
+                .filter(|checked| checked.generation < root.generation)
+            {
+                // The verified original body, not mutable result projections
+                // or a commit-only historical receipt, proves equivalence.
+                match body.input {
+                    EngramVerificationRecordInput::SourceId { source_id } if source_id == source => {
+                        predecessor_source = Some(source_id);
+                    }
+                    _ => return Err(Refusal::RootRebound {
+                        run_id: registration.run_id.clone(), checked: checked.clone(),
+                        current: TestRunNamedRoot {
+                            workspace_id: root.root.clone(), generation: root.generation,
+                        },
+                    }),
+                }
+            }
             admitting = Some(registration);
             break;
         }
@@ -975,7 +1011,8 @@ impl AppState {
         let native_source = admitting
             .declared_native
             .as_ref()
-            .map(|start| start.source.source_id.clone());
+            .map(|start| start.source.source_id.clone())
+            .or(predecessor_source);
         if self
             .acceptance_judged_clean_source(parent_session_id, FsPath::new(&root.root), deadline)
             .is_none_or(|current| {
