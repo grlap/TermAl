@@ -1648,6 +1648,17 @@ impl AppState {
             connection.ensure_state_continuity_generation(generation)?;
         }
         if !apply_remote_state_if_newer_locked(&mut inner, remote_id, &remote_state, None, mode) {
+            if expected_connection.is_some_and(|connection|
+                connection.event_stream_status.compare_exchange(REMOTE_STREAM_PENDING, REMOTE_STREAM_LIVE, Ordering::SeqCst, Ordering::SeqCst).is_ok()) {
+                // A valid authoritative full state can confirm the connection
+                // even when its mirror already holds the same revision.
+                if let Err(err) = self.commit_remote_localization_locked(&mut inner) {
+                    if let Some(connection) = expected_connection {
+                        let _ = connection.event_stream_status.compare_exchange(REMOTE_STREAM_LIVE, REMOTE_STREAM_PENDING, Ordering::SeqCst, Ordering::SeqCst);
+                    }
+                    return Err(ApiError::internal(format!("failed to persist remote state: {err:#}")));
+                }
+            }
             self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
                 .map_err(|err| {
                     ApiError::internal(format!(
@@ -1657,7 +1668,12 @@ impl AppState {
             return Ok(());
         }
         note_remote_applied_state_snapshot_revision(&mut inner, remote_id, &remote_state);
+        let marked_live = expected_connection.is_some_and(|connection|
+            connection.event_stream_status.compare_exchange(REMOTE_STREAM_PENDING, REMOTE_STREAM_LIVE, Ordering::SeqCst, Ordering::SeqCst).is_ok());
         if let Err(err) = self.commit_remote_localization_locked(&mut inner) {
+            if marked_live && let Some(connection) = expected_connection {
+                let _ = connection.event_stream_status.compare_exchange(REMOTE_STREAM_LIVE, REMOTE_STREAM_PENDING, Ordering::SeqCst, Ordering::SeqCst);
+            }
             return Err(ApiError::internal(format!(
                 "failed to persist remote state: {err:#}"
             )));

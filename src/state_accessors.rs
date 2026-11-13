@@ -1233,6 +1233,7 @@ impl AppState {
                 SessionTestRunActivitySnapshot::captured(projection.clone(), &session.id);
         }
         StateResponse {
+            remote_transport_statuses: self.remote_registry.transport_statuses(),
             revision: inner.revision,
             server_instance_id: self.server_instance_id.clone(),
             codex: inner.codex.clone(),

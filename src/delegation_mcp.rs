@@ -1017,7 +1017,16 @@ impl TermalDelegationMcpBridge {
                     err.downcast_ref::<TermalDurabilityPendingError>().unwrap(),
                 )
             }
-            Err(err) => mcp_json_rpc_tool_error(id_for_response, err.to_string()),
+            Err(err) => {
+                if let Some(failure) = err.downcast_ref::<TermalDelegationApiError>().and_then(|error| error.output_limit) {
+                    let envelope = failure.envelope();
+                    let mut result = mcp_tool_text_result(&envelope, true);
+                    result["structuredContent"] = envelope;
+                    mcp_json_rpc_result(id_for_response, result)
+                } else {
+                    mcp_json_rpc_tool_error(id_for_response, err.to_string())
+                }
+            }
         }))
     }
 
@@ -2508,6 +2517,7 @@ impl std::error::Error for TermalDelegationTransportError {
 struct TermalDelegationApiError {
     status: StatusCode,
     message: String,
+    output_limit: Option<OutputLimitResponse>,
 }
 
 impl TermalDelegationApiError {

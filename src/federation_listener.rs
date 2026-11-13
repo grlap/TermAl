@@ -42,6 +42,7 @@ fn federation_router(
             federation_authenticate,
         ))
         .with_state(state)
+        .layer(axum::middleware::from_fn(output_limit_http_guard))
         .layer(axum::middleware::from_fn(output_size_http_observer))
 }
 

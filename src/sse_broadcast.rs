@@ -782,8 +782,17 @@ impl AppState {
             changes,
             summary,
         };
-        if let Ok(payload) = serde_json::to_string(&event) {
-            let _ = self.file_events.send(payload);
+        match encode_sse_json("workspaceFilesChanged", &event) {
+            Ok(payload) => { let _ = self.file_events.send(payload); }
+            Err(error) => {
+                observe_output_limit("sse_workspace", &error, Some(event.revision));
+                // Exact paths were lost. Preserve the existing covering
+                // invalidation instead of pretending the workspace is quiet.
+                match encode_sse_json("workspaceFilesChanged", &workspace_files_covering_invalidation(event.revision)) {
+                    Ok(payload) => { let _ = self.file_events.send(payload); }
+                    Err(_) => { let _ = self.state_broadcast_senders.stream_events.send(SseStreamEvent::Lagged); }
+                }
+            }
         }
     }
 
@@ -834,16 +843,6 @@ impl AppState {
             }
         }
 
-        match serde_json::to_string(&snapshot) {
-            Ok(payload) => {
-                self.state_broadcast_senders.send_state(payload);
-            }
-            Err(err) => {
-                eprintln!(
-                    "warning: failed to serialize SSE state snapshot at revision {}: {err}",
-                    snapshot.revision,
-                );
-            }
-        }
+        forward_state_broadcast_work(StateBroadcastWork::Snapshot(snapshot), &self.state_broadcast_senders);
     }
 }

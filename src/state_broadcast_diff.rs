@@ -119,6 +119,7 @@ struct StateDiffPayload<'a> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StateDiffHeader<'a> {
+    remote_transport_statuses: &'a [RemoteTransportStatus],
     codex: &'a CodexState,
     agent_readiness: &'a [AgentReadiness],
     preferences: &'a AppPreferences,
@@ -207,6 +208,7 @@ fn state_diff_payload<'a>(
     // Exhaustive on purpose: a new `StateResponse` field must decide whether
     // it is a header slice, a keyed collection, or carried elsewhere.
     let StateResponse {
+        remote_transport_statuses,
         revision,
         server_instance_id,
         codex,
@@ -255,6 +257,7 @@ fn state_diff_payload<'a>(
         revision: *revision,
         server_instance_id,
         header: StateDiffHeader {
+            remote_transport_statuses,
             codex,
             agent_readiness,
             preferences,
@@ -305,17 +308,17 @@ fn serialize_full_state_cut(snapshot: ImmutableStateSnapshot, marked: bool) -> O
     let revision = snapshot.header.revision;
     let state = snapshot.materialize();
     let payload = if marked {
-        serde_json::to_string(&MarkedStateResponse {
+        encode_sse_json("state", &MarkedStateResponse {
             state: &state,
             state_diff_base: true,
         })
     } else {
-        serde_json::to_string(&state)
+        encode_sse_json("state", &state)
     };
     match payload {
         Ok(payload) => Some(payload),
         Err(err) => {
-            eprintln!("warning: failed to serialize SSE state snapshot at revision {revision}: {err}");
+            observe_output_limit("sse_full_cut", &err, Some(revision));
             None
         }
     }
@@ -433,13 +436,17 @@ impl StateDiffProducer {
             StateBroadcastWork::ImmutableSnapshot(snapshot) => self.forward_cut(snapshot, senders),
             StateBroadcastWork::Delta(event) => {
                 self.touched.record(&event);
-                forward_state_broadcast_work(StateBroadcastWork::Delta(event), senders);
+                if !forward_state_broadcast_work(StateBroadcastWork::Delta(event), senders) {
+                    self.reset(StateDiffRebase::Failure);
+                }
             }
             // A pre-built snapshot goes to every connection unmarked and
             // leaves no comparable base; diffs restart from the next cut.
             work @ StateBroadcastWork::Snapshot(_) => {
                 self.reset(StateDiffRebase::NoBase);
-                forward_state_broadcast_work(work, senders);
+                if !forward_state_broadcast_work(work, senders) {
+                    self.reset(StateDiffRebase::Failure);
+                }
             }
             // A loss means clients recover from a full state; the base and
             // touched keys are discarded before the marker goes out.
@@ -468,7 +475,8 @@ impl StateDiffProducer {
         let next_base = EmittedStateCut::capture(&snapshot);
         let request_generation = snapshot.request_generation;
         let Some(payload) = serialize_full_state_cut(snapshot, true) else {
-            self.rebase = StateDiffRebase::Failure;
+            self.reset(StateDiffRebase::Failure);
+            let _ = senders.stream_events.send(SseStreamEvent::Lagged);
             return;
         };
         if senders.send_state(payload) {
@@ -488,7 +496,10 @@ impl StateDiffProducer {
         snapshot: ImmutableStateSnapshot,
         senders: &StateBroadcastSenders,
     ) -> Result<(), StateDiffRebase> {
-        let payload = serialize_full_state_cut(snapshot, false).ok_or(StateDiffRebase::Failure)?;
+        let payload = serialize_full_state_cut(snapshot, false).ok_or_else(|| {
+            let _ = senders.stream_events.send(SseStreamEvent::Lagged);
+            StateDiffRebase::Failure
+        })?;
         if !senders.send_legacy_state(payload) {
             return Err(StateDiffRebase::NoReceivers);
         }
@@ -543,19 +554,19 @@ impl StateDiffProducer {
             if senders.legacy_state_demand() {
                 // A failed legacy pair leaves the diff base intact: diff
                 // clients never relied on it.
-                let _ = Self::send_legacy_pair(snapshot, senders);
+                if Self::send_legacy_pair(snapshot, senders) == Err(StateDiffRebase::Failure) {
+                    self.reset(StateDiffRebase::Failure);
+                }
             }
             return;
         }
         // Ends the payload's borrow of `snapshot` before a failure needs it.
-        let diff = serde_json::to_string(&state_diff_payload(&base, &snapshot, &touched));
+        let diff = encode_sse_json("stateDiff", &state_diff_payload(&base, &snapshot, &touched));
         let diff = match diff {
             Ok(diff) => diff,
             Err(err) => {
-                eprintln!(
-                    "warning: failed to serialize SSE state diff at revision {}: {err}",
-                    snapshot.header.revision
-                );
+                observe_output_limit("sse_state_diff", &err, Some(snapshot.header.revision));
+                let _ = senders.stream_events.send(SseStreamEvent::Lagged);
                 // No base: the next cut goes out marked, counted as a
                 // failure. Legacy connections still get this cut in full.
                 self.rebase = StateDiffRebase::Failure;

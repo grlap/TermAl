@@ -186,6 +186,7 @@ export type UseAppLiveStatePreferenceSetters = {
 };
 
 export type UseAppLiveStateParams = {
+  onRemoteTransportStatuses?: (statuses: NonNullable<StateResponse["remoteTransportStatuses"]>) => void;
   sessionAuthority: TranscriptRepairAuthority;
   adoptionRefs: UseAppLiveStateAdoptionRefs;
   stateSetters: UseAppLiveStateStateSetters;

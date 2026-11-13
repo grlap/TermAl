@@ -748,11 +748,12 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 /// serializes after release, all inside `spawn_blocking`. The async worker
 /// hands the resulting bytes to hyper without doing that synchronous work.
 async fn get_state(State(state): State<AppState>) -> Result<Response, ApiError> {
+    let output_budget = output_budget_bytes();
     let (body, revision) = run_blocking_api(move || {
         let snapshot = state.summary_snapshot();
-        serde_json::to_vec(&snapshot)
+        encode_json_bounded(&snapshot, output_budget)
             .map(|body| (body, snapshot.revision))
-            .map_err(|err| ApiError::internal(format!("failed to serialize state: {err}")))
+            .map_err(|err| output_encoding_api_error_at(err, "state", Some(snapshot.revision), None))
     })
     .await?;
     Ok((
@@ -831,6 +832,7 @@ async fn get_session(
         }
     }
 
+    let output_budget = output_budget_bytes();
     let (body, revision) = run_blocking_api(move || {
         let mut response = state.get_session_tail(
             &session_id,
@@ -844,9 +846,9 @@ async fn get_session(
                 })
             });
         }
-        serde_json::to_vec(&response)
+        encode_json_bounded(&response, output_budget)
             .map(|body| (body, response.revision))
-            .map_err(|err| ApiError::internal(format!("failed to serialize session: {err}")))
+            .map_err(|err| output_encoding_api_error_at(err, "session_tail", Some(response.revision), Some(&session_id)))
     })
     .await?;
     Ok((
@@ -903,6 +905,7 @@ async fn get_session_history(
             "session history from must be `start` when provided",
         ));
     }
+    let output_budget = output_budget_bytes();
     let (body, revision) = run_blocking_api(move || {
         let response = state.get_session_history(
             &session_id,
@@ -913,11 +916,9 @@ async fn get_session_history(
             query.from.as_deref() == Some("start"),
             query.limit,
         )?;
-        serde_json::to_vec(&response)
+        encode_json_bounded(&response, output_budget)
             .map(|body| (body, response.revision))
-            .map_err(|err| {
-                ApiError::internal(format!("failed to serialize session history page: {err}"))
-            })
+            .map_err(|err| output_encoding_api_error_at(err, "session_history", Some(response.revision), Some(&session_id)))
     })
     .await?;
     Ok((
@@ -1857,7 +1858,7 @@ async fn send_message(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
     Json(route_request): Json<SendMessageRouteRequest>,
-) -> Result<(StatusCode, Json<SendMessageRouteResponse>), ApiError> {
+) -> Result<Response, ApiError> {
     let snapshot = run_blocking_api({
         let state = state.clone();
         let session_id = session_id.clone();
@@ -1904,7 +1905,8 @@ async fn send_message(
     })
     .await?;
 
-    Ok((StatusCode::ACCEPTED, Json(snapshot)))
+    Ok((StatusCode::ACCEPTED, json_output_response(&snapshot, output_budget_bytes(),
+        ResponseMutationOutcome::Accepted)).into_response())
 }
 
 /// Cancels queued prompt.

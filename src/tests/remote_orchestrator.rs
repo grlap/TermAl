@@ -160,6 +160,7 @@ fn create_orchestrator_instance_proxies_remote_projects_and_localizes_response()
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
                 event_bridge_shutdown: AtomicBool::new(false),
+                event_stream_status: AtomicU8::new(0),
             }),
         );
 
@@ -352,6 +353,7 @@ fn create_remote_orchestrator_proxy_localizes_launch_and_notes_revision() {
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
                 event_bridge_shutdown: AtomicBool::new(false),
+                event_stream_status: AtomicU8::new(0),
             }),
         );
 
@@ -521,6 +523,7 @@ fn create_remote_orchestrator_proxy_rolls_back_on_localization_failure() {
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
                 event_bridge_shutdown: AtomicBool::new(false),
+                event_stream_status: AtomicU8::new(0),
             }),
         );
 
@@ -704,6 +707,7 @@ fn create_orchestrator_instance_materializes_stale_remote_launch_response() {
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
                 event_bridge_shutdown: AtomicBool::new(false),
+                event_stream_status: AtomicU8::new(0),
             }),
         );
     {
@@ -953,6 +957,7 @@ fn remote_orchestrator_lifecycle_actions_proxy_to_remote_backend_and_resync_loca
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(false),
                 event_bridge_shutdown: AtomicBool::new(false),
+                event_stream_status: AtomicU8::new(0),
             }),
         );
 

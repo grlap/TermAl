@@ -351,13 +351,15 @@ export default function App() {
     useState<string | null>(null);
   const initialBackendConnectionState: BackendConnectionState =
     readNavigatorOnline() ? "connecting" : "offline";
+  const [remoteTransportStatuses, setRemoteTransportStatuses] = useState<NonNullable<StateResponse["remoteTransportStatuses"]>>([]);
   const [backendConnectionState, setBackendConnectionStateRaw] =
     useState<BackendConnectionState>(initialBackendConnectionState);
   const backendConnectionStateRef = useRef<BackendConnectionState>(
     initialBackendConnectionState,
   );
   const setBackendConnectionState = useCallback(
-    (next: BackendConnectionState) => {
+    (next: BackendConnectionState, explicitRetry = false) => {
+      if (backendConnectionStateRef.current === "output-limited" && next !== "output-limited" && !explicitRetry) return;
       if (backendConnectionStateRef.current === next) {
         return;
       }
@@ -818,6 +820,7 @@ export default function App() {
     clearRecoveredBackendRequestError();
     setBackendConnectionState(
       latestStateRevisionRef.current === null ? "connecting" : "reconnecting",
+      true,
     );
     requestBackendReconnectRef.current();
   }
@@ -921,6 +924,7 @@ export default function App() {
     workspaceFilesChangedEventFlushTimeoutRef,
     resetWorkspaceFilesChangedEventGate,
   } = useAppLiveState({
+    onRemoteTransportStatuses: setRemoteTransportStatuses,
     sessionAuthority,
     adoptionRefs: {
       isMountedRef,
@@ -1530,6 +1534,7 @@ export default function App() {
       // Keep reconnect decisions in sync with the same ref-backed state path
       // that all backend connection transitions use.
       const currentConnectionState = backendConnectionStateRef.current;
+      if (currentConnectionState === "output-limited") return;
       const shouldRequestReconnect = currentConnectionState !== "connected";
       if (shouldRequestReconnect) {
         setBackendConnectionState(
@@ -1546,6 +1551,7 @@ export default function App() {
     }
 
     function handleBrowserOffline() {
+      if (backendConnectionStateRef.current === "output-limited") return;
       setBackendConnectionState("offline");
       setBackendConnectionIssueDetail(null);
       clearRecoveredBackendRequestError();
@@ -2130,7 +2136,7 @@ export default function App() {
         issueDetail={controlPanelInlineIssueDetail}
         onRetry={
           backendConnectionState === "connecting" ||
-          backendConnectionState === "reconnecting"
+          backendConnectionState === "reconnecting" || backendConnectionState === "output-limited"
             ? handleRetryBackendConnection
             : undefined
         }
@@ -2152,6 +2158,11 @@ export default function App() {
       <div className="background-orbit background-orbit-right" />
 
       <main className="workspace-shell">
+        {remoteTransportStatuses.filter(status => status.code === "output_limit_exceeded").map(status => (
+          <article className="thread-notice workspace-notice" role="status" key={status.remoteId}>
+            {remoteConfigs.find(remote => remote.id === status.remoteId)?.name ?? status.remoteId}: live updates stopped because the output exceeded its limit. Displayed data may be stale. Disable and re-enable this remote in Settings to retry.
+          </article>
+        ))}
         {workspaceLayoutStorageError ? (
           <article className="thread-notice workspace-notice" role="alert">
             <div className="card-label">Workspace save paused</div>

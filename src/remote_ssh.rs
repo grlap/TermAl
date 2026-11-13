@@ -1001,6 +1001,12 @@ fn decode_remote_json<T: DeserializeOwned>(response: BlockingHttpResponse) -> Re
                 "remote error response too large".to_owned(),
             ));
         }
+        if let Ok(value) = serde_json::from_slice::<Value>(&raw)
+            && let Some(failure) = output_limit_details(&value)
+        {
+            return Err(ApiError::internal("The remote response exceeded the output limit.")
+                .with_kind(ApiErrorKind::OutputLimitExceeded { limit: failure.limit, outcome: failure.outcome }));
+        }
         if let Ok(error) = serde_json::from_slice::<ErrorResponse>(&raw) {
             let message = sanitize_remote_error_body(&error.error).unwrap_or_else(|| {
                 format!("remote request failed with status {}", status.as_u16())

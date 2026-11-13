@@ -1635,6 +1635,7 @@ async fn mailbox_relay_corrupted_local_locator_does_not_change_the_original_mail
         let error: anyhow::Error = TermalDelegationApiError {
             status: error.status,
             message: error.message,
+            output_limit: None,
         }
         .into();
         assert!(!termal_delegation_outcome_is_unknown(&error));

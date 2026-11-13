@@ -159,7 +159,7 @@ fn validate_file_base_hash(resolved_path: &FsPath, base_hash: &str) -> Result<()
 async fn write_file(
     State(state): State<AppState>,
     Json(request): Json<WriteFileRequest>,
-) -> Result<Json<FileResponse>, ApiError> {
+) -> Result<Response, ApiError> {
     let response = run_blocking_api(move || {
         state.ensure_read_only_delegation_allows_session_write_action(
             request.session_id.as_deref(),
@@ -178,7 +178,7 @@ async fn write_file(
                     "baseHash": request.base_hash.clone(),
                     "overwrite": request.overwrite,
                 }),
-            );
+            ).map(|response| (response, ResponseMutationOutcome::Unknown));
         }
 
         state.ensure_read_only_delegation_allows_write_action(
@@ -244,17 +244,17 @@ async fn write_file(
         })?;
         let metadata = fs::metadata(&resolved_path).ok();
 
-        Ok(FileResponse {
+        Ok((FileResponse {
             path: resolved_path.to_string_lossy().into_owned(),
             content_hash: Some(content_hash),
             mtime_ms: metadata.as_ref().and_then(file_metadata_mtime_ms),
             size_bytes: metadata.map(|metadata| metadata.len()),
             content: request.content,
             language: infer_language_from_path(&resolved_path).map(str::to_owned),
-        })
+        }, ResponseMutationOutcome::Committed))
     })
     .await?;
-    Ok(Json(response))
+    Ok(json_output_response(&response.0, output_budget_bytes(), response.1))
 }
 
 /// Reads directory.

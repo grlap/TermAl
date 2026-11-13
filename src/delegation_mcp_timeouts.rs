@@ -356,6 +356,7 @@ impl TermalDelegationMcpBridge {
         {
             return Err(pending.into());
         }
+        let output_limit = parsed.as_ref().and_then(output_limit_details);
         let message = parsed
             .and_then(|value| {
                 value
@@ -364,6 +365,6 @@ impl TermalDelegationMcpBridge {
                     .map(str::to_owned)
             })
             .unwrap_or(text);
-        Err(TermalDelegationApiError { status, message }.into())
+        Err(TermalDelegationApiError { status, message, output_limit }.into())
     }
 }

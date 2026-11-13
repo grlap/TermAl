@@ -339,6 +339,7 @@ async fn send_terminal_stream_result(
         Err(err) => TerminalCommandStreamEvent::Error {
             error: err.message,
             status: err.status.as_u16(),
+            kind: err.kind,
         },
     };
     let _ = event_tx.send(event).await;
@@ -347,31 +348,56 @@ async fn send_terminal_stream_result(
 fn terminal_command_sse_event(event: TerminalCommandStreamEvent) -> Event {
     match event {
         TerminalCommandStreamEvent::Output { stream, text } => {
-            match serde_json::to_string(&TerminalOutputStreamPayload { stream, text }) {
+            match encode_sse_json("output", &TerminalOutputStreamPayload { stream, text }) {
                 Ok(data) => Event::default().event("output").data(data),
+                Err(OutputEncodingError::Limit { .. }) => terminal_output_limit_error_event(),
                 Err(err) => terminal_error_sse_event(
                     format!("failed to serialize terminal output event: {err}"),
                     StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
                 ),
             }
         }
-        TerminalCommandStreamEvent::Complete(response) => match serde_json::to_string(&response) {
+        TerminalCommandStreamEvent::Complete(response) => match encode_sse_json("complete", &response) {
             Ok(data) => Event::default().event("complete").data(data),
+            Err(OutputEncodingError::Limit { .. }) => terminal_output_limit_error_event(),
             Err(err) => terminal_error_sse_event(
                 format!("failed to serialize terminal command response: {err}"),
                 StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
             ),
         },
-        TerminalCommandStreamEvent::Error { error, status } => {
-            terminal_error_sse_event(error, status)
+        TerminalCommandStreamEvent::Error { error, status, kind } => {
+            terminal_api_error_sse_event(error, status, kind)
         }
     }
 }
 
 fn terminal_error_sse_event(error: String, status: u16) -> Event {
-    Event::default()
-        .event("error")
-        .data(json!({ "error": error, "status": status }).to_string())
+    terminal_api_error_sse_event(error, status, None)
+}
+
+fn terminal_api_error_sse_event(error: String, status: u16, kind: Option<ApiErrorKind>) -> Event {
+    let mut payload = json!({ "error": error, "status": status });
+    if let Some(ApiErrorKind::OutputLimitExceeded { limit, outcome }) = kind {
+        payload["code"] = json!("output_limit_exceeded");
+        payload["phase"] = json!("response_encoding");
+        payload["limitBytes"] = json!(limit);
+        payload["mutationOutcome"] = json!(outcome);
+    }
+    match encode_sse_json("error", &payload) {
+        Ok(payload) => Event::default().event("error").data(payload),
+        Err(_) => terminal_output_limit_error_event(),
+    }
+}
+
+fn terminal_output_limit_error_event() -> Event {
+    // Command-stream failure, not state-stream loss: never replay a command
+    // or enter state-generation recovery to repair its output.
+    let payload = encode_sse_json_with_limit("error", &json!({
+        "error": "Terminal event exceeded the output limit. Do not repeat the command; check its status.",
+        "status": 500, "code": "output_limit_exceeded", "limitBytes": MAX_ENCODED_OUTPUT_BYTES,
+        "phase": "response_encoding", "mutationOutcome": "accepted",
+    }), 2048).expect("fixed terminal error fits");
+    Event::default().event("error").data(payload)
 }
 
 fn validate_terminal_command(command: &str) -> Result<String, ApiError> {

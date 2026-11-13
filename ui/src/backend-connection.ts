@@ -2,7 +2,7 @@
 // the UI is currently talking to the backend.
 //
 // What this file owns:
-//   - `BackendConnectionState` — the four-variant discriminated
+//   - `BackendConnectionState` — the connection-state discriminated
 //     union used by the shell's connection indicator:
 //     `"connecting"` (initial handshake in progress),
 //     `"connected"` (SSE open + last sync succeeded),
@@ -37,6 +37,7 @@ export type BackendConnectionState =
   | "connecting"
   | "connected"
   | "reconnecting"
+  | "output-limited"
   | "offline";
 
 export const BACKEND_UNAVAILABLE_ISSUE_DETAIL =

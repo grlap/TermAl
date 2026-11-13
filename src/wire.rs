@@ -94,6 +94,7 @@
 /// locally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ApiErrorKind {
+    OutputLimitExceeded { limit: usize, outcome: ResponseMutationOutcome },
     FederationMailboxUpgradeRequired,
     FederationMailboxWriterAdmission,
     FederationMailboxDirectoryFence,
@@ -283,6 +284,9 @@ impl ApiError {
 impl IntoResponse for ApiError {
     /// Converts the value into response.
     fn into_response(self) -> Response {
+        if let Some(ApiErrorKind::OutputLimitExceeded { limit, outcome }) = self.kind {
+            return OutputLimitResponse { limit, outcome }.response();
+        }
         if let Some(deadline) = self.durability_deadline
             && let Some(operation) = deadline.operation
         {
@@ -3040,10 +3044,23 @@ struct AgentReadiness {
     command_path: Option<String>,
 }
 
+/// Stale remote-mirror status and its required recovery action.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteTransportStatus {
+    remote_id: String,
+    code: String,
+    stale: bool,
+    detail: String,
+    recovery_action: String,
+}
+
 /// Represents the state response payload.
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StateResponse {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    remote_transport_statuses: Vec<RemoteTransportStatus>,
     revision: u64,
     /// UUID generated at `AppState::new_with_paths` boot; see
     /// `HealthResponse::server_instance_id` for semantics. Carried on

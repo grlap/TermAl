@@ -35,7 +35,7 @@ import type { Session, StateSessionSummary } from "./types";
 /** Every header slice is absolute in every diff, with its `StateResponse` shape. */
 export type StateDiffHeader = Pick<
   StateResponse,
-  "codex" | "agentReadiness" | "preferences" | "projects" | "orchestrators" | "workspaces" | "testRunOverview"
+  "codex" | "agentReadiness" | "preferences" | "projects" | "orchestrators" | "workspaces" | "testRunOverview" | "remoteTransportStatuses"
 > & {
   delegationWaits: DelegationWaitRecord[];
   testRunWaits: TestRunWaitRecord[];

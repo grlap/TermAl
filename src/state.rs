@@ -745,12 +745,13 @@ impl StateBroadcastSenders {
         let _ = self.delta_events.send(observed);
     }
 
-    fn send_delta_event(&self, event: &DeltaEvent) {
-        let payload = match serde_json::to_string(event) {
+    fn send_delta_event(&self, event: &DeltaEvent) -> bool {
+        let payload = match encode_sse_json("delta", event) {
             Ok(payload) => payload,
             Err(error) => {
-                eprintln!("warning: failed to serialize SSE delta at revision {}: {error}", event.revision());
-                return;
+                observe_output_limit("sse_delta", &error, Some(event.revision()));
+                let _ = self.stream_events.send(SseStreamEvent::Lagged);
+                return false;
             }
         };
         // The private lifecycle channel keeps the original canonical event
@@ -768,10 +769,11 @@ impl StateBroadcastSenders {
         if let Some(observed) = observed {
             let _ = self.delta_events.send(observed);
         }
+        true
     }
 }
 
-fn forward_state_broadcast_work(work: StateBroadcastWork, senders: &StateBroadcastSenders) {
+fn forward_state_broadcast_work(work: StateBroadcastWork, senders: &StateBroadcastSenders) -> bool {
     #[cfg(test)]
     TEST_BEFORE_STATE_SERIALIZE.with(|hook| {
         if let Some(hook) = hook.borrow_mut().take() {
@@ -779,27 +781,28 @@ fn forward_state_broadcast_work(work: StateBroadcastWork, senders: &StateBroadca
         }
     });
     match work {
-        StateBroadcastWork::Snapshot(snapshot) => match serde_json::to_string(&snapshot) {
+        StateBroadcastWork::Snapshot(snapshot) => match encode_sse_json("state", &snapshot) {
             Ok(payload) => {
                 senders.send_state(payload);
+                true
             }
             Err(err) => {
-                eprintln!(
-                    "warning: failed to serialize SSE state snapshot at revision {}: {err}",
-                    snapshot.revision,
-                );
+                observe_output_limit("sse_state", &err, Some(snapshot.revision));
+                let _ = senders.stream_events.send(SseStreamEvent::Lagged);
+                false
             }
         },
         StateBroadcastWork::ImmutableSnapshot(snapshot) => {
             forward_state_broadcast_work(
                 StateBroadcastWork::Snapshot(snapshot.materialize()),
                 senders,
-            );
+            )
         }
         StateBroadcastWork::Drain => panic!("drain is handled by the owned broadcaster"),
         StateBroadcastWork::Delta(event) => senders.send_delta_event(&event),
         StateBroadcastWork::Lagged => {
             let _ = senders.stream_events.send(SseStreamEvent::Lagged);
+            true
         }
     }
 }
@@ -875,6 +878,7 @@ mod state_broadcast_mailbox_tests {
 
     fn snapshot(revision: u64) -> StateResponse {
         StateResponse {
+            remote_transport_statuses: Vec::new(),
             revision,
             server_instance_id: "test-instance".to_owned(),
             codex: CodexState::default(),

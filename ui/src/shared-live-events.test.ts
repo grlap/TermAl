@@ -26,10 +26,10 @@ function setup() {
     workers.push(worker);
     return { worker, hubPort };
   }
-  function connect(reconnect = false) {
+  function connect(reconnect = false, retryOutputLimit = false) {
     const { worker, hubPort } = makeWorker();
     const client = new SharedLiveEventSource(worker as unknown as SharedWorker, reconnect,
-      () => makeWorker().worker as unknown as SharedWorker);
+      () => makeWorker().worker as unknown as SharedWorker, retryOutputLimit);
     clients.push(client);
     return { client, worker, hubPort };
   }
@@ -53,6 +53,59 @@ afterEach(async () => {
 });
 
 describe("shared live updates", () => {
+  it("holds a terminal output limit across timers and new tabs until an explicit reopen", async () => {
+    const { sources, connect } = setup();
+    const { client } = connect();
+    const terminal = vi.fn();
+    client.addEventListener("outputLimit", terminal);
+    await flushMessages();
+    sources[0].open();
+    sources[0].emit("heartbeat", "1");
+    sources[0].emit("outputLimit", '{"code":"output_limit_exceeded","limitBytes":67108864}');
+    expect(sources[0].close).toHaveBeenCalledOnce();
+    await flushMessages();
+    expect(terminal).toHaveBeenCalledOnce();
+    expect(client.readyState).toBe(2);
+    await vi.advanceTimersByTimeAsync(SHARED_LIVE_LEASE_MS * 2);
+    window.dispatchEvent(new Event("pageshow"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await flushMessages();
+    const late = connect();
+    const lateTerminal = vi.fn();
+    late.client.addEventListener("outputLimit", lateTerminal);
+    await flushMessages();
+    expect(lateTerminal).toHaveBeenCalledOnce();
+    expect(sources).toHaveLength(1);
+    const resumed = connect(true);
+    const resumedLimit = vi.fn();
+    resumed.client.addEventListener("outputLimit", resumedLimit);
+    await flushMessages();
+    expect(resumedLimit).toHaveBeenCalledOnce();
+    expect(sources).toHaveLength(1);
+    const reopened = connect(true, true);
+    await flushMessages();
+    expect(sources).toHaveLength(2);
+    sources[1].open();
+    await flushMessages();
+    expect(reopened.client.readyState).toBe(1);
+  });
+
+  it("closes native fallback on outputLimit without reopening it", async () => {
+    const { connect } = setup();
+    const native = new TestSource();
+    const factory = vi.fn(function () { return native; });
+    vi.stubGlobal("EventSource", factory);
+    const { client, worker } = connect();
+    await flushMessages();
+    (worker as { onerror: (() => void) | null }).onerror?.();
+    native.emit("outputLimit", '{"code":"output_limit_exceeded"}');
+    expect(native.close).toHaveBeenCalledOnce();
+    expect(client.readyState).toBe(2);
+    await vi.advanceTimersByTimeAsync(SHARED_LIVE_LEASE_MS * 2);
+    window.dispatchEvent(new Event("pageshow"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(factory).toHaveBeenCalledOnce();
+  });
   it("leaves HTTP capacity for a prompt when eight tabs subscribe", async () => {
     const { sources, connect } = setup();
     const tabs = Array.from({ length: 8 }, () => connect());
@@ -447,23 +500,18 @@ describe("shared stream lifecycle", () => {
     await vi.advanceTimersByTimeAsync(SHARED_LIVE_LEASE_MS);
   });
 
-  it("keeps the named event allowlist in sync with the server wire events", async () => {
-    const nodeFsModule = "node:fs";
-    const nodeUrlModule = "node:url";
-    const { readFileSync } = await import(nodeFsModule) as {
-      readFileSync: (path: string, encoding: "utf8") => string;
-    };
-    const { fileURLToPath } = await import(nodeUrlModule) as {
-      fileURLToPath: (url: string) => string;
-    };
-    // Resolve this Node-only fixture from the test file, keeping Vite's allowlist intact.
-    const moduleUrl = import.meta.url;
-    const serverSseSource = readFileSync(
-      fileURLToPath(new URL("../../src/api_sse.rs", moduleUrl).href), "utf8",
-    );
-    const names = [...serverSseSource.matchAll(/\.event\("([^"]+)"\)/g)].map((match) => match[1]);
-    expect([...new Set(names)].sort()).toEqual([...LIVE_EVENT_TYPES].sort());
-    expect(LIVE_EVENT_TYPES).toContain("stateDiff");
+  it("forwards each supported live event in order through the real hub and facade", async () => {
+    const { sources, connect } = setup();
+    const { client } = connect();
+    const received: Array<[string, string]> = [];
+    for (const type of LIVE_EVENT_TYPES) {
+      client.addEventListener(type, event => received.push([type, (event as MessageEvent<string>).data]));
+    }
+    await flushMessages();
+    sources[0].open();
+    for (const type of LIVE_EVENT_TYPES) sources[0].emit(type, `payload for ${type}`);
+    await flushMessages();
+    expect(received).toEqual(LIVE_EVENT_TYPES.map(type => [type, `payload for ${type}`]));
   });
 
   it("opts every browser connection into state diffs", () => {

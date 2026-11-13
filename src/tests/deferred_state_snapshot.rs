@@ -577,7 +577,7 @@ async fn fresh_subscription_uses_current_state_despite_older_queued_capture() {
     let queued = mailbox.recv_next();
     let mut stream = state.subscribe_stream_events();
     let current = metadata_commit(&state);
-    let initial = state_snapshot_payload_for_sse(state.clone()).await;
+    let initial = state_snapshot_payload_for_sse(state.clone()).await.unwrap();
     assert_eq!(
         serde_json::from_str::<Value>(&initial).unwrap()["revision"],
         current

@@ -216,6 +216,14 @@ impl AppState {
         if expected_connection.is_some_and(|connection| connection.retired.load(Ordering::SeqCst)) {
             return Err(ApiError::conflict(REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST));
         }
+        if expected_connection.is_some_and(RemoteConnection::output_limited) {
+            // The latch can arrive while an already-issued request executes.
+            // Its response cannot certify the mirror, and its remote effect
+            // must remain explicitly uncertain rather than invite replay.
+            return Err(ApiError::internal("Remote output stopped while the request was in flight.").with_kind(
+                ApiErrorKind::OutputLimitExceeded { limit: MAX_ENCODED_OUTPUT_BYTES, outcome: ResponseMutationOutcome::Unknown },
+            ));
+        }
         Ok(())
     }
 }
