@@ -1,5 +1,9 @@
 // Process-local ownership of read-only capture workers. Caller timeouts do not
 // retire workers: the host retains their handles and cancels them at shutdown.
+
+// This backstop applies only after Stop has been issued to an observer that
+// had no operation deadline. It is separate from the normal read budget.
+const CAPTURE_SHUTDOWN_BACKSTOP: Duration = Duration::from_secs(40);
 #[derive(Default)]
 struct CaptureLifetime {
     state: Mutex<CaptureLifetimeState>,
@@ -369,7 +373,7 @@ impl CaptureLifetime {
     /// the exiting host never waits beyond the workers' existing shared budget.
     fn stop_and_join(self: &Arc<Self>) -> bool {
         self.stop();
-        let backstop = std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT;
+        let backstop = std::time::Instant::now() + CAPTURE_SHUTDOWN_BACKSTOP;
         let mut state = self.state.lock().unwrap();
         loop {
             // A different waiter may have transferred all handles to a drainer

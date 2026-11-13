@@ -102,7 +102,7 @@ uses it for both discovery and calls; older payloads without it fail closed.
 This is not a live authorization receipt: the endpoint still checks the current
 child, worktree, running attempt and policy before and after the subprocess.
 
-The check bounds process time (40 seconds internally, 45 seconds for the
+The check bounds process time (60 seconds internally, 65 seconds for the
 observer; the MCP bridge waits that and its ordinary 30 seconds, and a Codex
 caller longer still, see
 [the delegation tool timeout](agent-delegation-sessions.md#completed-codex-child-thread-lifecycle)), output (128 MiB per Git stdout, 64 KiB retained stderr, 4 KiB checker stdout),
@@ -110,9 +110,13 @@ manifest (1 MiB), and untracked input (20,000 entries, 128 MiB/file, 512 MiB tot
 Excess stderr is drained and discarded; Git failures embed at most 4 KiB of
 diagnostics so ordinary verification failure remains an observed failed check.
 Owned Unix process groups are terminated before reaping the leader; Windows
-Job Objects retain descendants through pipe collection. After exit, pipe
-collection has one shared one-second grace, including when exit was observed
-just past the process deadline; it never waits indefinitely for reader threads.
+Job Objects retain descendants through pipe collection. Git callers explicitly
+allow both pipes to drain within the original capture deadline, with the existing
+one-second EOF scheduling grace when exit is observed at or just past that
+deadline. The capture cancellation and cleanup fences still apply. Other bounded
+read callers, including Engram, retain one shared one-second post-exit grace.
+A Git runner still active after ten seconds logs one non-aborting warning, shared
+with its submodule runners; the warning never renews the deadline.
 Unsafe paths, non-UTF8 names/targets and special filesystem objects fail closed.
 Two captures, file metadata checks, and a manifest re-read reject observed
 concurrent changes; they are not an atomic filesystem snapshot or proof that

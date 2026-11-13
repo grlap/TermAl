@@ -1,6 +1,123 @@
 // Shared finite read-command transport, introduced for host freeze and Work
 // reads. Owns child/group and bounded pipe observation, not caller authority,
 // command construction or response parsing. Extracted from review_freeze_process.rs.
+
+const BOUNDED_READ_WARNING_AFTER: Duration = Duration::from_secs(10);
+
+// One decision point shared with the Engram facade; emitting a warning never
+// changes a caller's deadline or cancels its work.
+fn take_slow_operation_warning(
+    elapsed: Duration,
+    warned: &mut bool,
+    warning_after: Duration,
+) -> Option<Duration> {
+    if !*warned && elapsed >= warning_after {
+        *warned = true;
+        Some(elapsed)
+    } else {
+        None
+    }
+}
+
+// The existing Git runner shares this small diagnostic state across its
+// commands and submodule runners. There is no watcher or second wait owner.
+struct BoundedReadWarning {
+    started: std::time::Instant,
+    warned: bool,
+}
+
+impl BoundedReadWarning {
+    fn shared(started: std::time::Instant) -> Arc<Mutex<Self>> {
+        Arc::new(Mutex::new(Self { started, warned: false }))
+    }
+
+    fn observe(&mut self, now: std::time::Instant) -> Option<Duration> {
+        take_slow_operation_warning(
+            now.saturating_duration_since(self.started),
+            &mut self.warned,
+            BOUNDED_READ_WARNING_AFTER,
+        )
+    }
+
+    fn wait(&self, now: std::time::Instant, deadline: std::time::Instant) -> Duration {
+        let remaining = deadline.saturating_duration_since(now);
+        if self.warned {
+            remaining
+        } else {
+            remaining.min(BOUNDED_READ_WARNING_AFTER
+                .saturating_sub(now.saturating_duration_since(self.started)))
+        }
+    }
+}
+
+// Shared supervisors default to the existing one-second EOF grace. Only a
+// Git caller explicitly supplies the operation bound for extended draining.
+fn bounded_read_pipe_deadline(
+    drain_until: Option<std::time::Instant>,
+    entered: std::time::Instant,
+) -> std::time::Instant {
+    let grace = entered + Duration::from_secs(1);
+    drain_until.map_or(grace, |deadline| deadline.max(grace))
+}
+
+// The clock/wait boundary permits deterministic slow-output tests without
+// sleeping. The real receiver, cancellation and process custody stay local.
+fn receive_bounded_read_with<T>(
+    deadline: std::time::Instant,
+    extended_drain: bool,
+    mut observe: impl FnMut() -> Result<(std::time::Instant, Duration)>,
+    mut receive: impl FnMut(Duration) -> Result<T, mpsc::RecvTimeoutError>,
+) -> Result<T> {
+    // Preserve the original single receive and its timeout/error semantics
+    // for Engram and other callers that did not request extended draining.
+    if !extended_drain {
+        let (_, wait) = observe()?;
+        return receive(wait).map_err(Into::into);
+    }
+    loop {
+        let (now, wait) = observe()?;
+        if now >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "bounded read deadline exceeded while collecting pipes",
+            ).into());
+        }
+        match receive(wait.min(deadline.saturating_duration_since(now))) {
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            result => return result.map_err(Into::into),
+        }
+    }
+}
+
+fn receive_bounded_read<T>(
+    receiver: &mpsc::Receiver<T>,
+    deadline: std::time::Instant,
+    observed: &mut BoundedReadObservation,
+) -> Result<T> {
+    let extended_drain = observed.drain_until.is_some();
+    receive_bounded_read_with(
+        deadline,
+        extended_drain,
+        || {
+            let now = std::time::Instant::now();
+            if !extended_drain {
+                return Ok((now, deadline.saturating_duration_since(now)));
+            }
+            check_capture_cancellation_at(now)?;
+            observed.warn_if_slow();
+            let wait = observed.wait_duration(now, deadline);
+            // Cancellation remains observable even when a descendant has a
+            // pipe open; this is a polling cadence, not an abort deadline.
+            let wait = if current_capture_cancellation().is_some() {
+                wait.min(Duration::from_millis(50))
+            } else {
+                wait
+            };
+            Ok((now, wait))
+        },
+        |wait| receiver.recv_timeout(wait),
+    )
+}
 #[derive(Debug)]
 struct BoundedReadFailure {
     stage: &'static str,
@@ -86,6 +203,8 @@ struct BoundedReadObservation {
     started: std::time::Instant,
     warning_operation: Option<String>,
     warned: bool,
+    warning: Option<Arc<Mutex<BoundedReadWarning>>>,
+    drain_until: Option<std::time::Instant>,
     stage: &'static str,
     launch_lock_wait: Option<Duration>,
     read_deadline: Option<std::time::Instant>,
@@ -100,7 +219,7 @@ impl BoundedReadObservation {
     fn new() -> Self {
         Self {
             started: std::time::Instant::now(), stage: "spawn",
-            warning_operation: None, warned: false,
+            warning_operation: None, warned: false, warning: None, drain_until: None,
             // The legacy Windows Command path does not expose its lock wait.
             launch_lock_wait: if cfg!(windows) { None } else { Some(Duration::ZERO) },
             read_deadline: None,
@@ -112,9 +231,44 @@ impl BoundedReadObservation {
         }
     }
 
+    fn with_read_policy(
+        warning: Option<Arc<Mutex<BoundedReadWarning>>>,
+        drain_until: Option<std::time::Instant>,
+    ) -> Self {
+        Self { warning, drain_until, ..Self::new() }
+    }
+
+    fn for_engram(operation: &str) -> Self {
+        Self { warning_operation: Some(operation.to_owned()), ..Self::new() }
+    }
+
+    fn pipe_deadline(&self, operation_deadline: std::time::Instant, entered: std::time::Instant) -> std::time::Instant {
+        bounded_read_pipe_deadline(self.drain_until.map(|bound| bound.min(operation_deadline)), entered)
+    }
+
     fn warn_if_slow(&mut self) {
-        if let Some(operation) = self.warning_operation.as_deref() {
+        if let Some(warning) = &self.warning {
+            let elapsed = warning.lock().expect("read warning mutex poisoned")
+                .observe(std::time::Instant::now());
+            if let Some(elapsed) = elapsed {
+                eprintln!("git capture warning> still running after {} ms", elapsed.as_millis());
+            }
+        } else if let Some(operation) = self.warning_operation.as_deref() {
             warn_slow_engram_call(self.started, &mut self.warned, operation);
+        }
+    }
+
+    fn wait_duration(&self, now: std::time::Instant, deadline: std::time::Instant) -> Duration {
+        if let Some(warning) = &self.warning {
+            warning.lock().expect("read warning mutex poisoned").wait(now, deadline)
+        } else {
+            let remaining = deadline.saturating_duration_since(now);
+            if self.warning_operation.is_some() && !self.warned {
+                remaining.min(ENGRAM_CALL_WARNING_AFTER
+                    .saturating_sub(now.saturating_duration_since(self.started)))
+            } else {
+                remaining
+            }
         }
     }
 
@@ -140,6 +294,20 @@ impl BoundedReadObservation {
     }
 }
 
+fn finish_bounded_read_observation(
+    result: Result<std::process::Output>,
+    observed: &BoundedReadObservation,
+) -> Result<std::process::Output> {
+    #[cfg(all(windows, test))]
+    if BOUNDED_READ_TIMING_DIAGNOSTIC.load(std::sync::atomic::Ordering::SeqCst) {
+        eprintln!("bounded timing thread={:?} ok={} elapsed_ms={} lock_wait_ms={:?} phases={:?}; {}",
+            std::thread::current().id(), result.is_ok(), observed.started.elapsed().as_millis(),
+            observed.launch_lock_wait.map(|wait| wait.as_millis()), observed.timing_phases,
+            observed.lock_observation.summary());
+    }
+    result.map_err(|error| observed.failure(error))
+}
+
 #[cfg(windows)]
 type BoundedReadCommand = windows_launch::LaunchSpec;
 #[cfg(not(windows))]
@@ -158,15 +326,64 @@ fn run_bounded_read_command(
     output_limit: usize,
     own_tree: bool,
 ) -> Result<std::process::Output> {
-    #[cfg(not(windows))]
-    {
-        run_bounded_read_process(command, deadline, output_limit, own_tree)
-    }
+    run_bounded_read_command_with_warning(command, deadline, output_limit, own_tree, None, None)
+}
+
+// Git callers carry one diagnostic state across all finite subprocesses of
+// their existing operation. Both paths retain the same platform supervisors.
+fn run_bounded_read_command_with_warning(
+    command: &mut BoundedReadCommand,
+    deadline: std::time::Instant,
+    output_limit: usize,
+    own_tree: bool,
+    warning: Option<Arc<Mutex<BoundedReadWarning>>>,
+    drain_until: Option<std::time::Instant>,
+) -> Result<std::process::Output> {
+    let mut observed = BoundedReadObservation::with_read_policy(warning, drain_until);
     #[cfg(windows)]
-    {
+    let result = {
         let _ = own_tree;
-        run_bounded_read_windows_with_setup(command, deadline, output_limit, |_| Ok(()))
-    }
+        run_bounded_read_windows_observed(
+            command, deadline, output_limit, |_| Ok(()), &mut observed,
+        )
+    };
+    #[cfg(not(windows))]
+    let result = run_bounded_read_process_input_observed(
+        command, deadline, output_limit, own_tree, |_| Ok(()), None, &mut observed,
+    );
+    finish_bounded_read_observation(result, &observed)
+}
+
+fn run_bounded_read_input_with_warning(
+    command: &mut BoundedReadCommand,
+    deadline: std::time::Instant,
+    output_limit: usize,
+    input: Vec<u8>,
+    warning: Option<Arc<Mutex<BoundedReadWarning>>>,
+    drain_until: Option<std::time::Instant>,
+) -> Result<std::process::Output> {
+    let mut observed = BoundedReadObservation::with_read_policy(warning, drain_until);
+    #[cfg(windows)]
+    let result = {
+        command.piped_stdin();
+        run_bounded_read_windows_observed(
+            command, deadline, output_limit,
+            move |process| {
+                let mut stdin = process.take_stdin().context("batch stdin missing")?;
+                std::thread::Builder::new()
+                    .name("review-batch-input".to_owned())
+                    .spawn(move || { let _ = stdin.write_all(&input); })
+                    .context("batch input thread unavailable")?;
+                Ok(())
+            },
+            &mut observed,
+        )
+    };
+    #[cfg(not(windows))]
+    let result = run_bounded_read_process_input_observed(
+        command, deadline, output_limit, false, |_| Ok(()), Some(input), &mut observed,
+    );
+    finish_bounded_read_observation(result, &observed)
 }
 
 // Engram reads retain the same process/cancellation/cleanup owner as Git
@@ -177,8 +394,7 @@ fn run_engram_bounded_read_command(
     output_limit: usize,
     operation: &str,
 ) -> Result<std::process::Output> {
-    let mut observed = BoundedReadObservation::new();
-    observed.warning_operation = Some(operation.to_owned());
+    let mut observed = BoundedReadObservation::for_engram(operation);
     #[cfg(windows)]
     let result = run_bounded_read_windows_observed(command, deadline, output_limit, |_| Ok(()), &mut observed);
     #[cfg(not(windows))]
@@ -195,36 +411,12 @@ fn run_bounded_read_input(
     output_limit: usize,
     input: Vec<u8>,
 ) -> Result<std::process::Output> {
-    #[cfg(windows)]
-    {
-        command.piped_stdin();
-        run_bounded_read_windows_with_setup(command, deadline, output_limit, move |process| {
-            let mut stdin = process.take_stdin().context("batch stdin missing")?;
-            std::thread::Builder::new()
-                .name("review-batch-input".to_owned())
-                .spawn(move || {
-                    let _ = stdin.write_all(&input);
-                })
-                .context("batch input thread unavailable")?;
-            Ok(())
-        })
-    }
-    #[cfg(not(windows))]
-    {
-        run_bounded_read_process_input(
-            command,
-            deadline,
-            output_limit,
-            false,
-            |_| Ok(()),
-            Some(input),
-        )
-    }
+    run_bounded_read_input_with_warning(command, deadline, output_limit, input, None, None)
 }
 
 // Same private setup boundary as the legacy transport: tests can pin every
 // fixture identity and force leader exit before the supervisor observes it.
-#[cfg(windows)]
+#[cfg(all(windows, test))]
 fn run_bounded_read_windows_with_setup(
     command: &mut BoundedReadCommand,
     deadline: std::time::Instant,
@@ -233,14 +425,7 @@ fn run_bounded_read_windows_with_setup(
 ) -> Result<std::process::Output> {
     let mut observed = BoundedReadObservation::new();
     let result = run_bounded_read_windows_observed(command, deadline, output_limit, before_observe, &mut observed);
-    #[cfg(test)]
-    if BOUNDED_READ_TIMING_DIAGNOSTIC.load(std::sync::atomic::Ordering::SeqCst) {
-        eprintln!("bounded timing thread={:?} ok={} elapsed_ms={} lock_wait_ms={:?} phases={:?}; {}",
-            std::thread::current().id(), result.is_ok(), observed.started.elapsed().as_millis(),
-            observed.launch_lock_wait.map(|wait| wait.as_millis()), observed.timing_phases,
-            observed.lock_observation.summary());
-    }
-    result.map_err(|error| observed.failure(error))
+    finish_bounded_read_observation(result, &observed)
 }
 
 #[cfg(windows)]
@@ -330,10 +515,7 @@ fn run_bounded_read_windows_observed(
         let wait_started = std::time::Instant::now();
         let status = loop {
             observed.warn_if_slow();
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            let wait = if observed.warning_operation.is_some() && !observed.warned {
-                remaining.min(ENGRAM_CALL_WARNING_AFTER.saturating_sub(observed.started.elapsed()))
-            } else { remaining };
+            let wait = observed.wait_duration(std::time::Instant::now(), deadline);
             match process.wait_timeout(wait)? {
                 Some(status) => break status,
                 None if std::time::Instant::now() < deadline => continue,
@@ -366,13 +548,13 @@ fn run_bounded_read_windows_observed(
         check_capture_cancellation()?;
         #[cfg(test)]
         let pipes_started = std::time::Instant::now();
-        let pipe_deadline = std::time::Instant::now() + Duration::from_secs(1);
+        let pipe_deadline = observed.pipe_deadline(deadline, std::time::Instant::now());
         observed.stage = "pipe";
-        let stdout = out.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))?;
+        let stdout = receive_bounded_read(&out, pipe_deadline, observed)?;
         observed.stage = "read";
         let stdout = stdout?;
         observed.stage = "pipe";
-        let stderr = err.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))?;
+        let stderr = receive_bounded_read(&err, pipe_deadline, observed)?;
         observed.stage = "read";
         let stderr = stderr?;
         #[cfg(test)]
@@ -449,7 +631,7 @@ fn bounded_read_pipe(
     rx
 }
 
-#[cfg(any(not(windows), test))]
+#[cfg(test)]
 fn run_bounded_read_process(
     command: &mut Command,
     deadline: std::time::Instant,
@@ -461,7 +643,7 @@ fn run_bounded_read_process(
 
 // The setup boundary lets ownership tests force leader exit before observation.
 // Production never installs another waiter or exposes this hook to callers.
-#[cfg(any(not(windows), test))]
+#[cfg(test)]
 fn run_bounded_read_process_with_setup(
     command: &mut Command,
     deadline: std::time::Instant,
@@ -479,7 +661,7 @@ fn run_bounded_read_process_with_setup(
     )
 }
 
-#[cfg(any(not(windows), test))]
+#[cfg(test)]
 fn run_bounded_read_process_input(
     command: &mut Command,
     deadline: std::time::Instant,
@@ -604,16 +786,15 @@ fn run_bounded_read_process_input_observed(
             status
         };
         check_capture_cancellation()?;
-        // A completed process may be observed just past its deadline. Give
-        // both reader threads one shared, bounded EOF/drain grace, not a zero
-        // timeout racing their sends and not an unbounded receive.
-        let pipe_deadline = std::time::Instant::now() + Duration::from_secs(1);
+        // Both pipe readers share the caller-selected drain bound. Engram
+        // and the default transport retain their original one-second grace.
+        let pipe_deadline = observed.pipe_deadline(deadline, std::time::Instant::now());
         observed.stage = "pipe";
-        let stdout = out.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))?;
+        let stdout = receive_bounded_read(&out, pipe_deadline, observed)?;
         observed.stage = "read";
         let stdout = stdout?;
         observed.stage = "pipe";
-        let stderr = err.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))?;
+        let stderr = receive_bounded_read(&err, pipe_deadline, observed)?;
         observed.stage = "read";
         let stderr = stderr?;
         Ok(std::process::Output {

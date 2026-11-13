@@ -1021,7 +1021,7 @@ shape, then compares it for equality.
   with `:` or `\`), a file that changes while it is read or cannot be read
   for any reason but absence, or an exceeded bound (200,000 paths, tracked
   and untracked together, 128 MiB for one file, 512 MiB read in all, the
-  forty-second budget; a revision finished after the budget is not
+  sixty-second Git budget; a revision finished after the budget is not
   returned). Directory case or NFC/NFD spelling differences are admitted,
   while parent links or junctions leading elsewhere still refuse. Distinct
   tracked paths differing only by case or NFC/NFD that resolve to one regular

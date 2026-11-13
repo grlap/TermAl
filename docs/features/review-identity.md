@@ -30,7 +30,7 @@ identity inputs. Tracked paths remain inputs even beneath ignored trees,
 where a link ancestor is refused.
 
 The engine checks directory identity after enumeration, file identity around
-raw reads, and performs two complete captures under one 40-second deadline.
+raw reads, and performs two complete captures under one 60-second deadline.
 This establishes stability observations, not an atomic filesystem snapshot.
 Limits are 200,000 inventory records, 200,000 visited directory entries,
 128 MiB per payload, 2 GiB of raw reads per capture, eight nesting levels,
