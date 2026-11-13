@@ -82,6 +82,8 @@ import type { SessionReadRef, TranscriptRepairAuthority } from "./transcript-rep
 type UseAppLiveStateTransportParams = {
   sessionAuthority: TranscriptRepairAuthority;
   requestSessionTailRead: (sessionId: string) => void;
+  /** The periodic tail-read backstop for visible sessions, spaced out per session by its owner. */
+  runTailReadBackstop: () => void;
   visibleHydrationSessionIdsRef: MutableRefObject<Set<string>>;
   observeHydrationDelta?: (observation: HydrationDeltaObservation) => void;
   hasPartialTailAppendProof?: (sessionId?: string) => boolean;
@@ -1398,11 +1400,7 @@ export function useAppLiveStateTransport(
         // This sibling runs before the watchdog's independent policy guards;
         // browser throttling controls when actual interval firings occur.
         tailReadBackstopFirings++;
-        if (tailReadBackstopFirings % 3 === 0) {
-          for (const id of params.visibleHydrationSessionIdsRef.current) {
-            params.requestSessionTailRead(id);
-          }
-        }
+        if (tailReadBackstopFirings % 3 === 0) params.runTailReadBackstop();
         handleLiveSessionResumeWatchdogTick();
       },
       LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS,

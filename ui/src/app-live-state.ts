@@ -187,6 +187,7 @@ import { useAppLiveStateRenderSchedulers } from "./app-live-state-render-schedul
 import { useAppLiveStateTransport } from "./app-live-state-transport";
 import { reconcileAdoptedSessionsWorkspace } from "./app-live-state-workspace-reconciliation";
 import { WaitDeltaWatermark } from "./wait-delta-watermark";
+import { TailReadBackstopSchedule } from "./tail-read-backstop-schedule";
 
 function rememberServerInstanceId(
   seenServerInstanceIdsRef: MutableRefObject<Set<string>>,
@@ -337,6 +338,10 @@ export function useAppLiveState(
     visibleSessionHydrationTargets.map(target => target.id),
   );
   if (activeSession) visibleHydrationSessionIdsRef.current.add(activeSession.id);
+  const [tailReadBackstop] = useState(() => new TailReadBackstopSchedule());
+  // A session that leaves the visible set, even between backstop ticks,
+  // starts again at 3 s when it returns.
+  tailReadBackstop.retainOnly(visibleHydrationSessionIdsRef.current);
   const hydrationMismatchSessionIdsRef = useRef<Set<string>>(new Set());
   const queuedHydrationSessionIdsRef = useRef<Set<string>>(new Set());
   const queuedTailRepairSessionIdsRef = useRef<Set<string>>(new Set());
@@ -1168,6 +1173,9 @@ export function useAppLiveState(
             requestContext.partialTailAppendProof = proof;
             partialTailAppendProofsRef.current.set(sessionId, proof);
           }
+          // Any tail read but the backstop's own is new demand: the
+          // backstop's spacing for this session starts again at 3 s.
+          if (options?.backstopTailRead !== true) tailReadBackstop.clear(sessionId);
           const tailResponse = await fetchSessionTail(
             sessionId,
             SESSION_TAIL_WINDOW_MESSAGE_COUNT,
@@ -1406,14 +1414,41 @@ export function useAppLiveState(
     })();
   }
 
-  function requestSessionTailRead(sessionId: string) {
+  function requestSessionTailRead(sessionId: string, options?: { fromBackstop?: boolean }) {
+    const inFlight = hydratingSessionIdsRef.current.has(sessionId);
+    // A read wanted while another is in flight is still new demand: if that
+    // flight ends without certifying, the backstop serves it at 3 s, not at
+    // the spacing the earlier demand had reached.
+    if (inFlight && options?.fromBackstop !== true) tailReadBackstop.clear(sessionId);
     if (!shouldRequestSessionTailRead({
       mounted: isMountedRef.current,
-      inFlight: hydratingSessionIdsRef.current.has(sessionId),
+      inFlight,
       retryPending: hydrationRetryTimersRef.current.has(sessionId),
       needsTailRead: () => params.sessionAuthority.needsTailRead(sessionId, visibleHydrationSessionIdsRef.current.has(sessionId)),
     })) return;
-    startSessionHydration(sessionId, { forceTailRepair: true, ownerTailRead: true });
+    startSessionHydration(sessionId, {
+      forceTailRepair: true, ownerTailRead: true, backstopTailRead: options?.fromBackstop === true,
+    });
+  }
+
+  // The periodic backstop: the same owner read for each visible session,
+  // spaced out per session while the same demand stands, so a tail that never
+  // certifies is not re-read every 3 s forever.
+  function runTailReadBackstop() {
+    const now = Date.now();
+    for (const sessionId of visibleHydrationSessionIdsRef.current) {
+      if (!params.sessionAuthority.needsTailRead(sessionId, true)) {
+        tailReadBackstop.clear(sessionId);
+        continue;
+      }
+      if (!tailReadBackstop.isDue(sessionId, now)) continue;
+      // An unmounted hook, a read already in flight or a pending fast retry
+      // is not a backstop read; the spacing advances only when one goes out.
+      if (!isMountedRef.current || hydratingSessionIdsRef.current.has(sessionId) ||
+        hydrationRetryTimersRef.current.has(sessionId)) continue;
+      tailReadBackstop.recordIssued(sessionId, now);
+      requestSessionTailRead(sessionId, { fromBackstop: true });
+    }
   }
 
   useEffect(() => {
@@ -1826,6 +1861,7 @@ export function useAppLiveState(
   useAppLiveStateTransport({
     sessionAuthority: params.sessionAuthority,
     requestSessionTailRead,
+    runTailReadBackstop,
     visibleHydrationSessionIdsRef,
     applyTestRunDeltaLocally: delta => {
       if (delta.type === "testRunsInvalidated") {

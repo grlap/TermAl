@@ -675,7 +675,9 @@ describe("owner retry initiation witnesses", () => {
     }
     expect(h.tailRequests.filter(request => request.watchdog)).toHaveLength(0);
     for (let period = 0; period < 3; period++) {
-      await h.beforeNextBackstop();
+      // Each later backstop read waits twice as long as the one before.
+      if (period === 0) await h.beforeNextBackstop();
+      else await flush(3000 * 2 ** (period - 1) - 1);
       h.expectTailCount(6 + period);
       await flush(1);
       h.expectTailCount(7 + period);
@@ -685,8 +687,190 @@ describe("owner retry initiation witnesses", () => {
     }
     const polls = h.tailRequests.filter(request => request.watchdog);
     expect(polls).toHaveLength(3);
-    expect(polls.map(request => request.at - polls[0].at)).toEqual([0, 3000, 6000]);
-    expect(h.watchdogFirings()).toBe(12);
+    expect(polls.map(request => request.at - polls[0].at)).toEqual([0, 3000, 9000]);
+    expect(h.watchdogFirings()).toBe(15);
+  });
+
+  it("spaces backstop reads out to the cap on a healthy stream, then starts again at 3 s after certification", async () => {
+    const h = await pairedRetryFixture();
+    async function exhaustFastRetries(firstRetryIndex: number) {
+      for (const [index, delay] of SESSION_HYDRATION_RETRY_DELAYS_MS.entries()) {
+        await flush(delay);
+        await act(async () => h.tailRequests[firstRetryIndex + index].reject(new Error("Still unavailable")));
+      }
+    }
+    // An idle session keeps the separate quiet-turn watchdog out of this test.
+    async function raiseIdleDemand(revision: number, bodySeq: number) {
+      const ahead = summary(revision);
+      ahead.sessions[0] = { ...ahead.sessions[0], status: "idle", bodySeq, bodySeqEpoch: INSTANCE,
+        queuePaused: h.current().queuePaused === true };
+      h.emit("state", ahead);
+      await flush();
+    }
+    // Standing demand on a healthy, confirmed stream: the backstop is the only
+    // reader left once fast retries are spent.
+    await raiseIdleDemand(102, 1);
+    h.expectTailCount(2);
+    await act(async () => h.tailRequests[1].reject(new Error("Tail unavailable")));
+    await exhaustFastRetries(2);
+    await h.beforeNextBackstop();
+    await flush(1);
+    let count = h.tailRequests.length;
+    expect(h.tailRequests[count - 1].watchdog).toBe(true);
+    await act(async () => h.tailRequests[count - 1].reject(new Error("Still unavailable")));
+    for (const gap of [3000, 6000, 12000, 24000, 48000, 60000, 60000]) {
+      await flush(gap - 1);
+      h.expectTailCount(count);
+      await flush(1);
+      h.expectTailCount(++count);
+      expect(h.tailRequests[count - 1].watchdog).toBe(true);
+      await act(async () => h.tailRequests[count - 1].reject(new Error("Still unavailable")));
+    }
+    // The next backstop read certifies the tail: the backstop goes quiet.
+    await flush(60000);
+    h.expectTailCount(++count);
+    const certified = tail(102, "ax");
+    certified.session = { ...certified.session, status: "idle", bodySeq: 1, bodySeqEpoch: INSTANCE };
+    await act(async () => h.tailRequests[count - 1].resolve(certified));
+    await flush();
+    expect(h.params.sessionAuthority.needsTailRead(SESSION_ID, true)).toBe(false);
+    await flush(30000);
+    h.expectTailCount(count);
+    // New demand is served at the 3 s cadence again, not at the old cap.
+    await raiseIdleDemand(103, 2);
+    h.expectTailCount(++count);
+    await act(async () => h.tailRequests[count - 1].reject(new Error("Tail unavailable")));
+    await exhaustFastRetries(count);
+    count += SESSION_HYDRATION_RETRY_DELAYS_MS.length;
+    await h.beforeNextBackstop();
+    await flush(1);
+    h.expectTailCount(++count);
+    const first = h.tailRequests[count - 1];
+    expect(first.watchdog).toBe(true);
+    await act(async () => first.reject(new Error("Still unavailable")));
+    await flush(3000);
+    h.expectTailCount(++count);
+    expect(h.tailRequests[count - 1].at - first.at).toBe(3000);
+  });
+
+  describe("backstop spacing resets", () => {
+    // Raises idle standing demand whose reads all fail, spends the fast
+    // retries, then lets the backstop back off through `gaps`. Returns the
+    // last backstop read, still in flight; the next one would wait twice the
+    // last gap. Idle keeps the separate quiet-turn watchdog out of these tests.
+    async function backOffIdleDemand(gaps: number[]) {
+      const h = await pairedRetryFixture();
+      const ahead = summary(102);
+      ahead.sessions[0] = { ...ahead.sessions[0], status: "idle", bodySeq: 1, bodySeqEpoch: INSTANCE,
+        queuePaused: h.current().queuePaused === true };
+      h.emit("state", ahead);
+      await flush();
+      h.expectTailCount(2);
+      await act(async () => h.tailRequests[1].reject(new Error("Tail unavailable")));
+      for (const [index, delay] of SESSION_HYDRATION_RETRY_DELAYS_MS.entries()) {
+        await flush(delay);
+        await act(async () => h.tailRequests[2 + index].reject(new Error("Still unavailable")));
+      }
+      await h.beforeNextBackstop();
+      await flush(1);
+      let last = h.tailRequests[h.tailRequests.length - 1];
+      expect(last.watchdog).toBe(true);
+      for (const gap of gaps) {
+        const settled = last;
+        await act(async () => settled.reject(new Error("Still unavailable")));
+        await flush(gap);
+        last = h.tailRequests[h.tailRequests.length - 1];
+        expect(last.watchdog).toBe(true);
+        expect(last.at - settled.at).toBe(gap);
+      }
+      return { h, last };
+    }
+
+    // Ticks the clock, failing every new read, until the next backstop read.
+    async function nextBackstopReadAfter(h: Awaited<ReturnType<typeof backOffIdleDemand>>["h"], from: number) {
+      let settled = from;
+      for (let elapsed = 0; elapsed <= 60000; elapsed += 1000) {
+        for (; settled < h.tailRequests.length; settled++) {
+          if (h.tailRequests[settled].watchdog) return h.tailRequests[settled];
+          const request = h.tailRequests[settled];
+          await act(async () => request.reject(new Error("Still unavailable")));
+        }
+        await flush(1000);
+      }
+      throw new Error("no backstop read within 60 s");
+    }
+
+    it("forgets a session's spacing while its pane is hidden", async () => {
+      const { h, last } = await backOffIdleDemand([3000, 6000, 12000]);
+      // The 24 s wait would come next. The pane hides with the read still in
+      // flight, so its return issues nothing that could reset the spacing.
+      await h.visible(false);
+      await flush(3000);
+      await h.visible(true);
+      const from = h.tailRequests.length;
+      await act(async () => last.reject(new Error("Still unavailable")));
+      expect(h.params.sessionAuthority.needsTailRead(SESSION_ID, true)).toBe(true);
+      const next = await nextBackstopReadAfter(h, from);
+      expect(next, "no other read came first").toBe(h.tailRequests[from]);
+      expect(next.at - last.at).toBe(6000);
+    });
+
+    it("forgets a session's spacing when its pane is hidden and shown between backstop ticks", async () => {
+      const { h, last } = await backOffIdleDemand([3000, 6000, 12000]);
+      await h.visible(false);
+      await h.visible(true);
+      const from = h.tailRequests.length;
+      await act(async () => last.reject(new Error("Still unavailable")));
+      const next = await nextBackstopReadAfter(h, from);
+      expect(next, "no other read came first").toBe(h.tailRequests[from]);
+      expect(next.at - last.at).toBe(3000);
+    });
+
+    it("starts again at 3 s when new demand arrives while a backstop read is in flight", async () => {
+      const { h, last } = await backOffIdleDemand([3000, 6000, 12000]);
+      const newer = summary(103);
+      newer.sessions[0] = { ...newer.sessions[0], status: "idle", bodySeq: 2, bodySeqEpoch: INSTANCE,
+        queuePaused: h.current().queuePaused === true };
+      h.emit("state", newer);
+      await flush();
+      const from = h.tailRequests.length;
+      await act(async () => last.reject(new Error("Still unavailable")));
+      const next = await nextBackstopReadAfter(h, from);
+      expect(next, "no other read came first").toBe(h.tailRequests[from]);
+      expect(next.at - last.at).toBe(3000);
+    });
+
+    it("starts again at 3 s when new demand follows certification within one backstop window", async () => {
+      const { h, last } = await backOffIdleDemand([3000, 6000, 12000]);
+      const certified = tail(102, "ax");
+      certified.session = { ...certified.session, status: "idle", bodySeq: 1, bodySeqEpoch: INSTANCE };
+      await act(async () => last.resolve(certified));
+      expect(h.params.sessionAuthority.needsTailRead(SESSION_ID, true)).toBe(false);
+      // No backstop tick runs before the next body change raises new demand.
+      const from = h.tailRequests.length;
+      const newer = summary(103);
+      newer.sessions[0] = { ...newer.sessions[0], status: "idle", bodySeq: 2, bodySeqEpoch: INSTANCE,
+        queuePaused: h.current().queuePaused === true };
+      h.emit("state", newer);
+      expect(Date.now()).toBe(last.at);
+      const next = await nextBackstopReadAfter(h, from);
+      expect(next.at - last.at).toBeLessThan(24000);
+      await act(async () => next.reject(new Error("Still unavailable")));
+      await flush(3000);
+      expect(h.tailRequests[h.tailRequests.length - 1].at - next.at).toBe(3000);
+    });
+
+    it("starts again at 3 s after a master tail read that bypasses the owner requester", async () => {
+      const { h, last } = await backOffIdleDemand([3000, 6000, 12000]);
+      await act(async () => last.reject(new Error("Still unavailable")));
+      const from = h.tailRequests.length;
+      act(() => h.startHydration(SESSION_ID, { forceTailRepair: true }));
+      h.expectTailCount(from + 1);
+      expect(h.tailRequests[from].stack).not.toContain("requestSessionTailRead");
+      const next = await nextBackstopReadAfter(h, from);
+      expect(next, "only the master read came first").toBe(h.tailRequests[from + 1]);
+      expect(next.at - last.at).toBeLessThan(24000);
+    });
   });
 
   it("W14: admission checks an early owner read after a joined page requests recovery", async () => {

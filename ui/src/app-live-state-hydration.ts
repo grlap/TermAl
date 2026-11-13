@@ -11,6 +11,8 @@ export type SessionHydrationOptions = {
   forceTailRepair?: boolean;
   ownerTailRead?: boolean;
   queueAfterCurrent?: boolean;
+  /** Sent by the periodic backstop; every other tail read is new demand. */
+  backstopTailRead?: boolean;
 };
 
 // Shared by the hook and its deterministic delivery model. No second flight

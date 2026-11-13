@@ -95,9 +95,7 @@ it("T2 owner-origin hydration has one requester entry and one existing-interval 
   }
   visit(transport);
   expect(backstops).toHaveLength(1);
-  const body = backstops[0].getText(transport);
-  expect(body).toContain("params.visibleHydrationSessionIdsRef.current");
-  expect(body).toContain("params.requestSessionTailRead(id)");
-  expect(body).not.toMatch(/startSessionHydration|fetchSessionTail|Date\.now/);
-  expect(body.indexOf("params.requestSessionTailRead(id)")).toBeLessThan(body.indexOf("handleLiveSessionResumeWatchdogTick()"));
+  // The interval never reads or hydrates directly; the hook tests witness that
+  // its reads go through the owner requester and when they go out.
+  expect(backstops[0].getText(transport)).not.toMatch(/startSessionHydration|fetchSessionTail|Date\.now/);
 });
