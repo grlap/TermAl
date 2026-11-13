@@ -294,12 +294,10 @@ consumer admission checks at each execution boundary.
 
 ## Consumer migration and authority
 
-In `src/ordinary_commit_input.rs`, `ORDINARY_COMMIT_INPUT_DEFAULT` is now
-a `#[cfg(test)]` historical selector set to false. That value makes
-`source_revision(false)` return `legacy content revision capture is no
-longer supported`; it does not select a content hash. The legacy wrappers in
-`engram_source_roots.rs` and `engram_turn_observations.rs` are also
-test-only and supply no basis when that capture is unavailable.
+`source_revision` in `src/ordinary_commit_input.rs` and its historical capture
+wrappers remain `#[cfg(test)]`. Their callers pass the committed-input choice
+explicitly. The former Rust default selector and its implicit-choice wrappers
+have been removed.
 
 Production ordinary observations use `engram_observation_source_capture`
 in `engram_observation_source.rs`; named-root capture uses
@@ -312,8 +310,8 @@ or clean-commit revision.
 The launcher's independent automatic input selection is enabled: clean
 admitted checkouts select the existing Commit lane, while dirty or unsupported
 checkouts select a plain run without committed verification credit. Explicit
-`--input commit` remains strict. The test-only historical selector does not
-control this production selection.
+`--input commit` remains strict. This production selection is independent of
+the historical Rust helpers.
 
 Automatic launcher input and its host readers use only the existing complete
 `request.sourceId`, `results.sourceIdBefore` and `results.sourceIdAfter`.

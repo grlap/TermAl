@@ -20,7 +20,6 @@ import {
   createRun,
   executeRun,
   helperSupportFiles,
-  ORDINARY_COMMIT_INPUT_DEFAULT,
   summarize,
 } from "./test-launcher.mjs";
 import { registrationHost, withHostedRegistrationFixture } from "./test-launcher-registration-fixtures.mjs";
@@ -95,11 +94,6 @@ async function hosted(t, callback, files, options) {
 }
 
 const executed = (admin) => existsSync(join(admin, marker));
-
-test("the launcher enables automatic input selection independently of the host", () => {
-  assert.equal(ORDINARY_COMMIT_INPUT_DEFAULT, true);
-  assert.match(readFileSync(join(sourceRoot, "src/ordinary_commit_input.rs"), "utf8"), /ORDINARY_COMMIT_INPUT_DEFAULT: bool = false/u);
-});
 
 test("a clean commit records its commit, stays clean and is eligible when stages pass", async (t) => {
   await hosted(t, async ({ root, env, head, admin }) => {

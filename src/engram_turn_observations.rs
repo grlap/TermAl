@@ -30,12 +30,7 @@ fn engram_turn_end_basis(
     })
 }
 
-#[cfg(test)]
-fn engram_execution_source_basis(workdir: &FsPath) -> Option<EngramExecutionSourceBasis> {
-    engram_execution_source_basis_with(workdir, ORDINARY_COMMIT_INPUT_DEFAULT)
-}
-
-/// [`engram_execution_source_basis`] with the committed-input switch given
+/// Historical source basis with the committed-input switch given
 /// ([`source_revision`]). Off, the retired content capture is unavailable. On, a clean
 /// worktree's is its HEAD commit, and one that is not clean has none, logged
 /// with the paths Git reported, exactly as a revision that cannot be taken.
@@ -127,39 +122,6 @@ fn engram_bounded_source_basis(
 const ENGRAM_TURN_BASIS_CAPTURE_LIMIT: usize = 32;
 
 impl AppState {
-    /// Preserve only typed definitive refusals. Exhausted capacity, deadline,
-    /// panic or any other missing capture remains transient absence.
-    #[cfg(test)]
-    fn engram_source_capture_within(
-        &self,
-        place: &EngramBasisPlace,
-        budget: Duration,
-    ) -> EngramSourceCapture {
-        #[cfg(test)]
-        {
-            let capture = self.inner.lock().expect("state mutex poisoned")
-                .test_engram_source_capture.clone();
-            if let Some(capture) = capture {
-                return capture(place, budget);
-            }
-        }
-        let live = self
-            .inner
-            .lock()
-            .expect("state mutex poisoned")
-            .engram_turn_basis_captures_live
-            .clone();
-        let place = place.clone();
-        bounded_source_capture(
-            &live,
-            &self.capture_lifetime,
-            ENGRAM_TURN_BASIS_CAPTURE_LIMIT,
-            budget,
-            move || Some(engram_place_source_capture(&place)),
-        )
-        .unwrap_or(Ok(None))
-    }
-
     /// The historical closing basis at `place` (`engram_turn_end_basis`), on
     /// its own thread and waited for at most `budget`: the capture and, when
     /// it fails, the check that a sealed root is gone both touch the file

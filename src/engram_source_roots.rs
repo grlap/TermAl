@@ -1362,13 +1362,6 @@ fn engram_lookup_says_missing(kind: std::io::ErrorKind) -> bool {
     )
 }
 
-/// The source basis at `place`, under the committed-input switch as it stands
-/// ([`ORDINARY_COMMIT_INPUT_DEFAULT`]).
-#[cfg(test)]
-fn engram_place_source_basis(place: &EngramBasisPlace) -> Option<EngramExecutionSourceBasis> {
-    engram_place_source_basis_with(place, ORDINARY_COMMIT_INPUT_DEFAULT)
-}
-
 /// The source basis at `place` with the committed-input switch given
 /// ([`source_revision`]). A root that is not clean while the switch is on has
 /// no basis, logged with its paths, as any basis that cannot be taken.
@@ -1378,11 +1371,6 @@ fn engram_place_source_basis_with(
     ordinary_commit_input: bool,
 ) -> Option<EngramExecutionSourceBasis> {
     engram_place_source_capture_with(place, ordinary_commit_input).ok().flatten()
-}
-
-#[cfg(test)]
-fn engram_place_source_capture(place: &EngramBasisPlace) -> EngramSourceCapture {
-    engram_place_source_capture_with(place, ORDINARY_COMMIT_INPUT_DEFAULT)
 }
 
 #[cfg(test)]
@@ -1410,16 +1398,8 @@ fn engram_place_source_capture_with(
 /// on the root the capture took. The root must still belong to the repository
 /// it was named in (`common_dir_key`), and the historical capture refuses a path
 /// that is not its own worktree's root.
-#[cfg(test)]
-fn engram_named_root_source_basis(
-    root: &str,
-    common_dir_key: &str,
-) -> Option<EngramExecutionSourceBasis> {
-    engram_named_root_source_basis_with(root, common_dir_key, ORDINARY_COMMIT_INPUT_DEFAULT)
-}
-
-/// [`engram_named_root_source_basis`] with the committed-input switch given
-/// ([`source_revision`]): on, a root that is not clean has no basis.
+/// The historical committed-input switch is explicit ([`source_revision`]):
+/// on, a root that is not clean has no basis.
 #[cfg(test)]
 fn engram_named_root_source_basis_with(
     root: &str,

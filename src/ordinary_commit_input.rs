@@ -4,11 +4,6 @@
 // back to a clean commit or reconstructs a historical content fingerprint.
 // Reuses review_freeze.rs's pinned Git runner.
 
-/// Historical selector retained by legacy callers. False now means unavailable;
-/// it does not request or manufacture a content revision.
-#[cfg(test)]
-const ORDINARY_COMMIT_INPUT_DEFAULT: bool = false;
-
 /// The scheme used by retained committed source revisions.
 const COMMITTED_SOURCE_REVISION_SCHEME: &str = "git-commit";
 
