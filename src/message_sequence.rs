@@ -122,12 +122,6 @@ mod message_sequence {
         pub(super) fn swap(&mut self, a: usize, b: usize) {
             self.bodies.swap(a, b);
         }
-        // Dropping Vec::Drain removes the range without visiting/cloning its
-        // shared message bodies. Eviction intentionally produces no messages.
-        #[cfg(test)]
-        pub(super) fn discard(&mut self, range: impl std::ops::RangeBounds<usize>) {
-            drop(self.bodies.drain(range));
-        }
         pub(super) fn window(&self, range: impl std::ops::RangeBounds<usize>) -> Self {
             use std::ops::Bound;
             let start = match range.start_bound() {

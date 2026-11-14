@@ -354,8 +354,6 @@ fn an_exemption_delivered_during_off_lock_artifact_read_is_not_lost() {
         )],
         Some(arrival),
     );
-    release.send(()).unwrap();
-    polling.join().unwrap();
     turn.record(|record| {
         let carried = &record.engram.carried_checks[0];
         let (cause, order) = carried.check.watcher_exempted.as_ref().unwrap();
@@ -371,6 +369,8 @@ fn an_exemption_delivered_during_off_lock_artifact_read_is_not_lost() {
         );
         assert!(carried.fence.is_none());
     });
+    release.send(()).unwrap();
+    polling.join().unwrap();
     assert_carried_artifact_custody(&turn, &run, true);
 }
 

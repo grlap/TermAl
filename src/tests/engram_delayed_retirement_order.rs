@@ -188,17 +188,19 @@ fn retirement_during_an_in_flight_artifact_read_keeps_the_saved_match_ambiguous(
     if let Err(panic) = inspected {
         std::panic::resume_unwind(panic);
     }
-    let digest = engram_terminal_record_digest(&run).unwrap();
-    turn.record(|record| {
-        let carried = &record.engram.carried_checks[0];
-        assert!(
-            carried.ambiguous,
-            "installing a previously read artifact cannot restore association"
-        );
-        assert_eq!(carried.run_directory.as_deref(), Some(run.as_path()));
-        assert_eq!(carried.terminal_digest.as_deref(), Some(digest.as_str()));
-    });
-    assert_carried_ambiguity(&turn);
+    assert_retired_run(&turn, &run);
+    let used = turn.record(|record| record.engram.carried_consumed_runs.clone());
+    let (found, _, _) = engram_find_carried_run(
+        &turn.session_id,
+        &worktree,
+        &started,
+        &used,
+        &Default::default(),
+    );
+    assert!(
+        found.is_none(),
+        "a completed ambiguous observation cannot lend its run"
+    );
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
 }
 
@@ -209,13 +211,12 @@ fn later_distant_retirement_keeps_the_exact_older_terminal_artifact() {
         let (turn, worktree) = ordinary_carried_turn(&format!("distant-retirement-{seconds}"));
         ordinary_launch_gate(&turn, &worktree, false);
         let run = finish_run(&worktree, "passed", &"f".repeat(64));
+        let started =
+            turn.record(|record| record.engram.carried_checks[0].check.started_at.clone());
         turn.state.poll_engram_carried_runs();
         turn.record_mut(|record| {
-            let carry = &record.engram.carried_checks[0];
-            assert!(carry.ended() && carry.fence.is_none() && !carry.ambiguous);
-            let later = (engram_parse_time(&carry.check.started_at).unwrap()
-                + chrono::Duration::seconds(seconds))
-            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            let later = (engram_parse_time(&started).unwrap() + chrono::Duration::seconds(seconds))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
             engram_note_unmatched_launch(record, &worktree, &later);
         });
         assert_carried_artifact_custody(&turn, &run, true);
@@ -278,7 +279,7 @@ fn medium_repair_distant_later_retirement_keeps_running_gate_eligible() {
 }
 
 #[test]
-fn medium_repair_ambiguous_saved_match_is_not_described_as_pending_credit() {
+fn a_later_ambiguous_launch_cannot_give_a_retired_artifact_a_credit_obligation() {
     let _placement = TestTempRootDirectoryScope::repository_local();
     let (turn, worktree) = ordinary_carried_turn("ambiguous-restart-risk");
     ordinary_launch_gate(&turn, &worktree, true);
@@ -315,6 +316,7 @@ fn medium_repair_ambiguous_saved_match_is_not_described_as_pending_credit() {
         !reason.contains("Exact carried run is awaiting host verification settlement"),
         "ordinary artifacts never promise automatic native settlement"
     );
+    launch_detached(&turn, &worktree, "later-ambiguous");
     turn.record_mut(|record| record.engram.carried_checks[0].ambiguous = true);
     let (risk, reason) = view();
     assert_eq!(risk, None);

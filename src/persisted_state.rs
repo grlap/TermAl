@@ -916,35 +916,6 @@ fn serialize_persisted_session_view<S: serde::Serializer>(
     projected.serialize(serializer)
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PersistedRemoteProxyIdentity {
-    #[serde(default)]
-    remote_id: Option<String>,
-    #[serde(default)]
-    remote_session_id: Option<String>,
-}
-
-impl PersistedRemoteProxyIdentity {
-    fn from_session_json(encoded: &str) -> Result<Self> {
-        let value: Value = serde_json::from_str(encoded)
-            .context("failed to parse persisted remote proxy identity")?;
-        if !value.is_object() {
-            bail!("persisted session metadata is not an object");
-        }
-        serde_json::from_value(value).context("failed to decode persisted remote proxy identity")
-    }
-
-    fn remote_proxy_identity(&self) -> Result<Option<(&str, &str)>> {
-        validate_remote_proxy_identity(self.remote_id.as_deref(), self.remote_session_id.as_deref())
-    }
-
-    fn is_remote_proxy(&self) -> Result<bool> {
-        self.remote_proxy_identity()
-            .map(|identity| identity.is_some())
-    }
-}
-
 fn validate_remote_proxy_identity<'a>(
     remote_id: Option<&'a str>,
     remote_session_id: Option<&'a str>,

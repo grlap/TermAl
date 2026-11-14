@@ -131,10 +131,6 @@ struct FederationPromptFreshness {
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl FederationPromptFreshness {
-    fn ensure_fresh(&self) -> Result<(), ApiError> {
-        self.ensure_fresh_at(std::time::Instant::now())
-    }
-
     fn ensure_fresh_at(&self, now: std::time::Instant) -> Result<(), ApiError> {
         if now >= self.deadline {
             return Err(federation_stale_link());

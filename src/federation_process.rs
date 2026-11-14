@@ -9,6 +9,7 @@ struct FederationSshProcess {
 }
 
 impl FederationSshProcess {
+    #[cfg(test)]
     fn from_child(child: Child) -> Result<Self, ApiError> {
         let diagnostic = Arc::new(Mutex::new(FederationSshDiagnostic::default()));
         let mut process = Self::retain_child(child, diagnostic);
@@ -74,6 +75,7 @@ impl FederationSshProcess {
     }
 
     // Called on spawn_blocking, and completed before another attempt starts.
+    #[cfg(test)]
     fn shutdown(mut self) -> Result<(), ApiError> {
         self.reap()
     }

@@ -78,7 +78,7 @@ fn watcher_provenance_source_refusal_retains_available_and_unknown_facts() {
 }
 
 #[test]
-fn watcher_provenance_late_write_then_restore_still_fences_custody() {
+fn watcher_provenance_late_write_then_restore_cannot_reopen_retired_custody() {
     let (turn, worktree) = ordinary_carried_turn("watcher-source-restored");
     let path = fs::canonicalize(&worktree).unwrap().join("README.md");
     let before = fs::read(&path).unwrap();
@@ -87,13 +87,14 @@ fn watcher_provenance_late_write_then_restore_still_fences_custody() {
     fs::write(&path, &before).unwrap();
     assert_eq!(fs::read(&path).unwrap(), before);
 
-    finish_run(&worktree, "passed", &"f".repeat(64));
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
     turn.state.poll_engram_carried_runs();
-    // A delayed notification can describe a real write during the run.
-    // Matching snapshots and an already-terminal run must not waive it.
+    // The artifact observation has ended. A late watcher notification cannot
+    // reopen it or turn it into registered native verification.
     turn.state
         .note_engram_workspace_file_changes(&[source_change(&path)]);
-    assert_carried_fence_custody(&turn, "a file in its worktree changed");
+    assert_retired_run(&turn, &run);
+    assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
 }
 
 #[test]

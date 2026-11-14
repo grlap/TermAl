@@ -242,6 +242,7 @@ fn test_run_compact_artifact_matches(row: &TestRunCompacted, disk: &TestRunDisk)
         })
 }
 
+#[cfg(test)]
 fn test_run_history_locked(inner: &StateInner, project: Option<&str>) -> TestRunHistory {
     test_run_history_from_projection(inner, &test_run_summaries_locked(inner), project)
 }

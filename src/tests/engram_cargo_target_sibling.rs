@@ -201,8 +201,6 @@ fn cargo_target_sibling_arriving_during_off_lock_poll_keeps_its_candidate() {
         &watched.join("targetAb1234"),
         WorkspaceFileChangeKind::Deleted,
     )]);
-    release.send(()).unwrap();
-    polling.join().unwrap();
     turn.record(|record| {
         let carried = &record.engram.carried_checks[0];
         assert!(carried.fence.is_none() && carried.check.watcher_exempted.is_none());
@@ -211,6 +209,8 @@ fn cargo_target_sibling_arriving_during_off_lock_poll_keeps_its_candidate() {
         assert!(!candidate.before_launch);
         assert!(candidate.path.contains("targetAb1234"));
     });
+    release.send(()).unwrap();
+    polling.join().unwrap();
     assert_carried_artifact_custody(&turn, &run, true);
 }
 
@@ -238,8 +238,6 @@ fn cargo_target_sibling_prelaunch_arrival_during_off_lock_poll_keeps_its_order()
         )],
         Some(before),
     );
-    release.send(()).unwrap();
-    polling.join().unwrap();
     turn.record(|record| {
         let carried = &record.engram.carried_checks[0];
         assert!(carried.fence.is_none() && carried.check.watcher_exempted.is_none());
@@ -248,6 +246,8 @@ fn cargo_target_sibling_prelaunch_arrival_during_off_lock_poll_keeps_its_order()
         assert!(candidate.before_launch);
         assert!(candidate.path.contains("targetAb1234"));
     });
+    release.send(()).unwrap();
+    polling.join().unwrap();
     assert_carried_artifact_custody(&turn, &run, true);
 }
 
@@ -355,7 +355,6 @@ fn cargo_target_candidate_without_a_directory_is_data_not_a_verification_exempti
         )]);
         fs::remove_dir(&sibling).unwrap();
         let run = finish_run(&worktree, "passed", &"f".repeat(64));
-        turn.state.poll_engram_carried_runs();
         turn.record(|record| {
             let carried = &record.engram.carried_checks[0];
             assert!(carried.fence.is_none());

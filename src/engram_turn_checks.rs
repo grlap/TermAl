@@ -1181,7 +1181,14 @@ fn engram_has_open_check(record: &SessionRecord) -> bool {
     }) || engram
         .carried_checks
         .iter()
-        .any(|carried| carried.fence.is_none())
+        .any(|carried| {
+            carried.fence.is_none()
+                && !carried.ended()
+                && (carried.ends_by_report
+                    || (!carried.launcher_gone
+                        && !carried.run_missing
+                        && !engram_carried_check_expired(carried, chrono::Utc::now())))
+        })
 }
 
 // A command's reported location is a fact, separate from whether its arguments

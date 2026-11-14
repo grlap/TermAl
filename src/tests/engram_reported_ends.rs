@@ -1308,6 +1308,11 @@ fn an_expired_carried_test_still_overlaps_later_checks() {
         record.engram.carried_checks[0].check.started_at =
             (chrono::Utc::now() - chrono::Duration::hours(7)).to_rfc3339();
     });
+    turn.state.poll_engram_carried_runs();
+    turn.record(|record| {
+        assert!(engram_has_open_check(record));
+        assert_eq!(record.engram.carried_checks.len(), 1);
+    });
 
     let expiring = next_turn_observation(&turn);
     assert!(

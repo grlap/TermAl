@@ -88,14 +88,32 @@ other tool call makes it ineligible. The agent still runs its ordinary exact
 declared command, with no manual launcher or wrapper. Other runtime forms
 are unsupported by this credit route.
 
+This pre-prompt capture is bounded local work, using the configured source
+adapter and the locally acknowledged named-root binding. Prompt delivery does
+not refresh that binding through an Engram authority RPC. After claim recovery,
+the successful explicit naming retains its validated held binding beside the
+exact current root selection. S0 uses it only under confirmed published local
+authority at the acknowledged root fence. Lifecycle journals and canonical
+read proofs keep their original recovery associations. The optional retained
+binding survives reload; older state without it falls back only when the
+proof itself has the acknowledged root fence.
+Unconfirmed or mismatched local authority withholds S0. The existing native
+registration worker validates the captured recovery run and root fence after
+the original command starts. It retains the current work revision separately:
+a revision advance since naming is accepted without rewriting S0 or the original
+start. Closing must match that exact registration-time binding; a revision or
+authority change after registration withholds credit. Unavailable authority
+also withholds credit without changing the original execution or its reported
+result. Registration cannot move the captured source, root, claim or start time.
+
 When S0 is unavailable, the notice includes bounded stage names and elapsed
 milliseconds, including an operation still running when the caller stopped
 waiting. These timings also appear in the host diagnostic; a successful
 opening retains its stage summary in the native run request. They contain
 no paths, Git arguments or file contents, and do not extend the opening budget.
 Source capture allows 30 s; opening reserves another 5 s for its existing
-declaration, preimage and authority stages. The source adapter still caps its
-own work at 30 s. Timings identify where time was spent, not why it was slow.
+declaration, preimage and local authority rechecks. The source adapter still
+caps its own work at 30 s. Timings identify where time was spent, not why it was slow.
 
 The host associates only the original execution newly originating in that
 turn; it never adopts an earlier or background execution. `R` is the real,

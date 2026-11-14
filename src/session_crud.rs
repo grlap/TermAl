@@ -1276,27 +1276,34 @@ impl AppState {
             }
         }
         self.resume_revoked_engram_mcp_sessions(&mut outcome);
+        // Releasing the project fence must give every ordinary queue a chance,
+        // even when cleanup is degraded or another session still owns Stop.
+        for session_id in &session_ids {
+            // Normal dispatch honors operator pauses, Stop owners and each
+            // prompt's persistence hold. No force-resume is granted here.
+            match self.dispatch_next_queued_turn(session_id, false) {
+                Ok(Some(dispatch)) => {
+                    if let Err(error) = deliver_turn_dispatch(self, dispatch)
+                        .into_background_result("Engram connection queue drain")
+                    {
+                        outcome.failures.push(format!(
+                            "session `{session_id}`: failed to deliver the ordinary queue: {}",
+                            error.message
+                        ));
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => outcome.failures.push(format!(
+                    "session `{session_id}`: failed to resume the ordinary queue: {error:#}"
+                )),
+            }
+        }
         let pending = self.finish_revoked_engram_mcp_runtime_outcome(outcome)?;
         if !pending.is_empty() {
             return Err(ApiError::conflict(format!(
                 "Engram settings were saved; runtime cleanup is pending behind an existing Stop: {}",
                 pending.join(", "),
             )));
-        }
-        for session_id in &session_ids {
-            // Normal dispatch honors operator pauses, Stop owners and each
-            // prompt's persistence hold. No force-resume is granted here.
-            if let Some(dispatch) =
-                self.dispatch_next_queued_turn(session_id, false)
-                    .map_err(|error| {
-                        ApiError::internal(format!(
-                            "failed to resume the ordinary queue: {error:#}"
-                        ))
-                    })?
-            {
-                deliver_turn_dispatch(self, dispatch)
-                    .into_background_result("Engram connection queue drain")?;
-            }
         }
         let inner = self.inner.lock().expect("state mutex poisoned");
         Ok(self.snapshot_from_inner(&inner))

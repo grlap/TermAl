@@ -81,10 +81,13 @@ fn an_ordinary_launch_preserves_the_members_original_fence_without_binding_its_a
         }]
     );
     script_members(&turn, Some(3), 0);
-    let run = finish_run(&worktree, "passed", &"f".repeat(64));
-    assert_carried_artifact_custody(&turn, &run, true);
     turn.record(|record| {
         assert_eq!(record.engram.carried_checks[0].bind_targets, original);
+    });
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    assert_carried_artifact_custody(&turn, &run, true);
+    assert_retired_run(&turn, &run);
+    turn.record(|record| {
         let persisted = serde_json::to_value(PersistedSessionRecord::from_record(record)).unwrap();
         assert!(persisted.get("engramOwedBinds").is_none());
         assert!(persisted.get("engramPendingBatches").is_none());
@@ -118,12 +121,20 @@ fn legacy_or_absent_member_sightings_cannot_turn_a_carried_artifact_into_credit(
         ordinary_launch_gate(&turn, &worktree, false);
         let original = turn.record(|record| record.engram.carried_checks[0].bind_targets.clone());
         assert_eq!(original.len(), 1);
-        let run = finish_run(&worktree, "passed", &"f".repeat(64));
-        assert_carried_artifact_custody(&turn, &run, true);
-        turn.state.engram_verification_records_tick();
         turn.record(|record| {
             assert_eq!(record.engram.carried_checks[0].bind_targets, original);
         });
+        assert_ordinary_turn_has_no_native_requests(&turn);
+        assert!(
+            turn.transport
+                .requests()
+                .iter()
+                .all(|request| { request.request["operation"] != "named_root_sighting_read" })
+        );
+        let run = finish_run(&worktree, "passed", &"f".repeat(64));
+        assert_carried_artifact_custody(&turn, &run, true);
+        turn.state.engram_verification_records_tick();
+        assert_retired_run(&turn, &run);
         assert_ordinary_turn_has_no_native_requests(&turn);
         assert!(
             turn.transport

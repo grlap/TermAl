@@ -297,7 +297,7 @@ impl AppState {
         let project_environment = project_environment_for_session_locked(inner, &session_id);
         let mut started = self
             .start_turn_on_record_with_environment(
-                &mut inner.sessions[index],
+                inner.session_mut_by_index(index).expect("session index should be valid"),
                 queued.pending_prompt.id.clone(),
                 queued.pending_prompt.text.clone(),
                 queued.attachments.clone(),
@@ -317,7 +317,7 @@ impl AppState {
             })?;
         drop(host_shutdown);
         EngramHost::turn_started(inner, index);
-        let record = &mut inner.sessions[index];
+        let record = inner.session_mut_by_index(index).expect("session index should be valid");
         mark_prompt_delivery_promoted(record, &queued, &mut started.dispatch,
             &started.message_delta.message_id, &self.server_instance_id);
         if queued.engram_bind.is_some() || queued.engram_evaluate.is_some()

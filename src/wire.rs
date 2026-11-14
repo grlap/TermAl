@@ -1243,18 +1243,6 @@ enum GeminiApprovalMode {
     Plan,
 }
 
-impl GeminiApprovalMode {
-    /// Returns the cli value representation.
-    fn as_cli_value(self) -> &'static str {
-        match self {
-            Self::Default => "default",
-            Self::AutoEdit => "auto_edit",
-            Self::Yolo => "yolo",
-            Self::Plan => "plan",
-        }
-    }
-}
-
 /// Enumerates session states.
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]

@@ -69,13 +69,6 @@ fn test_run_lifecycle_binding_matches(
         && association.binding.claim_id == binding.claim_id
 }
 
-fn test_run_object_id_valid(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
 impl AppState {
     fn settle_test_run_producer_records_locked(
         inner: &mut StateInner,

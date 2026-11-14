@@ -271,12 +271,15 @@ fn observe_output_limit_at(
     // One bounded counter, rather than a map keyed by unbounded identities.
     // Log the first and power-of-two occurrences to coalesce repeated failures.
     static OVERFLOWS: AtomicU64 = AtomicU64::new(0);
-    let count = OVERFLOWS
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
-            Some(value.saturating_add(1))
-        })
-        .unwrap_or(u64::MAX)
-        .saturating_add(1);
+    let mut previous = OVERFLOWS.load(Ordering::Relaxed);
+    let count = loop {
+        let next = previous.saturating_add(1);
+        match OVERFLOWS.compare_exchange_weak(previous, next, Ordering::Relaxed, Ordering::Relaxed)
+        {
+            Ok(_) => break next,
+            Err(current) => previous = current,
+        }
+    };
     if count.is_power_of_two() {
         if let OutputEncodingError::Limit {
             limit,

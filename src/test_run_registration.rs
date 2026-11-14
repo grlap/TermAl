@@ -1037,7 +1037,7 @@ impl AppState {
                 (inner.sessions[index].engram.work_binding.clone(), None)
             };
             if let Some(start) = native {
-                if work_binding.as_ref() != Some(&start.binding)
+                if !start.accepts_registration_binding(work_binding.as_ref())
                     || named_root.as_ref() != Some(&start.named)
                     || authority_store.as_ref() != Some(&start.store)
                     || inner

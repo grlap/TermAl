@@ -475,35 +475,6 @@ impl MailboxStore {
         Ok(record)
     }
 
-    fn read_remote_prompt_source_operation<G>(
-        &self,
-        source: &remote_prompt_authority::NativeRoot,
-        operation: Uuid,
-        authorize_read: impl FnOnce() -> Result<G>,
-    ) -> Result<Option<RemotePromptJournalRecord>> {
-        let (host, epoch, session, creation) = source.components();
-        let connection = self.connection()?;
-        let key: Option<String> = connection.query_row(
-            "SELECT idempotency_key FROM remote_prompt_intents WHERE operation_id=?1
-             AND source_host_id=?2 AND source_epoch=?3 AND source_session_id=?4 AND source_creation_id=?5",
-            rusqlite::params![operation.to_string(), host.to_string(), epoch, session, creation.to_string()],
-            |row| row.get(0)).optional()?;
-        let record = key
-            .map(|key| {
-                remote_prompt_read_row(&connection, RemotePromptJournalSide::Sender, source, &key)
-            })
-            .transpose()?
-            .flatten();
-        if record
-            .as_ref()
-            .is_some_and(|record| record.operation_id != operation)
-        {
-            return Err(remote_prompt_invalid_record());
-        }
-        let _owner = authorize_read()?;
-        Ok(record)
-    }
-
     // CAS of admission/projection evidence only; no provider/lifecycle owner.
     fn mark_remote_prompt_possible_entry<G>(
         &self,

@@ -386,10 +386,6 @@ fn open_sqlite_state_read_connection_with_busy_timeout(
     Ok(connection)
 }
 
-fn open_sqlite_history_snapshot(path: &FsPath) -> Result<rusqlite::Connection> {
-    open_sqlite_history_snapshot_with_busy_timeout(path, SQLITE_BUSY_TIMEOUT)
-}
-
 fn open_sqlite_history_snapshot_with_busy_timeout(
     path: &FsPath,
     busy_timeout: Duration,

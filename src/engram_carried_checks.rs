@@ -254,9 +254,11 @@ fn engram_carried_lost_to_restart_line(marker: &EngramCarriedLaunchMarker) -> St
         return line.clone();
     }
     format!(
-        "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} the host restarted while the background full gate \
-         launched at {} in {} (check {}) was running; it earned no credit, since the host \
-         could not watch its worktree while it was down. Run the gate again.",
+        "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} the host restarted after the background full gate \
+         launched at {} in {} (check {}). Its local observation is no longer followed; \
+         this does not determine its terminal outcome or registered verification. Inspect \
+         the retained launcher run before starting another; do not rerun solely because \
+         the host restarted.",
         marker.launched_at,
         engram_source_root_display(&marker.root),
         marker.fingerprint,
@@ -1197,6 +1199,7 @@ fn engram_push_carried_check(
     record: &mut SessionRecord,
     carried: EngramCarriedCheck,
 ) -> Option<String> {
+    engram_retire_launcher_checks(record, chrono::Utc::now());
     let engram = &mut record.engram;
     if engram.carried_checks.len() < ENGRAM_CARRIED_CHECK_LIMIT {
         engram.carried_checks.push(carried);
@@ -1447,13 +1450,45 @@ fn engram_display_reported_target(target: &str) -> String {
 
 /// Whether `carried` is past `ENGRAM_CARRIED_CHECK_TTL_SECONDS` at `now`
 /// (or its launch time cannot be read).
-#[cfg(test)]
 fn engram_carried_check_expired(
     carried: &EngramCarriedCheck,
     now: chrono::DateTime<chrono::Utc>,
 ) -> bool {
     engram_parse_time(&carried.check.started_at)
         .is_none_or(|launched| (now - launched).num_seconds() > ENGRAM_CARRIED_CHECK_TTL_SECONDS)
+}
+
+/// Local launcher custody ends independently of registered verification.
+/// Keep its run reserved against later launches, but neither grant credit nor
+/// tell the holder to repeat a run whose terminal artifact was already found.
+fn engram_retire_launcher_checks(
+    record: &mut SessionRecord,
+    now: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    let mut retired = Vec::new();
+    record.engram.carried_checks.retain(|carried| {
+        let retire = !carried.ends_by_report
+            && (carried.ended()
+                || carried.launcher_gone
+                || carried.run_missing
+                || engram_carried_check_expired(carried, now));
+        if retire {
+            retired.push((
+                carried.run_directory.clone(),
+                carried.check.target.root.clone(),
+                carried.check.started_at.clone(),
+            ));
+        }
+        !retire
+    });
+    let changed = !retired.is_empty();
+    for (directory, root, launched_at) in retired {
+        match directory {
+            Some(directory) => engram_note_consumed_runs(record, vec![directory]),
+            None => engram_note_unmatched_launch(record, &root, &launched_at),
+        }
+    }
+    changed
 }
 
 /// `later`, a line about a check's credit, merged into `earlier`, one still
@@ -2067,7 +2102,14 @@ impl AppState {
         }
         let now = chrono::Utc::now();
         let pending: Vec<Pending> = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            for index in 0..inner.sessions.len() {
+                if engram_retire_launcher_checks(&mut inner.sessions[index], now) {
+                    // Removing a carried entry removes its durable restart
+                    // marker, including when the launching session is idle.
+                    let _ = inner.session_mut_by_index(index);
+                }
+            }
             inner
                 .sessions
                 .iter()
@@ -2128,8 +2170,8 @@ impl AppState {
             let Some(index) = inner.find_session_index(&pending.session_id) else {
                 continue;
             };
-            // The run's place, digest and search state live in memory only,
-            // so taking them does not mark the session for persistence.
+            // Search progress is in memory. Retirement also removes a durable
+            // restart marker, so that change must reach delta persistence.
             let record = &mut inner.sessions[index];
             let Some(carried) = record.engram.carried_checks.iter_mut().find(|carried| {
                 carried.check.host_turn_ref == pending.host_turn_ref
@@ -2138,6 +2180,9 @@ impl AppState {
                 continue;
             };
             engram_note_carried_run_read(carried, found, digest, launcher_gone, missing, ruled_out);
+            if engram_retire_launcher_checks(record, chrono::Utc::now()) {
+                let _ = inner.session_mut_by_index(index);
+            }
         }
     }
 

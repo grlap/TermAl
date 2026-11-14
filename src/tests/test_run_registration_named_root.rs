@@ -155,6 +155,7 @@ pub(super) fn name_root(
         .push(EngramWorkNamingHistory {
             store: store.clone(),
             work_id: binding.work_id.clone(),
+            acknowledged_root_binding: None,
             revision: 1,
             known_generation: generation,
             epoch: 0,

@@ -727,22 +727,8 @@ impl AppState {
         }
     }
 
-    /// Creates and updates cards for this rescan, under the lock that
-    /// committed its run deltas. `changed` names the runs whose summary
-    /// changed and was published; `failures` holds excerpts read before the
-    /// lock. Every card delta is published under the lock that allocated its
-    /// revision.
-    fn sync_test_run_cards_locked(
-        &self,
-        inner: &mut StateInner,
-        entries: &[TestRunEntry],
-        changed: &HashSet<String>,
-        failures: &HashMap<String, TestRunCardFailureRead>,
-        publish: &dyn Fn(&StateInner, &DeltaEvent),
-    ) {
-        self.sync_test_run_cards_traced_locked(inner, entries, changed, failures, publish);
-    }
-
+    /// Creates and updates cards under the lock that committed the run deltas.
+    /// Failure excerpts are read before taking that lock.
     fn sync_test_run_cards_traced_locked(
         &self,
         inner: &mut StateInner,

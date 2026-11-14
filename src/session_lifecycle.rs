@@ -541,12 +541,8 @@ impl AppState {
                     "failed persisting selected Resume capacity cancellation: {error:#}"
                 )))?;
             }
-            if capacity_nonce.is_none() && inner.sessions[index].engram.observation_delete_requested {
-                inner.sessions[index].engram.observation_delete_requested = false;
-                if let Err(error) = self.persist_session_internal_locked(&inner, session_id) {
-                    inner.sessions[index].engram.observation_delete_requested = true;
-                    return Err(ApiError::internal(format!("failed to cancel pending Delete: {error:#}")));
-                }
+            if capacity_nonce.is_none() {
+                self.cancel_observation_delete_for_resume_locked(&mut inner, index)?;
             }
             let record = &inner.sessions[index];
             if capacity_nonce.is_some_and(|nonce| !provider_capacity_resume_owned(record, nonce)) {
@@ -579,7 +575,8 @@ impl AppState {
             if ordinary_queue_position(record).is_none() {
                 if record.orchestrator_auto_dispatch_blocked {
                     let before = record.clone();
-                    inner.sessions[index].set_auto_dispatch_blocked(false);
+                    inner.session_mut_by_index(index).expect("session index should be valid")
+                        .set_auto_dispatch_blocked(false);
                     if let Err(error) = self.commit_session_locked(&mut inner, session_id) {
                         inner.sessions[index] = before;
                         return Err(ApiError::internal(format!("failed persisting Resume: {error:#}")));
@@ -1603,12 +1600,34 @@ impl AppState {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner.find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
-        if inner.sessions[index].engram.observation_delete_requested {
-            inner.sessions[index].engram.observation_delete_requested = false;
-            if let Err(error) = self.persist_session_internal_locked(&inner, session_id) {
-                inner.sessions[index].engram.observation_delete_requested = true;
-                return Err(ApiError::internal(format!("failed to cancel pending Delete: {error:#}")));
-            }
+        self.cancel_observation_delete_for_resume_locked(&mut inner, index)
+    }
+
+    fn cancel_observation_delete_for_resume_locked(
+        &self,
+        inner: &mut StateInner,
+        index: usize,
+    ) -> Result<(), ApiError> {
+        if !inner.sessions[index].engram.observation_delete_requested {
+            return Ok(());
+        }
+        let before = inner.sessions[index].clone();
+        let retained_notice = runtime_observation_terminal_removal_notice(&before);
+        let record = inner.session_mut_by_index(index).expect("session index should be valid");
+        record.engram.observation_delete_requested = false;
+        // Replace the Delete presentation, while preserving any newer runtime
+        // preview. The retained observation facts themselves stay untouched.
+        if record.session.preview == SOURCE_OBSERVATION_DELETE_RETAINED
+            || record.session.preview == SOURCE_OBSERVATION_ACTIVE_DELETE_RETAINED
+            || retained_notice.as_deref() == Some(record.session.preview.as_str())
+        {
+            record.session.preview = record.session.messages.iter().rev()
+                .find_map(Message::preview_text)
+                .unwrap_or_else(|| "Ready for a prompt.".to_owned());
+        }
+        if let Err(error) = self.commit_session_locked(inner, &before.session.id) {
+            inner.sessions[index] = before;
+            return Err(ApiError::internal(format!("failed to cancel pending Delete: {error:#}")));
         }
         Ok(())
     }

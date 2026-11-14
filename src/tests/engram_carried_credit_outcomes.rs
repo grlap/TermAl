@@ -10,18 +10,25 @@ mod credit_corrections {
 #[test]
 fn ordinary_claim_changes_never_relabel_the_original_carried_launch() {
     for terminal in [false, true] {
-    for changed in ["revision", "fence", "claim", "work", "missing"] {
-        let (turn, worktree) = ordinary_carried_turn("ordinary-carried-claim-custody");
-        ordinary_launch_gate(&turn, &worktree, true);
-        let run = terminal.then(|| finish_run(&worktree, "passed", &"f".repeat(64)));
-        turn.state.poll_engram_carried_runs();
-        let original = turn.record(|record| {
-            let carried = &record.engram.carried_checks[0];
-            (record.engram.work_binding.clone(), carried.work_id.clone(), carried.claim_id.clone(),
-                carried.claim_fence, carried.check.host_turn_ref.clone(), carried.root_generation,
-                carried.run_directory.clone(), carried.terminal_digest.clone())
-        });
-        turn.record_mut(|record| {
+        for changed in ["revision", "fence", "claim", "work", "missing"] {
+            let (turn, worktree) = ordinary_carried_turn("ordinary-carried-claim-custody");
+            ordinary_launch_gate(&turn, &worktree, true);
+            let run = terminal.then(|| finish_run(&worktree, "passed", &"f".repeat(64)));
+            let original = turn.record(|record| {
+                let carried = &record.engram.carried_checks[0];
+                (
+                    record.engram.work_binding.clone(),
+                    carried.work_id.clone(),
+                    carried.claim_id.clone(),
+                    carried.claim_fence,
+                    carried.check.host_turn_ref.clone(),
+                    carried.root_generation,
+                    carried.run_directory.clone(),
+                    carried.terminal_digest.clone(),
+                )
+            });
+            turn.state.poll_engram_carried_runs();
+            turn.record_mut(|record| {
             match changed {
                 "revision" => record.engram.work_binding.as_mut().unwrap().work_revision += 1,
                 "fence" => record.engram.work_binding.as_mut().unwrap().claim_fence += 1,
@@ -32,28 +39,48 @@ fn ordinary_claim_changes_never_relabel_the_original_carried_launch() {
             assert!(runtime_observation_check_owner(record).is_none(),
                 "a changed current association cannot start checks under the original trace owner");
         });
-        turn.state.poll_engram_carried_runs();
-        turn.record(|record| {
-            let carried = &record.engram.carried_checks[0];
-            assert_eq!((&carried.work_id, &carried.claim_id, carried.claim_fence,
-                &carried.check.host_turn_ref, carried.root_generation,
-                &carried.run_directory, &carried.terminal_digest),
-                (&original.1, &original.2, original.3, &original.4, original.5, &original.6, &original.7));
-            assert!(record.engram.carried_consumed_runs.is_empty());
-        });
-        turn.record_mut(|record| record.engram.work_binding = original.0);
-        turn.record(|record| assert!(runtime_observation_check_owner(record).is_some()));
-        if let Some(run) = run {
-            assert_carried_artifact_custody(&turn, &run, true);
-        } else {
-            assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
-            turn.record(|record| {
-                assert_eq!(record.engram.carried_checks.len(), 1);
-                assert!(record.engram.carried_checks[0].run_directory.is_none());
-                assert!(record.engram.carried_checks[0].terminal_digest.is_none());
-            });
+            turn.state.poll_engram_carried_runs();
+            if let Some(run) = &run {
+                assert_retired_run(&turn, run);
+            } else {
+                turn.record(|record| {
+                    let carried = &record.engram.carried_checks[0];
+                    assert_eq!(
+                        (
+                            &carried.work_id,
+                            &carried.claim_id,
+                            carried.claim_fence,
+                            &carried.check.host_turn_ref,
+                            carried.root_generation,
+                            &carried.run_directory,
+                            &carried.terminal_digest
+                        ),
+                        (
+                            &original.1,
+                            &original.2,
+                            original.3,
+                            &original.4,
+                            original.5,
+                            &original.6,
+                            &original.7
+                        )
+                    );
+                    assert!(record.engram.carried_consumed_runs.is_empty());
+                });
+            }
+            turn.record_mut(|record| record.engram.work_binding = original.0);
+            turn.record(|record| assert!(runtime_observation_check_owner(record).is_some()));
+            if let Some(run) = run {
+                assert_carried_artifact_custody(&turn, &run, true);
+            } else {
+                assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
+                turn.record(|record| {
+                    assert_eq!(record.engram.carried_checks.len(), 1);
+                    assert!(record.engram.carried_checks[0].run_directory.is_none());
+                    assert!(record.engram.carried_checks[0].terminal_digest.is_none());
+                });
+            }
         }
-    }
     }
 }
 
@@ -80,14 +107,15 @@ fn an_expired_or_fenced_launch_does_not_poll_a_new_artifact_or_consume_verificat
         assert!(engram_terminal_record_digest(&run).is_some(), "a valid candidate exists");
         turn.state.poll_engram_carried_runs();
         turn.record(|record| {
-            assert_eq!(record.engram.carried_checks.len(), 1);
-            let carried = &record.engram.carried_checks[0];
-            assert!(carried.run_directory.is_none() && carried.terminal_digest.is_none());
+            assert_eq!(record.engram.carried_checks.len(), usize::from(!expired));
+            if let Some(carried) = record.engram.carried_checks.first() {
+                assert!(carried.run_directory.is_none() && carried.terminal_digest.is_none());
+            }
             assert!(record.engram.carried_consumed_runs.is_empty());
         });
         assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
         turn.record(|record| {
-            assert_eq!(record.engram.carried_checks.len(), 1);
+            assert_eq!(record.engram.carried_checks.len(), usize::from(!expired));
             assert!(record.engram.carried_consumed_runs.is_empty());
         });
     }

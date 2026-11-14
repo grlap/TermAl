@@ -445,6 +445,7 @@ fn test_run_unknown_reason(
 /// run is `running`, at once when a tracked directory changed, and otherwise
 /// once the idle interval has passed since the last rescan (or there has been
 /// none). `dirs_changed` is only asked when nothing else decides.
+#[cfg(test)]
 fn test_run_rescan_due(
     active: bool,
     since_last_rescan: Option<Duration>,
@@ -668,6 +669,7 @@ impl AppState {
     /// Rescans every local project's run directories and publishes what
     /// changed. Returns whether any indexed run is `running`, which sets the
     /// next rescan's interval.
+    #[cfg(test)]
     fn refresh_test_runs(&self) -> bool {
         self.refresh_test_runs_from("direct")
     }
@@ -686,6 +688,7 @@ impl AppState {
     /// `writer_may_be_alive` gets a recorded pid and when the file carrying
     /// it was last written. `publish` is called under the state lock that
     /// allocated the event's revision.
+    #[cfg(test)]
     fn refresh_test_runs_with(
         &self,
         writer_may_be_alive: &TestRunLiveness,
@@ -696,6 +699,7 @@ impl AppState {
 
     /// One observation time for the scan, including cached parses and
     /// post-liveness rereads. Tests inject time without a state-wide clock.
+    #[cfg(test)]
     fn refresh_test_runs_at_with(
         &self,
         now: chrono::DateTime<chrono::Utc>,

@@ -2949,11 +2949,40 @@ impl AppState {
             }
             _ => None,
         };
+        // Keep the successful explicit naming's validated held association
+        // beside its current selection. Lifecycle journals/proofs deliberately
+        // retain their older recovery binding, including after a claim lapses.
+        // This value shares the selection's persistence and rollback boundary;
+        // it is usable only once the whole authority image is published.
+        let acknowledged =
+            engram_work_source_root_for_work(&inner.engram_work_source_roots, &store, &claim.work_id)
+                .filter(|selection| {
+                    selection.claim_id == association.binding.claim_id
+                        && selection.claim_fence == association.binding.claim_fence
+                })
+                .map(|selection| EngramAcknowledgedRootBinding {
+                    selection: selection.clone(),
+                    binding: association.binding.clone(),
+                });
+        let previous_acknowledged = inner
+            .engram_work_naming_history
+            .iter_mut()
+            .enumerate()
+            .find(|(_, history)| history.store == store && history.work_id == claim.work_id)
+            .map(|(index, history)| {
+                (
+                    index,
+                    std::mem::replace(&mut history.acknowledged_root_binding, acknowledged),
+                )
+            });
         if let Err(error) = self.commit_engram_root_locked(&mut inner) {
             // Nothing was kept, so the agent is told of nothing and the
             // running turn keeps its root unsealed.
             inner.engram_work_source_roots = previous.into();
             inner.engram_named_root_journal = previous_journal.into();
+            if let Some((index, previous)) = previous_acknowledged {
+                inner.engram_work_naming_history[index].acknowledged_root_binding = previous;
+            }
             let engram = &mut inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid")

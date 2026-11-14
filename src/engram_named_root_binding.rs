@@ -496,6 +496,16 @@ fn engram_named_root_journal_limit(_inner: &StateInner) -> usize {
     ENGRAM_NAMED_ROOT_JOURNAL_LIMIT
 }
 
+// The held association already validated by an explicit naming. Its exact
+// selection distinguishes a recovered generation from retained lifecycle
+// proofs; it grants no authority independently of the published work image.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EngramAcknowledgedRootBinding {
+    selection: EngramWorkSourceRoot,
+    binding: EngramControlWorkBinding,
+}
+
 /// History belongs to a work, rather than the disposable receipts of its
 /// successive claims. The revision orders publication, not allocation.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -503,6 +513,8 @@ fn engram_named_root_journal_limit(_inner: &StateInner) -> usize {
 struct EngramWorkNamingHistory {
     store: EngramAuthorityStoreKey,
     work_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    acknowledged_root_binding: Option<EngramAcknowledgedRootBinding>,
     revision: u64,
     known_generation: u64,
     /// Numeric-only legacy records are never a canonical history frontier.
@@ -641,6 +653,7 @@ fn engram_record_naming_history(
             .push(EngramWorkNamingHistory {
                 store: store.clone(),
                 work_id: work_id.to_owned(),
+                acknowledged_root_binding: None,
                 revision: 1,
                 known_generation: generation,
                 epoch: 0,

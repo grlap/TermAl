@@ -104,6 +104,30 @@ fn native_opening_after_claim_recovery_reaches_source_capture() {
                 );
             }
         }
+        // Restore the real persisted naming metadata before S0. The runtime
+        // and source adapter belong to the new turn, not to this retained value.
+        let saved = load_state(turn.state.persistence_path.as_path())
+            .unwrap()
+            .unwrap();
+        let retained = saved.engram_work_naming_history[0]
+            .acknowledged_root_binding
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            retained.selection, saved.engram_work_source_roots[0],
+            "{sequence}"
+        );
+        assert_eq!(
+            Some(&retained.binding),
+            held.items[0].control_binding.as_ref(),
+            "{sequence}"
+        );
+        {
+            let mut inner = turn.state.inner.lock().unwrap();
+            inner.engram_work_naming_history = saved.engram_work_naming_history;
+            inner.engram_work_source_roots = saved.engram_work_source_roots;
+            inner.engram_named_root_journal = saved.engram_named_root_journal;
+        }
         let (entry_fence, proof_fence) = {
             let inner = turn.state.inner.lock().unwrap();
             let entry = &inner.engram_work_source_roots[0];
@@ -132,7 +156,13 @@ fn native_opening_after_claim_recovery_reaches_source_capture() {
                 observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 owner.snapshot(until, None)
             }));
+        let held_reads = turn.transport.held_claim_reads();
         turn.begin("Native opening authority diagnostic");
+        assert_eq!(
+            turn.transport.held_claim_reads(),
+            held_reads,
+            "{sequence}: S0 uses the acknowledged local binding without a held-claim RPC"
+        );
         let opening = turn
             .record(|record| record.engram.declared_run_turn.clone())
             .unwrap();

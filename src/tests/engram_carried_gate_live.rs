@@ -126,6 +126,14 @@ fn live_carried_gate(suffix: &str) -> LiveCarriedGate {
             .expect("state mutex poisoned");
         inner.preferences.engram.binary_path = live_engram_binary().to_string_lossy().into_owned();
         inner.preferences.engram.home = gate.home.to_string_lossy().into_owned();
+        // The prompt fixture preinstalls settings without learning a store.
+        // Real enablement must run readiness before this fixture names a root.
+        inner
+            .projects
+            .iter_mut()
+            .find(|project| project.id == project_id)
+            .expect("carried gate project exists")
+            .engram = None;
     }
     gate.fixture
         .state
@@ -141,6 +149,29 @@ fn live_carried_gate(suffix: &str) -> LiveCarriedGate {
             },
         )
         .expect("real readiness identifies the disposable store");
+    let database = {
+        let inner = gate.fixture.state.inner.lock().unwrap();
+        inner
+            .find_project(&project_id)
+            .unwrap()
+            .engram
+            .as_ref()
+            .unwrap()
+            .authority_store_key
+            .as_ref()
+            .expect("real readiness learned the disposable store identity")
+            .database_path
+            .clone()
+    };
+    assert!(
+        fs::canonicalize(database)
+            .unwrap()
+            .starts_with(fs::canonicalize(&gate.home).unwrap())
+    );
+    let context_read = phase_sync::PollGuard::new();
+    while live_record(&gate, |record| record.engram.context_nudge_in_progress) {
+        context_read.wait("the context read started by real enablement finishes");
+    }
     let added = live_engram_work(&gate, &["add", "Carried gate live check", "--json"]);
     let work_ref = added["work"]["short_ref"]
         .as_str()
@@ -359,13 +390,11 @@ fn live_carried_background_gate_keeps_artifact_custody_without_automatic_native_
     assert!(live_verifications(&gate).is_empty());
     finish_live_run(&gate);
     gate.fixture.state.poll_engram_carried_runs();
-    let (run, digest) = live_record(&gate, |record| {
-        let carried = &record.engram.carried_checks[0];
-        (
-            carried.run_directory.clone().unwrap(),
-            carried.terminal_digest.clone().unwrap(),
-        )
+    let run = live_record(&gate, |record| {
+        assert!(record.engram.carried_checks.is_empty());
+        record.engram.carried_consumed_runs.last().cloned().unwrap()
     });
+    let digest = engram_terminal_record_digest(&run).unwrap();
     assert!(
         engram_read_carried_run(&run, &digest).unwrap().passed,
         "actual artifact reader"
@@ -378,12 +407,8 @@ fn live_carried_background_gate_keeps_artifact_custody_without_automatic_native_
         "a launch artifact is not registered native verification"
     );
     live_record(&gate, |record| {
-        assert_eq!(record.engram.carried_checks.len(), 1);
-        assert_eq!(
-            record.engram.carried_checks[0].terminal_digest.as_deref(),
-            Some(digest.as_str())
-        );
-        assert!(record.engram.carried_consumed_runs.is_empty());
+        assert!(record.engram.carried_checks.is_empty());
+        assert!(record.engram.carried_consumed_runs.contains(&run));
     });
     assert_no_live_turn_gate(&gate.fixture.transport);
 }

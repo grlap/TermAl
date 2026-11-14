@@ -2186,6 +2186,7 @@ impl AppState {
                     .push(EngramWorkNamingHistory {
                         store: store.clone(),
                         work_id: binding.work_id.clone(),
+                        acknowledged_root_binding: None,
                         revision: 0,
                         known_generation: 0,
                         epoch: 0,

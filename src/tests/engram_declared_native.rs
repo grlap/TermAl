@@ -20,18 +20,565 @@ struct NativeFixture {
 }
 
 #[test]
-fn native_opening_authority_never_renews_the_capture_budget() {
-    let requested = std::time::Instant::now();
-    let remaining = requested + Duration::from_secs(1);
-    assert_eq!(
-        native_opening_authority_deadline(&EngramBudgetClock::Real, remaining, requested),
-        remaining
-    );
-    let full = requested + NATIVE_S0_CAPTURE_BUDGET;
-    assert_eq!(
-        native_opening_authority_deadline(&EngramBudgetClock::Real, full, requested),
-        requested + TEST_RUN_REGISTRATION_DURABILITY_BUDGET
-    );
+fn native_opening_keeps_its_local_binding_without_reading_held_claims() {
+    for claude in [false, true] {
+        let native = NativeFixture::new("native-local-opening", claude);
+        let expected = {
+            let inner = native.fixture.state.inner.lock().unwrap();
+            test_run_registration_named_binding(
+                &inner,
+                &native.session,
+                inner
+                    .projects
+                    .iter()
+                    .find(|project| project.id == native.fixture.project_id)
+                    .unwrap()
+                    .engram
+                    .as_ref()
+                    .unwrap()
+                    .authority_store_key
+                    .as_ref(),
+                test_run_worktree_keys(&native.fixture.root).as_ref(),
+            )
+            .unwrap()
+        };
+        let transport = ScriptedEngramControlTransport::new([]);
+        transport.replace_held_claims([Err(EngramTransportError::deadline(
+            "authority is unavailable",
+        ))]);
+        native
+            .fixture
+            .state
+            .install_test_engram_transport(transport.clone());
+        native.prepare();
+        assert_eq!(transport.held_claim_reads(), 0, "S0 uses no authority RPC");
+        let inner = native.fixture.state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&native.session).unwrap()];
+        let turn = record.engram.declared_run_turn.as_ref().unwrap();
+        assert_eq!(
+            (Some(turn.binding.clone()), Some(turn.named.clone())),
+            expected
+        );
+        assert!(turn.snapshot.is_some());
+        assert!(declared_run_opening_notice(record).is_none());
+    }
+}
+
+#[test]
+fn native_opening_uses_only_the_acknowledged_binding_for_its_exact_selection() {
+    for claude in [false, true] {
+        for case in [
+            "current",
+            "other-work",
+            "other-claim",
+            "other-run",
+            "other-root-execution",
+            "old-fence",
+            "new-fence",
+            "old-revision",
+            "unpublished",
+            "missing-owner",
+            "missing-binding",
+            "foreign-selection",
+            "unresolved",
+            "changed-during-capture",
+        ] {
+            let native = NativeFixture::new("native-local-recovered-binding", claude);
+            let mut expected = {
+                let mut inner = native.fixture.state.inner.lock().unwrap();
+                let root = &mut inner.engram_work_source_roots[0];
+                root.claim_fence += 1;
+                let fence = root.claim_fence;
+                let selection = root.clone();
+                let history = &mut inner.engram_work_naming_history[0];
+                let mut binding = history.proofs[0].binding.clone();
+                binding.claim_fence = fence;
+                binding.work_revision += 1;
+                history.epoch = ENGRAM_NAMING_HISTORY_EPOCH;
+                history.owner_version = 1;
+                history.transition = Some(EngramAuthorityTransition {
+                    id: "published-recovered-name".into(),
+                    version: 1,
+                    binding: history.proofs[0].binding.clone(),
+                    phase: EngramAuthorityPhase::Published,
+                });
+                history.acknowledged_root_binding = Some(EngramAcknowledgedRootBinding {
+                    selection,
+                    binding: binding.clone(),
+                });
+                binding
+            };
+            {
+                let mut inner = native.fixture.state.inner.lock().unwrap();
+                let history = &mut inner.engram_work_naming_history[0];
+                let acknowledged = history.acknowledged_root_binding.as_mut().unwrap();
+                match case {
+                    "other-work" => acknowledged.binding.work_id.push_str("-other"),
+                    "other-claim" => acknowledged.binding.claim_id.push_str("-other"),
+                    "other-run" => acknowledged.binding.run_id.push_str("-other"),
+                    "other-root-execution" => {
+                        acknowledged.binding.root_execution_id.push_str("-other")
+                    }
+                    "old-fence" => acknowledged.binding.claim_fence -= 1,
+                    "new-fence" => acknowledged.binding.claim_fence += 1,
+                    "old-revision" => acknowledged.binding.work_revision -= 2,
+                    "foreign-selection" => {
+                        acknowledged.selection.named_by_session.push_str("-other")
+                    }
+                    "unpublished" => {
+                        history.transition.as_mut().unwrap().phase = EngramAuthorityPhase::Prepared
+                    }
+                    "unresolved" => history.unresolved_runs.push(expected.clone()),
+                    "missing-owner" => history.transition = None,
+                    "missing-binding" => history.acknowledged_root_binding = None,
+                    _ => {}
+                }
+            }
+            let snapshot = native
+                .source_owner
+                .snapshot(std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT, None)
+                .unwrap();
+            let state = Arc::downgrade(&native.fixture.state.inner);
+            let move_owner = case == "changed-during-capture";
+            let captures = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let seen = captures.clone();
+            native
+                .fixture
+                .state
+                .inner
+                .lock()
+                .unwrap()
+                .test_declared_run_snapshot = Some(Arc::new(move |_, _| {
+                seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if move_owner {
+                    state
+                        .upgrade()
+                        .unwrap()
+                        .lock()
+                        .unwrap()
+                        .engram_work_naming_history[0]
+                        .acknowledged_root_binding
+                        .as_mut()
+                        .unwrap()
+                        .binding
+                        .work_revision += 1;
+                }
+                Ok(snapshot.clone())
+            }));
+            let transport = ScriptedEngramControlTransport::new([]);
+            transport.replace_held_claims([Err(EngramTransportError::deadline(
+                "no opening authority RPC",
+            ))]);
+            native
+                .fixture
+                .state
+                .install_test_engram_transport(transport.clone());
+            native.fixture.state.prepare_declared_run_before_handoff(
+                &native.session,
+                &native.token,
+                1,
+            );
+            assert_eq!(transport.held_claim_reads(), 0, "{case}");
+            let inner = native.fixture.state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&native.session).unwrap()];
+            let opening = record.engram.declared_run_turn.as_ref();
+            if case == "current" {
+                let opening = opening.unwrap();
+                assert_eq!(opening.binding, expected, "{case}");
+                assert!(opening.snapshot.is_some());
+                assert_eq!(captures.load(std::sync::atomic::Ordering::SeqCst), 1);
+                expected.claim_fence -= 1;
+                expected.work_revision -= 1;
+                assert_eq!(
+                    inner.engram_work_naming_history[0].proofs[0].binding, expected,
+                    "the retained recovery proof stays historical"
+                );
+            } else {
+                assert!(
+                    opening.is_none_or(|opening| opening.snapshot.is_none()),
+                    "{case}"
+                );
+                assert_eq!(
+                    captures.load(std::sync::atomic::Ordering::SeqCst),
+                    usize::from(move_owner),
+                    "{case}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn native_opening_old_format_history_falls_back_only_at_the_proven_fence() {
+    for claude in [false, true] {
+        let native = NativeFixture::new("native-old-format-history", claude);
+        {
+            let mut inner = native.fixture.state.inner.lock().unwrap();
+            let mut old = serde_json::to_value(&inner.engram_work_naming_history[0]).unwrap();
+            old.as_object_mut()
+                .unwrap()
+                .remove("acknowledgedRootBinding");
+            inner.engram_work_naming_history[0] = serde_json::from_value(old).unwrap();
+            assert!(
+                inner.engram_work_naming_history[0]
+                    .acknowledged_root_binding
+                    .is_none()
+            );
+        }
+        native.prepare();
+        let original = {
+            let mut inner = native.fixture.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&native.session).unwrap();
+            let original = inner.sessions[index]
+                .engram
+                .declared_run_turn
+                .as_ref()
+                .unwrap()
+                .binding
+                .clone();
+            inner.engram_work_source_roots[0].claim_fence += 1;
+            original
+        };
+        native
+            .fixture
+            .state
+            .prepare_declared_run_before_handoff(&native.session, &native.token, 1);
+        let inner = native.fixture.state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&native.session).unwrap()];
+        assert!(
+            record.engram.declared_run_turn.is_none(),
+            "missing refreshed authority cannot borrow an old proof"
+        );
+        assert_eq!(
+            inner.engram_work_naming_history[0].proofs[0].binding,
+            original
+        );
+    }
+}
+
+#[test]
+fn native_registration_keeps_forward_revision_and_closing_rejects_later_movement() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for claude in [false, true] {
+        for closing_revision in [4, 5, 3] {
+            let fixture = NativeFixture::new("native-registration-revision", claude);
+            fixture.held_revision(4);
+            fixture.prepare();
+            let mut recorder = fixture.recorder();
+            fixture.start(&mut recorder);
+            let original = fixture.wait();
+            assert_eq!(
+                original.binding.work_revision, 3,
+                "naming proof stays immutable"
+            );
+            let registered_binding = {
+                let inner = fixture.fixture.state.inner.lock().unwrap();
+                assert_eq!(
+                    inner.engram_work_naming_history[0].proofs[0]
+                        .binding
+                        .work_revision,
+                    3
+                );
+                let registration = &inner.test_run_registrations[&original.run_id];
+                assert_eq!(registration.declared_native.as_ref(), Some(&original));
+                let binding = registration.work_binding.clone().unwrap();
+                assert_eq!(
+                    binding.work_revision, 4,
+                    "registration retains the forward revision"
+                );
+                binding
+            };
+            let persisted = load_state(fixture.fixture.state.persistence_path.as_path())
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                persisted.test_run_registrations[&original.run_id].work_binding,
+                Some(registered_binding.clone()),
+                "the registration baseline is durable"
+            );
+            // Only change the authority after registration has settled. This
+            // must not be accepted as another forward refresh at closing.
+            fixture.held_revision(closing_revision);
+            fixture.artifact(include_str!("fixtures/declared-trx/pass.trx"));
+            let (start, registration, request, results) = fixture.finish(&mut recorder, 0);
+            assert_eq!(start, original);
+            assert_eq!(registration.work_binding, Some(registered_binding));
+            assert_eq!(registration.declared_native.as_ref(), Some(&original));
+            assert_eq!(
+                results["state"], "passed",
+                "the actual artifact remains visible"
+            );
+            assert_eq!(results["nativeEligible"], closing_revision == 4);
+            let body = engram_verification_record_body(&registration, &request, &results);
+            if closing_revision == 4 {
+                assert_eq!(
+                    body.unwrap().run.outcome,
+                    EngramVerificationRecordRunOutcome::Passed
+                );
+            } else {
+                assert!(
+                    body.unwrap_err()
+                        .contains("ineligible under its host authority checks")
+                );
+            }
+        }
+    }
+}
+
+struct ParkedNativeClaims {
+    gate: Arc<(Mutex<bool>, Condvar)>,
+    entered: Mutex<Option<mpsc::Sender<()>>>,
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+impl EngramControlTransport for ParkedNativeClaims {
+    fn request(
+        &self,
+        _: &EngramConnectionConfig,
+        _: &EngramControlRequest,
+        _: Duration,
+    ) -> Result<Value, EngramTransportError> {
+        Err(EngramTransportError::protocol(
+            "no control request expected",
+        ))
+    }
+
+    fn read_held_claims(
+        &self,
+        _: &EngramConnectionConfig,
+        _: Duration,
+    ) -> Result<EngramHeldClaims, EngramTransportError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if let Some(entered) = self.entered.lock().unwrap().take() {
+            entered.send(()).unwrap();
+        }
+        phase_sync::wait_for_gate(&self.gate, true);
+        Err(EngramTransportError::deadline(
+            "parked held claims released",
+        ))
+    }
+
+    fn shutdown_session(&self, _: &str) {}
+}
+
+#[test]
+fn native_handoff_and_shared_reader_progress_before_a_held_claim_answer() {
+    let native = NativeFixture::new("native-reader-opening", false);
+    native.prepare();
+    {
+        let mut inner = native.fixture.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&native.session).unwrap();
+        inner.sessions[index].engram.declared_run_turn = None;
+    }
+    let process = phase_sync::ParkedProcess::spawn();
+    let (runtime, _, _) =
+        test_shared_codex_runtime_with_process("native-reader", process.process.clone());
+    let (commands_tx, commands_rx) = mpsc::channel();
+    let dispatch = TurnDispatch::PersistentCodex {
+        human_prompt_id: None,
+        federation_handoff: None,
+        active_turn_generation: 1,
+        opening_prompt: None,
+        mailbox_notification: None,
+        runtime_token: native.token.clone(),
+        sender: commands_tx,
+        session_id: native.session.clone(),
+        service_tier: Ok(None),
+        command: CodexPromptCommand {
+            active_turn_generation: 1,
+            approval_policy: CodexApprovalPolicy::Never,
+            attachments: Vec::new(),
+            cwd: test_run_display_path(&native.fixture.root),
+            model: "gpt-5.4".into(),
+            prompt: "Native declared opening.".into(),
+            reasoning_effort: CodexReasoningEffort::Medium,
+            service_tier: None,
+            resume_thread_id: None,
+            sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            delivery_receipt: None,
+        },
+    };
+    let pending: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let (reply_tx, reply_rx) = mpsc::channel();
+    pending
+        .lock()
+        .unwrap()
+        .insert("unrelated-native-reply".into(), reply_tx);
+    std::thread::scope(|scope| {
+        // Drop before scoped joins, including on a blocked-reader assertion.
+        let release = phase_sync::ReleaseGateOnDrop::new();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let authority = Arc::new(ParkedNativeClaims {
+            gate: release.gate(),
+            entered: Mutex::new(Some(entered_tx)),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        native
+            .fixture
+            .state
+            .install_test_engram_transport(authority.clone());
+        let target = AppState::engram_source_root_target_locked(
+            &native.fixture.state.inner.lock().unwrap(),
+            &native.session,
+        )
+        .unwrap()
+        .unwrap();
+        let authority_reader = authority.clone();
+        let parked = scope.spawn(move || {
+            authority_reader
+                .read_held_claims(&target.connection, ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)
+        });
+        phase_sync::receive(&entered_rx, "held answer parked before native handoff");
+        let state = &native.fixture.state;
+        let reader = scope.spawn(move || {
+            assert!(matches!(
+                deliver_turn_dispatch(state, dispatch),
+                TurnDispatchDeliveryOutcome::Delivered
+            ));
+            handle_shared_codex_app_server_message(
+                &json!({"id":"unrelated-native-reply", "result":{"routed":true}}),
+                state,
+                &runtime.runtime_id,
+                &pending,
+                &runtime.sessions,
+                &runtime.thread_sessions,
+                &runtime.input_tx,
+            )
+            .unwrap();
+        });
+        assert!(
+            matches!(phase_sync::receive(&commands_rx, "native provider enqueue before authority answer"),
+            CodexRuntimeCommand::Prompt { session_id, .. } if session_id == native.session)
+        );
+        assert_eq!(
+            phase_sync::receive(&reply_rx, "shared reader routes a second response").unwrap(),
+            json!({"routed":true})
+        );
+        assert_eq!(
+            authority.calls.load(Ordering::SeqCst),
+            1,
+            "only the explicit parked read called Engram"
+        );
+        assert!(
+            !*release.gate().0.lock().unwrap(),
+            "delivery preceded the parked answer"
+        );
+        let inner = native.fixture.state.inner.lock().unwrap();
+        let turn = inner.sessions[inner.find_session_index(&native.session).unwrap()]
+            .engram
+            .declared_run_turn
+            .as_ref()
+            .unwrap();
+        assert!(
+            turn.snapshot.is_some(),
+            "the actual handoff still prepares S0 for its turn"
+        );
+        drop(inner);
+        reader.join().unwrap();
+        release.release();
+        assert!(parked.join().unwrap().is_err());
+    });
+}
+
+#[test]
+fn native_registration_refuses_later_authority_without_relabelling_the_original_start() {
+    for claude in [false, true] {
+        for changed in [false, true] {
+            let native = NativeFixture::new("native-later-authority", claude);
+            native.prepare();
+            let transport = ScriptedEngramControlTransport::new([]);
+            if changed {
+                let mut binding = native
+                    .fixture
+                    .state
+                    .inner
+                    .lock()
+                    .unwrap()
+                    .engram_work_naming_history[0]
+                    .proofs[0]
+                    .binding
+                    .clone();
+                binding.run_id = "replacement-recovery-run".into();
+                transport.replace_held_claims([Ok(EngramHeldClaims {
+                    items: vec![EngramHeldClaim {
+                        work_id: binding.work_id.clone(),
+                        short_ref: "changed-native".into(),
+                        claim_id: binding.claim_id.clone(),
+                        claim_fence: binding.claim_fence,
+                        focused: false,
+                        control_binding: Some(binding),
+                    }],
+                    omitted: 0,
+                })]);
+            } else {
+                transport.replace_held_claims([Err(EngramTransportError::deadline(
+                    "later authority unavailable",
+                ))]);
+            }
+            let release = phase_sync::ReleaseGateOnDrop::new();
+            let gate = release.gate();
+            let (entered_tx, entered_rx) = mpsc::channel();
+            transport.on_next_held_claim_read(move |_| {
+                entered_tx.send(()).unwrap();
+                phase_sync::wait_for_gate(&gate, true);
+            });
+            native
+                .fixture
+                .state
+                .install_test_engram_transport(transport.clone());
+            let mut recorder = native.recorder();
+            native.start(&mut recorder);
+            phase_sync::receive(
+                &entered_rx,
+                "registration checks authority after the original start",
+            );
+            let execution = native.execution().unwrap();
+            let original = execution.lock().unwrap().reservation.clone();
+            assert_eq!(
+                original.binding.work_revision, 3,
+                "the locally captured binding is immutable"
+            );
+            native.artifact(include_str!("fixtures/declared-trx/pass.trx"));
+            native.end(&mut recorder, 0);
+            release.release();
+            let guard = phase_sync::PollGuard::new();
+            loop {
+                if !execution.lock().unwrap().worker_active {
+                    break;
+                }
+                guard.wait("native registration authority refusal");
+            }
+            let job = execution.lock().unwrap();
+            assert_eq!(job.reservation, original);
+            assert!(!job.registered);
+            let reason = job.failure.as_deref().unwrap();
+            assert!(
+                reason.contains(if changed {
+                    "held association changed"
+                } else {
+                    "held-claim read"
+                }),
+                "{reason}"
+            );
+            drop(job);
+            assert_eq!(
+                transport.held_claim_reads(),
+                1,
+                "a failed attribution does not retry or recapture S0"
+            );
+            let inner = native.fixture.state.inner.lock().unwrap();
+            assert!(!inner.test_run_registrations.contains_key(&original.run_id));
+            let row = &inner.test_run_observations[&original.execution_id];
+            assert_eq!(row.declared_native.as_ref(), Some(&original));
+            assert_eq!(
+                row.summary.state,
+                TestRunState::Passed,
+                "the real artifact result stays visible without credit"
+            );
+            assert_eq!(row.summary.exit_code, if claude { None } else { Some(0) });
+            assert!(row.summary.ended_at.is_some());
+        }
+    }
 }
 
 #[test]
@@ -644,6 +1191,8 @@ impl NativeFixture {
     }
 
     fn held_revision(&self, revision: i64) {
+        // The naming proof stays at revision 3. Registration may retain a
+        // newer revision without rewriting the original opening reservation.
         let mut binding = {
             let inner = self.fixture.state.inner.lock().unwrap();
             inner.engram_work_naming_history[0].proofs[0]

@@ -973,7 +973,7 @@ fn engram_verification_record_results_are_terminal(registration: &TestRunRegistr
     let exit = results.get("exitCode");
     if registration.registered_at != start.registered_at
         || registration.request_identity != start.request_identity
-        || registration.work_binding.as_ref() != Some(&start.binding)
+        || !start.accepts_registration_binding(registration.work_binding.as_ref())
         || registration.named_root.as_ref() != Some(&start.named)
         || registration.authority_store.as_ref() != Some(&start.store)
         || results.get("runId").and_then(Value::as_str) != Some(start.run_id.as_str())
@@ -1106,7 +1106,7 @@ fn engram_verification_record_native_body(
     });
     if terminal.results_digest != file_content_hash(&digest)
         || registration.registered_at != start.registered_at
-        || registration.work_binding.as_ref() != Some(&start.binding)
+        || !start.accepts_registration_binding(registration.work_binding.as_ref())
         || registration.named_root.as_ref() != Some(&start.named)
         || registration.authority_store.as_ref() != Some(&start.store)
         || registration.source_owner.as_ref() != Some(&start.source.source_owner)

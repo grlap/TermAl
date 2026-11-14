@@ -139,6 +139,21 @@ impl Fixture {
             .unwrap()
     }
 
+    fn saved_session(&self) -> PersistedSessionRecord {
+        let encoded: String = self
+            .cache
+            .connection
+            .as_ref()
+            .unwrap()
+            .query_row(
+                "SELECT value_json FROM sessions WHERE id=?1",
+                [&self.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        serde_json::from_str(&encoded).unwrap()
+    }
+
     fn assert_reload(&self, expected: &[(String, String)]) {
         let loaded = load_state(self.state.persistence_path.as_path())
             .unwrap()
@@ -174,6 +189,314 @@ fn unchanged_tick_has_no_message_payload_or_sql_changes() {
     assert_eq!(fixture.ordered_rows(), before);
 }
 
+fn promote_queue_after_consumed_watermark(receipted: bool) {
+    let mut fixture = Fixture::new(0);
+    let (runtime, _commands, process) = test_shared_codex_runtime("queued-persist-watermark");
+    let prompt_id = "queued-after-watermark";
+    let prompt_text = "persist this promotion before handing it to the provider";
+    fixture.change(|record| {
+        record.session.status = SessionStatus::Idle;
+        record.runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime,
+                session_id: fixture.id.clone(),
+            }),
+        });
+        let prompt = PendingPrompt {
+            id: prompt_id.into(),
+            timestamp: stamp_now(),
+            text: prompt_text.into(),
+            expanded_text: None,
+            source: None,
+            attachments: Vec::new(),
+            engram_interrupted: false,
+            is_engram_retained: false,
+        };
+        if receipted {
+            queue_receipted_orchestrator_prompt_on_record(record, prompt, Vec::new());
+            // Enter at the promotion boundary after both existing fences have
+            // acknowledged this exact entry. No settlement thread is needed.
+            record
+                .queued_prompt_durability_holds
+                .get_mut(prompt_id)
+                .unwrap()
+                .acknowledged = true;
+            let delivery = record.prompt_deliveries.get_mut(prompt_id).unwrap();
+            delivery.disposition = PromptDeliveryDisposition::HandingOff;
+            delivery.attempt = 1;
+            delivery.write_ahead_acknowledged = true;
+            sync_prompt_delivery_view(record);
+        } else {
+            queue_prompt_on_record(record, prompt, Vec::new());
+        }
+    });
+
+    // The writer consumes the pending row while the dispatcher is outside
+    // StateInner preparing context. Promotion then starts after that watermark;
+    // no producer mutation can accidentally make the row eligible again.
+    fixture.persist();
+    assert!(fixture.ordered_rows().is_empty());
+    let read_saved = |fixture: &Fixture| {
+        let encoded: String = fixture
+            .cache
+            .connection
+            .as_ref()
+            .unwrap()
+            .query_row(
+                "SELECT value_json FROM sessions WHERE id=?1",
+                [&fixture.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        serde_json::from_str::<PersistedSessionRecord>(&encoded).unwrap()
+    };
+    let before = read_saved(&fixture);
+    assert_eq!(before.queued_prompts.len(), 1);
+    assert_eq!(before.queued_prompts[0].pending_prompt.id, prompt_id);
+    if receipted {
+        assert!(before.prompt_deliveries[prompt_id].message_id.is_none());
+    }
+
+    let generation = {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&fixture.id).unwrap();
+        let started = fixture
+            .state
+            .start_next_queued_turn_locked(&mut inner, index, false)
+            .unwrap()
+            .expect("the durable queue head should promote");
+        let TurnDispatch::PersistentCodex { command, .. } = started.dispatch else {
+            panic!("expected the installed Codex runtime");
+        };
+        assert_eq!(command.prompt, prompt_text);
+        assert!(inner.sessions[index].queued_prompts.is_empty());
+        command.active_turn_generation
+    };
+    fixture.persist();
+
+    let saved = read_saved(&fixture);
+    assert!(
+        saved.queued_prompts.is_empty(),
+        "SQLite must not retain an already-promoted queue head"
+    );
+    if receipted {
+        let delivery = &saved.prompt_deliveries[prompt_id];
+        assert_eq!(delivery.disposition, PromptDeliveryDisposition::HandingOff);
+        assert_eq!(delivery.message_id.as_deref(), Some(prompt_id));
+        assert_eq!(delivery.turn_generation, Some(generation));
+    }
+    let rows = fixture.ordered_rows();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].0, prompt_id);
+    assert_eq!(
+        serde_json::from_str::<Value>(&rows[0].1).unwrap()["text"],
+        prompt_text
+    );
+    let reloaded = load_state(fixture.state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    let record = &reloaded.sessions[reloaded.find_session_index(&fixture.id).unwrap()];
+    // Promotion left a running turn. Boot preserves its durable transcript
+    // and appends the ordinary interruption notice; that is not a replay.
+    assert_eq!(record.session.message_count as usize, rows.len() + 1);
+    assert_eq!(record.session.messages.len(), rows.len() + 1);
+    assert_eq!(record.session.status, SessionStatus::Error);
+    for (position, (id, encoded)) in rows.iter().enumerate() {
+        let message = &record.session.messages[position];
+        assert_eq!(message.id(), id);
+        assert_eq!(
+            serde_json::to_value(message).unwrap(),
+            serde_json::from_str::<Value>(encoded).unwrap()
+        );
+    }
+    assert!(matches!(
+        record.session.messages.last(),
+        Some(Message::Text {
+            author: Author::Assistant,
+            ..
+        })
+    ));
+    assert_eq!(
+        record
+            .session
+            .messages
+            .iter()
+            .filter(|message| message.id() == prompt_id)
+            .count(),
+        1,
+        "restart recovery must not duplicate the promoted input"
+    );
+    assert!(
+        !record
+            .queued_prompts
+            .iter()
+            .any(|queued| queued.pending_prompt.id == prompt_id),
+        "reload must not make the dispatched input eligible for replay"
+    );
+}
+
+#[test]
+fn ordinary_queued_promotion_persists_after_writer_consumed_the_row() {
+    promote_queue_after_consumed_watermark(false);
+}
+
+#[test]
+fn receipted_queued_promotion_persists_after_writer_consumed_the_row() {
+    promote_queue_after_consumed_watermark(true);
+}
+
+fn resume_retained_delete_after_consumed_watermark(public_resume: bool) {
+    let mut fixture = Fixture::new(1);
+    let (persist_tx, persist_rx) = mpsc::channel();
+    // Keep the production background path connected. A disconnected channel
+    // writes a full snapshot synchronously and would hide a missing row stamp.
+    fixture.state.persist_tx = persist_tx;
+    {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        let project = inner.create_project(
+            Some("Resume retained Delete".into()),
+            fixture.state.default_workdir.clone(),
+            default_local_remote_id(),
+        );
+        inner
+            .projects
+            .iter_mut()
+            .find(|entry| entry.id == project.id)
+            .unwrap()
+            .engram = Some(EngramProjectSettings {
+            enabled: true,
+            ..EngramProjectSettings::default()
+        });
+        let index = inner.find_session_index(&fixture.id).unwrap();
+        let record = inner.session_mut_by_index(index).unwrap();
+        record.session.project_id = Some(project.id);
+        record.session.status = SessionStatus::Active;
+        record.engram.work_binding = Some(EngramControlWorkBinding {
+            root_execution_id: "delete-root".into(),
+            work_id: "delete-work".into(),
+            run_id: "delete-run".into(),
+            claim_id: "delete-claim".into(),
+            work_revision: 1,
+            claim_fence: 1,
+        });
+        record.engram.unadmitted_active_turn = Some(EngramRuntimeObservedTurn::started(
+            "active-before-delete".into(),
+            record.active_turn_generation,
+        ));
+        // This is the same retention transition used by public Delete. It
+        // preserves the active observation and installs the exact Delete notice.
+        retain_source_observation_removal_locked(&mut inner, std::slice::from_ref(&fixture.id));
+    }
+    fixture.persist();
+    let before = fixture.saved_session();
+    assert!(before.engram_observation_delete_requested);
+    assert_eq!(
+        before.session.preview,
+        SOURCE_OBSERVATION_ACTIVE_DELETE_RETAINED
+    );
+    let transcript = fixture.ordered_rows();
+
+    // No fixture mutation occurs between consuming the retained row and Resume.
+    let error = if public_resume {
+        fixture
+            .state
+            .resume_session_queue(&fixture.id)
+            .err()
+            .unwrap()
+    } else {
+        fixture
+            .state
+            .resume_local_session_queue(&fixture.id, None)
+            .err()
+            .unwrap()
+    };
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(error.message, "session is busy, resetting or stopping");
+    {
+        let inner = fixture.state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&fixture.id).unwrap()];
+        assert!(!record.engram.observation_delete_requested);
+        assert!(record.engram.unadmitted_active_turn.is_some());
+    }
+    assert!(matches!(persist_rx.try_recv(), Ok(PersistRequest::Delta)));
+    fixture.persist();
+    let saved = fixture.saved_session();
+    assert!(
+        !saved.engram_observation_delete_requested,
+        "Resume must durably cancel Delete even when it then returns busy"
+    );
+    assert_ne!(
+        saved.session.preview,
+        SOURCE_OBSERVATION_ACTIVE_DELETE_RETAINED
+    );
+    assert_eq!(fixture.ordered_rows(), transcript);
+    let loaded = load_state(fixture.state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    let record = &loaded.sessions[loaded.find_visible_session_index(&fixture.id).unwrap()];
+    assert!(
+        !record.engram.observation_delete_requested,
+        "reload must not restore the Delete dispatch veto"
+    );
+    assert_ne!(
+        record.session.preview,
+        SOURCE_OBSERVATION_ACTIVE_DELETE_RETAINED
+    );
+}
+
+#[test]
+fn public_resume_cancels_retained_delete_after_writer_consumed_the_row() {
+    resume_retained_delete_after_consumed_watermark(true);
+}
+
+#[test]
+fn local_resume_cancels_retained_delete_after_writer_consumed_the_row() {
+    resume_retained_delete_after_consumed_watermark(false);
+}
+
+#[test]
+fn empty_queue_resume_persists_unpause_after_writer_consumed_the_row() {
+    let mut fixture = Fixture::new(1);
+    let (persist_tx, persist_rx) = mpsc::channel();
+    fixture.state.persist_tx = persist_tx;
+    fixture.change(|record| {
+        record.session.status = SessionStatus::Idle;
+        record.session.preview = "Keep this existing preview".into();
+        record.set_auto_dispatch_blocked(true);
+    });
+    fixture.persist();
+    assert!(fixture.saved_session().orchestrator_auto_dispatch_blocked);
+    let transcript = fixture.ordered_rows();
+
+    fixture.state.resume_session_queue(&fixture.id).unwrap();
+    {
+        let inner = fixture.state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&fixture.id).unwrap()];
+        assert!(record.queued_prompts.is_empty());
+        assert!(!record.orchestrator_auto_dispatch_blocked);
+        assert!(!record.session.queue_paused);
+    }
+    assert!(matches!(persist_rx.try_recv(), Ok(PersistRequest::Delta)));
+    fixture.persist();
+    let saved = fixture.saved_session();
+    assert!(
+        !saved.orchestrator_auto_dispatch_blocked,
+        "a successful empty-queue Resume must not leave SQLite paused"
+    );
+    assert_eq!(saved.session.preview, "Keep this existing preview");
+    assert_eq!(fixture.ordered_rows(), transcript);
+    let loaded = load_state(fixture.state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    let record = &loaded.sessions[loaded.find_visible_session_index(&fixture.id).unwrap()];
+    assert!(!record.orchestrator_auto_dispatch_blocked);
+    assert!(!record.session.queue_paused);
+    assert_eq!(record.session.preview, "Keep this existing preview");
+}
+
 #[test]
 fn metadata_only_tick_prepares_no_unchanged_message_payload() {
     for retained in [16, 128] {
@@ -195,6 +518,116 @@ fn metadata_only_tick_prepares_no_unchanged_message_payload() {
             counts.message_bytes
         );
     }
+}
+
+#[test]
+fn cancel_retained_delete_preserves_newer_preview_and_publishes_once() {
+    let mut fixture = Fixture::new(1);
+    let (persist_tx, persist_rx) = mpsc::channel();
+    fixture.state.persist_tx = persist_tx;
+    fixture.change(|record| {
+        record.engram.observation_delete_requested = true;
+        record.session.preview = "New provider progress after Delete".into();
+    });
+    fixture.persist();
+    let mut events = fixture
+        .state
+        .state_broadcast_senders
+        .state_events
+        .subscribe();
+
+    fixture
+        .state
+        .cancel_observation_delete_for_resume(&fixture.id)
+        .unwrap();
+    assert!(
+        events.try_recv().is_ok(),
+        "Delete cancellation must be published"
+    );
+    assert!(matches!(persist_rx.try_recv(), Ok(PersistRequest::Delta)));
+    fixture.persist();
+    let saved = fixture.saved_session();
+    assert!(!saved.engram_observation_delete_requested);
+    assert_eq!(saved.session.preview, "New provider progress after Delete");
+    let stamp = {
+        let inner = fixture.state.inner.lock().unwrap();
+        inner.sessions[inner.find_session_index(&fixture.id).unwrap()].mutation_stamp
+    };
+
+    fixture
+        .state
+        .cancel_observation_delete_for_resume(&fixture.id)
+        .unwrap();
+    let inner = fixture.state.inner.lock().unwrap();
+    assert_eq!(
+        inner.sessions[inner.find_session_index(&fixture.id).unwrap()].mutation_stamp,
+        stamp
+    );
+    assert!(matches!(
+        events.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
+    assert!(matches!(
+        persist_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+}
+
+#[test]
+fn cancel_retained_delete_rolls_back_on_persist_failure() {
+    let mut fixture = Fixture::new(1);
+    fixture.change(|record| {
+        record.engram.observation_delete_requested = true;
+        record.set_auto_dispatch_blocked(true);
+        record.session.preview = SOURCE_OBSERVATION_ACTIVE_DELETE_RETAINED.into();
+    });
+    fixture.persist();
+    let before = {
+        let inner = fixture.state.inner.lock().unwrap();
+        inner.sessions[inner.find_session_index(&fixture.id).unwrap()].clone()
+    };
+    fixture
+        .cache
+        .connection
+        .as_ref()
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER refuse_resume_update BEFORE UPDATE ON sessions BEGIN
+           SELECT RAISE(ABORT,'injected Resume session update failure');
+         END;",
+        )
+        .unwrap();
+    let mut events = fixture
+        .state
+        .state_broadcast_senders
+        .state_events
+        .subscribe();
+
+    // The default fixture's disconnected channel exercises the synchronous
+    // commit error, rather than an asynchronous request that only queued.
+    let error = fixture
+        .state
+        .cancel_observation_delete_for_resume(&fixture.id)
+        .unwrap_err();
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    {
+        let inner = fixture.state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&fixture.id).unwrap()];
+        assert!(record.engram.observation_delete_requested);
+        assert_eq!(record.session.preview, before.session.preview);
+        assert_eq!(
+            record.orchestrator_auto_dispatch_blocked,
+            before.orchestrator_auto_dispatch_blocked
+        );
+        assert_eq!(record.mutation_stamp, before.mutation_stamp);
+    }
+    assert!(matches!(
+        events.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
+    let saved = fixture.saved_session();
+    assert!(saved.engram_observation_delete_requested);
+    assert_eq!(saved.session.preview, before.session.preview);
 }
 
 #[test]

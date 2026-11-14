@@ -54,18 +54,9 @@ fn assert_matched_artifact_is_not_verification(turn: &EOCheckedTurn, run: &FsPat
         launcher_source_id_fixture()
     );
     turn.state.poll_engram_carried_runs();
-    turn.record(|record| {
-        assert_eq!(record.engram.carried_checks.len(), 1);
-        let carried = &record.engram.carried_checks[0];
-        assert_eq!(carried.run_directory.as_deref(), Some(run));
-        assert_eq!(carried.terminal_digest.as_deref(), Some(digest.as_str()));
-    });
+    assert_retired_run(turn, run);
     assert_launch_fact(turn, &turn.finish());
-    assert_eq!(
-        turn.record(|record| record.engram.carried_checks.len()),
-        1,
-        "closing an ordinary turn does not consume an artifact into verification"
-    );
+    assert_retired_run(turn, run);
 }
 
 fn launch_bash_gate(turn: &EOCheckedTurn, worktree: &FsPath, started: &str, finished: &str) {

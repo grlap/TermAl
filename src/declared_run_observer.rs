@@ -8,16 +8,11 @@
 include!("declared_run_task_end.rs");
 
 // The owner may use 60 s to capture source. Opening also reserves the existing
-// authority-read budget for declaration/preimage and publication stages;
+// margin for local declaration/preimage and publication stages;
 // registration durability has its own window. Expiry withholds credit,
 // not dispatch. Every source stage derives its cap from the same budget.
 const NATIVE_S0_CAPTURE_BUDGET: Duration = ENGRAM_SOURCE_METADATA_BUDGET;
 const NATIVE_S0_AUTHORITY_MARGIN: Duration = TEST_RUN_REGISTRATION_DURABILITY_BUDGET;
-
-fn native_opening_authority_deadline(clock: &EngramBudgetClock, capture_deadline: std::time::Instant,
-    requested: std::time::Instant) -> std::time::Instant {
-    capture_deadline.min(test_run_registration_deadline(clock, requested))
-}
 
 // Host-private provenance, persisted with the original execution before its
 // registration. A request file cannot supply or change this reservation.
@@ -38,6 +33,19 @@ struct DeclaredRunReservation {
     named: TestRunNamedRoot,
     // Provider time is attributed data, never the host reservation clock.
     provider_time: BTreeMap<String, Value>,
+}
+
+impl DeclaredRunReservation {
+    // Naming proves the recovery run and root fence. The registration worker
+    // may observe a newer work revision, just like a committed launcher run;
+    // that separately retained binding becomes the exact closing baseline.
+    fn accepts_registration_binding(&self, binding: Option<&EngramControlWorkBinding>) -> bool {
+        binding.is_some_and(|binding| {
+            engram_same_recovery_run(&self.binding, binding)
+                && binding.claim_fence == self.binding.claim_fence
+                && binding.work_revision >= self.binding.work_revision
+        })
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -142,9 +150,9 @@ struct DeclaredRunTurn {
     store: EngramAuthorityStoreKey,
     binding: EngramControlWorkBinding,
     named: TestRunNamedRoot,
-    // The name may have been refreshed after its retained proof was recorded.
-    // Recheck the selected root's fence here; the existing held-claim read
-    // validates and refreshes the binding before publishing S0.
+    // Freeze the locally acknowledged name and claim fence with S0.
+    // Registration retains its current revision separately; neither a newer
+    // claim nor a later source capture may replace this opening reservation.
     root_claim_fence: i64,
     snapshot: Option<DeclaredRunSnapshot>,
     opening_refusal: Option<String>,
@@ -171,6 +179,70 @@ fn declared_run_opening_notice(record: &SessionRecord) -> Option<String> {
     Some(format!("[TermAl] Native declared-command credit is unavailable for this turn ({code}). S0 stages: {}. The prompt proceeds. To seek credit, run the declared command as the first tool activity of a later turn after the source and named-root authority are valid.", turn.timings.summary()))
 }
 
+// A recovered name can retain an older proof's recovery association. Naming
+// has already validated and retained the held claim beside its exact current
+// selection. Use that local binding, never the session's focus
+// or a new RPC. Older proof-only images are usable only at their own fence.
+fn declared_run_opening_named_binding(
+    inner: &StateInner,
+    session_id: &str,
+    store: &EngramAuthorityStoreKey,
+    keys: &TestRunWorktreeKeys,
+) -> Result<(Option<EngramControlWorkBinding>, Option<TestRunNamedRoot>), ApiError> {
+    let (proof, named) =
+        test_run_registration_named_binding(inner, session_id, Some(store), Some(keys))?;
+    let (Some(proof), Some(named)) = (proof, named) else {
+        return Ok((None, None));
+    };
+    let fence = test_run_named_root_fence(inner, session_id, Some(store), Some(&named));
+    let history = inner
+        .engram_work_naming_history
+        .iter()
+        .find(|history| &history.store == store && history.work_id == proof.work_id);
+    let selection =
+        engram_work_source_root_for_work(&inner.engram_work_source_roots, store, &proof.work_id);
+    let confirmed = history.is_some_and(|history| {
+        if history.epoch == 0 && history.transition.is_none() {
+            history.unresolved_runs.is_empty()
+                && history.recovery_reason.is_none()
+                && !inner.engram_named_root_journal.iter().any(|journal| {
+                    &journal.store == store
+                        && engram_journal_names_work(journal, &proof.work_id)
+                        && journal.requires_reconciliation()
+                })
+        } else {
+            !engram_authority_work_unresolved(inner, store, &proof.work_id)
+        }
+    });
+    if !confirmed {
+        return Err(ApiError::conflict(
+            "native opening local naming authority is unconfirmed",
+        ));
+    }
+    let binding = match history.and_then(|history| history.acknowledged_root_binding.as_ref()) {
+        Some(acknowledged) => {
+            if selection != Some(&acknowledged.selection)
+                || !engram_same_recovery_run(&acknowledged.binding, &proof)
+                || Some(acknowledged.binding.claim_fence) != fence
+                || acknowledged.binding.claim_fence < proof.claim_fence
+                || acknowledged.binding.work_revision < proof.work_revision
+            {
+                return Err(ApiError::conflict(
+                    "native opening local naming authority is unconfirmed or changed",
+                ));
+            }
+            acknowledged.binding.clone()
+        }
+        None if Some(proof.claim_fence) == fence => proof,
+        None => {
+            return Err(ApiError::conflict(
+                "native opening has no local binding for the acknowledged root fence",
+            ));
+        }
+    };
+    Ok((Some(binding), Some(named)))
+}
+
 fn declared_run_opening_authority_locked(
     inner: &StateInner, session_id: &str, pending: &DeclaredRunTurn,
 ) -> Result<EngramSourceOwnerAuthority> {
@@ -189,8 +261,8 @@ fn declared_run_opening_authority_locked(
     }
     let authority = engram_source_owner_authority_locked(inner, session_id)
         .map_err(|error| anyhow!(error.message))?;
-    let (binding, named) = test_run_registration_named_binding(
-        inner, session_id, Some(&pending.store), Some(&pending.keys))
+    let (binding, named) = declared_run_opening_named_binding(
+        inner, session_id, &pending.store, &pending.keys)
         .map_err(|error| anyhow!(error.message))?;
     if authority.settings.authority_store_key.as_ref() != Some(&pending.store)
         || binding.as_ref() != Some(&pending.binding) || named.as_ref() != Some(&pending.named)
@@ -324,15 +396,26 @@ impl AppState {
             let deadline = test_run_registration_deadline(&clock, std::time::Instant::now());
             let mut diagnostics = TestRunRegistrationDiagnostics::new(&self.server_instance_id);
             let keys = test_run_worktree_keys(&start.source.root);
-            // The registered run id intentionally replays its immutable
-            // binding. A new probe must refresh the live held claim here.
-            let probe = format!("native-closing-{}", Uuid::new_v4());
-            eligible = self.read_test_run_current_named_binding(&start.session_id, &probe,
-                keys.as_ref(), &clock, deadline, &mut diagnostics).ok().is_some_and(|current| {
-                let inner = self.inner.lock().expect("state mutex poisoned");
-                current.resolve_locked(&inner, &start.session_id, Some(&start.store), keys.as_ref()).ok()
-                    == Some((Some(start.binding.clone()), Some(start.named.clone())))
-            });
+            // Keep the naming-proof reservation immutable. Registration froze
+            // the first current binding off the send path; closing must match
+            // that exact binding, so a later revision cannot inherit credit.
+            let registered_binding = self.inner.lock().expect("state mutex poisoned")
+                .test_run_registrations.get(&start.run_id)
+                .filter(|row| row.declared_native.as_ref() == Some(start))
+                .and_then(|row| row.work_binding.clone());
+            eligible = start.accepts_registration_binding(registered_binding.as_ref());
+            if eligible {
+                let probe = format!("native-closing-{}", Uuid::new_v4());
+                eligible = self.read_test_run_current_named_binding(&start.session_id, &probe,
+                    keys.as_ref(), &clock, deadline, &mut diagnostics).ok().is_some_and(|current| {
+                    let inner = self.inner.lock().expect("state mutex poisoned");
+                    current.resolve_locked(&inner, &start.session_id, Some(&start.store), keys.as_ref()).ok()
+                        == Some((registered_binding.clone(), Some(start.named.clone())))
+                        && inner.test_run_registrations.get(&start.run_id).is_some_and(|row|
+                            row.declared_native.as_ref() == Some(start)
+                                && row.work_binding == registered_binding)
+                });
+            }
         }
         eligible &= self.native_declared_scope_current(start);
         eligible &= {
@@ -705,8 +788,8 @@ impl AppState {
                 root: engram_exact_path_key(FsPath::new(&entry.root)),
                 common_dir: entry.common_dir_key.clone(),
             };
-            let named = match test_run_registration_named_binding(
-                &inner, session_id, Some(&store), Some(&keys)) {
+            let named = match declared_run_opening_named_binding(
+                &inner, session_id, &store, &keys) {
                 Ok(binding) => binding,
                 Err(error) => {
                     eprintln!("[termal] native opening named root refused: {error:?}");
@@ -741,7 +824,6 @@ impl AppState {
             }
             return;
         }
-        let clock = self.engram_budget_clock();
         let admitted_at = now();
         let source_plan = EngramSourcePhasePlan::at(admitted_at + ENGRAM_SOURCE_COMMAND_BUDGET, admitted_at);
         let deadline = admitted_at + NATIVE_S0_CAPTURE_BUDGET + NATIVE_S0_AUTHORITY_MARGIN;
@@ -797,18 +879,6 @@ impl AppState {
             Some(Err(error)) => { self.declared_run_opening_refused(session_id, &pending, &error); return; },
             None => { self.declared_run_opening_refused(session_id, &pending, "opening capture unavailable: deadline/capacity/cleanup"); return; },
         };
-        let mut diagnostics = TestRunRegistrationDiagnostics::new(&self.server_instance_id);
-        let probe = format!("native-opening-{}", Uuid::new_v4());
-        let authority_deadline = native_opening_authority_deadline(&clock, deadline, now());
-        let current = {
-            let _timing = pending.timings.begin("opening_authority");
-            self.read_test_run_current_named_binding(session_id, &probe,
-                Some(&pending.keys), &clock, authority_deadline, &mut diagnostics)
-        };
-        let current = match current {
-            Ok(current) => current,
-            Err(error) => { self.declared_run_opening_refused(session_id, &pending, &format!("opening claim read: {error:?}")); return; },
-        };
         if now() >= deadline {
             self.declared_run_opening_refused(session_id, &pending, "opening capture deadline elapsed");
             return;
@@ -818,8 +888,6 @@ impl AppState {
             .ok().as_ref() != Some(&source_owner_authority) { return; }
         let Some(index) = inner.find_session_index(session_id) else { return; };
         if !pending.is_current(&inner.sessions[index]) { return; }
-        let Ok((Some(binding), Some(named))) = current.resolve_locked(
-            &inner, session_id, Some(&pending.store), Some(&pending.keys)) else { return; };
         let Some(turn) = inner.sessions[index].engram.declared_run_turn.as_mut().filter(|turn|
             turn.runtime == pending.runtime && turn.generation == pending.generation
                 && turn.keys == pending.keys
@@ -831,8 +899,9 @@ impl AppState {
             eprintln!("[termal] native opening unavailable: {}", turn.opening_refusal.as_deref().unwrap());
             return;
         }
-        turn.binding = binding;
-        turn.named = named;
+        // S0 precedes model edits, but authority availability never delays the
+        // prompt. The native registration worker validates the named recovery
+        // run and freezes its current revision; closing checks that revision.
         turn.snapshot = Some(snapshot);
     }
 
@@ -847,8 +916,6 @@ impl AppState {
             "opening_deadline"
         } else if reason.contains("declaration_not_committed") {
             "declaration_not_committed"
-        } else if reason.starts_with("opening claim read:") {
-            "authority_unavailable"
         } else { "opening_unavailable" });
         eprintln!("[termal] native opening unavailable: {}", turn.opening_refusal.as_deref().unwrap());
     }

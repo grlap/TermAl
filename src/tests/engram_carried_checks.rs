@@ -1,8 +1,8 @@
 // Carried background/detached launch observations: exact artifact discovery,
 // original terminal digest, conservative interference, shell/worktree scope,
-// bounded retention and restart disclosure. Ordinary closing keeps these
-// facts separate from explicit native verification; it does not consume a
-// launch at a checkpoint. Uses the actual ordinary turn fixture owned by
+// bounded retirement and restart disclosure. Terminal launcher custody ends
+// without turning its launch into native verification. Uses the ordinary turn
+// fixture owned by
 // src/tests/engram_turn_checks.rs, whose in-turn checks remain separate.
 use super::*;
 
@@ -337,6 +337,19 @@ fn assert_carried_ambiguity(turn: &EOCheckedTurn) {
     });
 }
 
+fn assert_retired_run(turn: &EOCheckedTurn, run: &FsPath) {
+    turn.record(|record| {
+        assert!(record.engram.carried_checks.is_empty());
+        assert!(
+            record
+                .engram
+                .carried_consumed_runs
+                .iter()
+                .any(|used| used == run)
+        );
+    });
+}
+
 fn assert_carried_artifact_custody(turn: &EOCheckedTurn, run: &FsPath, passed: bool) -> Value {
     let digest =
         engram_terminal_record_digest(run).expect("the exact fixture artifact is terminal");
@@ -349,13 +362,7 @@ fn assert_carried_artifact_custody(turn: &EOCheckedTurn, run: &FsPath, passed: b
         launcher_source_id_fixture()
     );
     turn.state.poll_engram_carried_runs();
-    turn.record(|record| {
-        assert_eq!(record.engram.carried_checks.len(), 1);
-        let carried = &record.engram.carried_checks[0];
-        assert!(!carried.ambiguous && carried.fence.is_none());
-        assert_eq!(carried.run_directory.as_deref(), Some(run));
-        assert_eq!(carried.terminal_digest.as_deref(), Some(digest.as_str()));
-    });
+    assert_retired_run(turn, run);
     let observation = turn.finish();
     let facts = observation["occurrence"]["observed_checks"]
         .as_array()
@@ -375,17 +382,7 @@ fn assert_carried_artifact_custody(turn: &EOCheckedTurn, run: &FsPath, passed: b
     );
     assert!(facts[0].get("finished_at").is_none());
     assert_ordinary_observation_has_no_native_credit(turn, &observation);
-    turn.record(|record| {
-        assert_eq!(
-            record.engram.carried_checks.len(),
-            1,
-            "ordinary closing never consumes an artifact into verification"
-        );
-        assert_eq!(
-            record.engram.carried_checks[0].terminal_digest.as_deref(),
-            Some(digest.as_str())
-        );
-    });
+    assert_retired_run(turn, run);
     observation
 }
 
@@ -411,28 +408,14 @@ fn assert_carried_fence_custody(turn: &EOCheckedTurn, why: &str) -> String {
 }
 
 fn assert_carried_artifact_rejected(turn: &EOCheckedTurn, run: &FsPath, why: &str) {
+    let digest = engram_terminal_record_digest(run).expect("the artifact has a terminal identity");
     turn.state.poll_engram_carried_runs();
-    let digest = turn.record(|record| {
-        assert_eq!(record.engram.carried_checks.len(), 1);
-        let carried = &record.engram.carried_checks[0];
-        assert_eq!(carried.run_directory.as_deref(), Some(run));
-        carried
-            .terminal_digest
-            .clone()
-            .expect("the real poll pins a terminal identity")
-    });
+    assert_retired_run(turn, run);
     let error =
         engram_read_carried_run(run, &digest).expect_err("the real artifact reader rejects it");
     assert!(error.contains(why), "{error}");
     assert_ordinary_observation_has_no_native_credit(turn, &turn.finish());
-    turn.record(|record| {
-        assert_eq!(record.engram.carried_checks.len(), 1);
-        assert_eq!(
-            record.engram.carried_checks[0].terminal_digest.as_deref(),
-            Some(digest.as_str())
-        );
-        assert!(record.engram.carried_consumed_runs.is_empty());
-    });
+    assert_retired_run(turn, run);
 }
 
 #[test]
@@ -459,13 +442,8 @@ fn late_launch_basis_completion_does_not_turn_artifact_custody_into_verification
     assert!(facts[0].get("finished_at").is_none());
     pending.finish(basis);
     turn.state.poll_engram_carried_runs();
-    turn.record(|record| {
-        assert_eq!(record.engram.carried_checks.len(), 1);
-        let carried = &record.engram.carried_checks[0];
-        assert_eq!(carried.run_directory.as_deref(), Some(run.as_path()));
-        assert_eq!(carried.terminal_digest.as_deref(), Some(digest.as_str()));
-        assert!(record.engram.carried_consumed_runs.is_empty());
-    });
+    assert_retired_run(&turn, &run);
+    assert_eq!(engram_terminal_record_digest(&run), Some(digest));
     assert_ordinary_turn_has_no_native_requests(&turn);
 }
 
@@ -480,6 +458,9 @@ mod description_window_retirement;
 
 #[path = "test_run_restart_evidence.rs"]
 mod test_run_restart_evidence;
+
+#[path = "engram_carried_retirement.rs"]
+mod retirement;
 
 mod credit_outcomes {
     use super::*;
@@ -1474,7 +1455,7 @@ fn a_write_after_the_terminal_read_does_not_rewrite_the_carried_artifact() {
         &EngramObservationProvenance::Ambient,
         None,
     );
-    assert!(turn.record(|record| record.engram.carried_checks[0].fence.is_none()));
+    assert_retired_run(&turn, &run);
     assert_carried_artifact_custody(&turn, &run, true);
 
     let (turn, worktree) = ordinary_carried_turn("carried-after-end-changed");
@@ -1495,12 +1476,8 @@ fn a_write_after_the_terminal_read_does_not_rewrite_the_carried_artifact() {
         "the real source write belongs to the ordinary turn: {observation:#}"
     );
     assert!(engram_read_carried_run(&run, &digest).unwrap().passed);
-    turn.record(|record| {
-        let carried = &record.engram.carried_checks[0];
-        assert_eq!(carried.run_directory.as_deref(), Some(run.as_path()));
-        assert_eq!(carried.terminal_digest.as_deref(), Some(digest.as_str()));
-        assert!(record.engram.carried_consumed_runs.is_empty());
-    });
+    assert_retired_run(&turn, &run);
+    assert_eq!(engram_terminal_record_digest(&run), Some(digest));
 }
 
 #[test]
@@ -1706,6 +1683,7 @@ fn a_terminal_record_changed_after_the_first_terminal_read_refuses_the_gate() {
     let (turn, worktree) = ordinary_carried_turn("carried-rewritten");
     ordinary_launch_gate(&turn, &worktree, false);
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    let digest = engram_terminal_record_digest(&run).unwrap();
     turn.state.poll_engram_carried_runs();
     let mut record: Value =
         serde_json::from_slice(&fs::read(run.join("results.json")).unwrap()).unwrap();
@@ -1715,11 +1693,14 @@ fn a_terminal_record_changed_after_the_first_terminal_read_refuses_the_gate() {
         serde_json::to_vec(&record).unwrap(),
     )
     .unwrap();
-    assert_carried_artifact_rejected(
-        &turn,
-        &run,
-        "its terminal record changed after the host first read it as terminal",
+    turn.state.poll_engram_carried_runs();
+    assert_retired_run(&turn, &run);
+    assert!(
+        engram_read_carried_run(&run, &digest)
+            .unwrap_err()
+            .contains("its terminal record changed after the host first read it as terminal")
     );
+    assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
 }
 
 #[test]
@@ -1751,13 +1732,8 @@ fn an_unreported_source_change_is_measured_separately_from_a_carried_artifact() 
     assert_eq!(checks[0]["observed_result"], "indeterminate");
     assert!(checks[0].get("source_basis").is_none());
     assert_ordinary_observation_has_no_native_credit(&turn, &observation);
-    turn.record(|record| {
-        assert_eq!(
-            record.engram.carried_checks[0].terminal_digest.as_deref(),
-            Some(digest.as_str())
-        );
-        assert!(record.engram.carried_consumed_runs.is_empty());
-    });
+    assert_retired_run(&turn, &run);
+    assert_eq!(engram_terminal_record_digest(&run), Some(digest));
 }
 
 #[test]
@@ -1805,17 +1781,9 @@ fn a_dead_launcher_cannot_supply_a_terminal_result_or_native_verification() {
     )
     .unwrap();
     turn.state.poll_engram_carried_runs();
-    turn.record(|record| {
-        let carried = &record.engram.carried_checks[0];
-        assert_eq!(carried.run_directory.as_deref(), Some(run.as_path()));
-        assert!(carried.launcher_gone && carried.terminal_digest.is_none());
-        assert!(!engram_carried_check_polls(carried, chrono::Utc::now()));
-    });
+    assert_retired_run(&turn, &run);
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
-    turn.record(|record| {
-        assert_eq!(record.engram.carried_checks.len(), 1);
-        assert!(record.engram.carried_consumed_runs.is_empty());
-    });
+    assert_retired_run(&turn, &run);
 }
 
 #[test]
@@ -1872,7 +1840,7 @@ fn renaming_the_current_root_does_not_relabel_a_prior_carried_launch() {
 }
 
 #[test]
-fn a_host_restart_tells_the_holder_its_carried_gate_lost_its_credit() {
+fn a_host_restart_tells_the_holder_to_inspect_the_existing_run_without_claiming_lost_credit() {
     let (turn, worktree) = ordinary_carried_turn("carried-restart");
     ordinary_launch_gate(&turn, &worktree, false);
     let persisted = turn.record(|record| {
@@ -1894,8 +1862,10 @@ fn a_host_restart_tells_the_holder_its_carried_gate_lost_its_credit() {
         .pending_source_root_line
         .expect("the holder should be told");
     assert!(
-        line.contains("the host restarted while the background full gate")
-            && line.contains("earned no credit"),
+        line.contains("the host restarted after the background full gate")
+            && line.contains("Inspect the retained launcher run")
+            && !line.contains("earned no credit")
+            && !line.contains("Run the gate again"),
         "{line}"
     );
 }
@@ -2043,16 +2013,23 @@ fn a_file_change_the_watcher_saw_in_the_worktree_refuses_the_gate() {
     finish_run(&worktree, "passed", &"f".repeat(64));
     assert_carried_fence_custody(&turn, "a file in its worktree changed");
 
-    // The watcher reports late, so a change it reports after the run was
-    // read as ended still refuses it: it may have landed while it ran.
+    // A terminal local observation retires. A late watcher report cannot
+    // reopen it or turn its artifact into native verification.
     let (turn, worktree) = ordinary_carried_turn("carried-watched-late");
     ordinary_launch_gate(&turn, &worktree, false);
-    finish_run(&worktree, "passed", &"f".repeat(64));
+    turn.record(|record| {
+        assert_eq!(record.engram.carried_checks.len(), 1);
+        assert!(record.engram.carried_checks[0].fence.is_none());
+    });
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    let digest = engram_terminal_record_digest(&run).unwrap();
     turn.state.poll_engram_carried_runs();
     let changed = fs::canonicalize(&worktree).unwrap().join("README.md");
     turn.state
         .note_engram_workspace_file_changes(&[change(changed)]);
-    assert_carried_fence_custody(&turn, "a file in its worktree changed");
+    assert_retired_run(&turn, &run);
+    assert_eq!(engram_terminal_record_digest(&run), Some(digest));
+    assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
 }
 
 #[test]
@@ -2314,10 +2291,8 @@ fn a_launch_whose_run_never_appeared_stops_searching_without_inventing_a_result(
     turn.record_mut(|record| record.engram.carried_checks[0].check.started_at = long_ago);
     turn.state.poll_engram_carried_runs();
     turn.record(|record| {
-        let carried = &record.engram.carried_checks[0];
-        assert!(carried.run_missing);
-        assert!(carried.run_directory.is_none() && carried.terminal_digest.is_none());
-        assert!(!engram_carried_check_polls(carried, chrono::Utc::now()));
+        assert!(record.engram.carried_checks.is_empty());
+        assert_eq!(record.engram.carried_unmatched_launches.len(), 1);
     });
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
     turn.record(|record| assert!(record.engram.carried_consumed_runs.is_empty()));
@@ -2338,15 +2313,9 @@ fn a_run_that_never_ends_stops_polling_after_six_hours_without_verification() {
     turn.state.poll_engram_carried_runs();
     turn.record_mut(|record| record.engram.carried_checks[0].check.started_at = long_ago);
     turn.state.poll_engram_carried_runs();
-    turn.record(|record| {
-        let carried = &record.engram.carried_checks[0];
-        assert!(engram_carried_check_expired(carried, chrono::Utc::now()));
-        assert!(!engram_carried_check_polls(carried, chrono::Utc::now()));
-        assert_eq!(carried.run_directory.as_deref(), Some(run.as_path()));
-        assert!(carried.terminal_digest.is_none());
-    });
+    assert_retired_run(&turn, &run);
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
-    turn.record(|record| assert!(record.engram.carried_consumed_runs.is_empty()));
+    assert_retired_run(&turn, &run);
 }
 
 #[test]
@@ -2441,14 +2410,8 @@ fn an_ordinary_successor_turn_does_not_take_a_predecessors_carried_artifact() {
         "a successor cannot claim the predecessor's launch or artifact as its own check"
     );
     assert_ordinary_observation_has_no_native_credit(&turn, &second);
-    turn.record(|record| {
-        assert_eq!(record.engram.carried_checks.len(), 1);
-        let carried = &record.engram.carried_checks[0];
-        assert_eq!(carried.check.host_turn_ref, original);
-        assert_eq!(carried.run_directory.as_deref(), Some(run.as_path()));
-        assert_eq!(carried.terminal_digest.as_deref(), Some(digest.as_str()));
-        assert!(record.engram.carried_consumed_runs.is_empty());
-    });
+    assert_retired_run(&turn, &run);
+    assert_eq!(engram_terminal_record_digest(&run), Some(digest));
 }
 
 #[test]
@@ -2704,36 +2667,37 @@ fn a_turn_a_stop_drains_from_the_queue_fences_a_carried_gate_of_its_own_worktree
 }
 
 #[test]
-fn a_conflict_recorded_after_a_carried_copy_preserves_the_original_terminal_custody() {
+fn a_late_conflicting_copy_cannot_reopen_retired_launcher_custody() {
     let (turn, worktree) = ordinary_carried_turn("carried-late-conflict");
     ordinary_launch_gate(&turn, &worktree, false);
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    let mut copy = turn.record(|record| record.engram.carried_checks[0].clone());
+    let digest = engram_terminal_record_digest(&run).unwrap();
     turn.state.poll_engram_carried_runs();
-    let copy = turn.record(|record| record.engram.carried_checks[0].clone());
-    let digest = copy.terminal_digest.clone().unwrap();
-    turn.record_mut(|record| {
-        engram_note_carried_run_read(
-            &mut record.engram.carried_checks[0],
-            Some(run.clone()),
-            Some("0".repeat(64)),
-            false,
-            false,
-            Vec::new(),
-        );
-    });
+    engram_note_carried_run_read(
+        &mut copy,
+        Some(run.clone()),
+        Some(digest),
+        false,
+        false,
+        Vec::new(),
+    );
+    let original = copy.clone();
+    engram_note_carried_run_read(
+        &mut copy,
+        Some(run.clone()),
+        Some("0".repeat(64)),
+        false,
+        false,
+        Vec::new(),
+    );
     assert!(
-        !copy.terminal_conflict,
+        !original.terminal_conflict && copy.terminal_conflict,
         "a captured value does not share later mutation"
     );
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
-    turn.record(|record| {
-        let live = &record.engram.carried_checks[0];
-        assert!(live.terminal_conflict);
-        assert_eq!(live.terminal_digest.as_deref(), Some(digest.as_str()));
-        assert_eq!(live.check.host_turn_ref, copy.check.host_turn_ref);
-        assert_eq!(live.check.sequence, copy.check.sequence);
-        assert!(record.engram.carried_consumed_runs.is_empty());
-    });
+    assert_eq!(original.terminal_digest, copy.terminal_digest);
+    assert_retired_run(&turn, &run);
 }
 
 #[test]
@@ -2911,17 +2875,13 @@ fn concurrent_artifact_polls_keep_the_first_terminal_digest_before_a_later_read(
     if let Err(panic) = inspected {
         std::panic::resume_unwind(panic);
     }
-    turn.record(|record| {
-        assert_eq!(
-            record.engram.carried_checks[0].terminal_digest.as_deref(),
-            Some(first_digest.as_str())
-        );
-    });
-    assert_carried_artifact_rejected(
-        &turn,
-        &run,
-        "its terminal record changed after the host first read it as terminal",
+    assert_retired_run(&turn, &run);
+    assert!(
+        engram_read_carried_run(&run, &first_digest)
+            .unwrap_err()
+            .contains("its terminal record changed after the host first read it as terminal")
     );
+    assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
 }
 
 #[test]
@@ -3054,7 +3014,7 @@ fn a_restart_notice_is_told_once_through_the_store() {
             .engram
             .pending_source_root_line
             .as_deref()
-            .is_some_and(|line| line.contains("the host restarted while the background full gate")),
+            .is_some_and(|line| line.contains("the host restarted after the background full gate")),
         "{:?}",
         record.engram.pending_source_root_line
     );
@@ -3192,26 +3152,14 @@ fn a_launch_after_one_matched_to_its_run_takes_its_own() {
     launch_detached(&turn, &worktree, "first");
     let first = write_named_run(&worktree, "test-first", "passed");
     turn.state.poll_engram_carried_runs();
-    assert_eq!(
-        turn.record(|record| record.engram.carried_checks[0].run_directory.clone()),
-        Some(first.clone())
-    );
+    assert_retired_run(&turn, &first);
     launch_detached(&turn, &worktree, "second");
-    assert!(!turn.record(|record| record.engram.carried_checks[1].ambiguous));
+    assert!(!turn.record(|record| record.engram.carried_checks[0].ambiguous));
     let second = write_named_run(&worktree, "test-second", "failed");
     turn.state.poll_engram_carried_runs();
-    turn.record(|record| {
-        let carried = &record.engram.carried_checks[1];
-        assert!(
-            !carried.ambiguous && carried.fence.is_none(),
-            "the clean distinct-run control remains available without an unrelated fence"
-        );
-        assert_ne!(carried.run_directory.as_ref(), Some(&first));
-    });
-    assert_eq!(
-        turn.record(|record| record.engram.carried_checks[1].run_directory.clone()),
-        Some(second)
-    );
+    assert_ne!(first, second);
+    assert_retired_run(&turn, &first);
+    assert_retired_run(&turn, &second);
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
 }
 
@@ -3274,8 +3222,6 @@ fn a_missing_launch_basis_never_turns_a_valid_carried_artifact_into_native_verif
     let failed = Arc::new(EngramBasisCapture::default());
     failed.finish(None);
     turn.record_mut(|record| record.engram.carried_checks[0].check.start_basis = failed);
-    let run = finish_run(&worktree, "passed", &"f".repeat(64));
-    assert_carried_artifact_custody(&turn, &run, true);
     turn.record(|record| {
         assert!(matches!(
             record.engram.carried_checks[0]
@@ -3286,6 +3232,34 @@ fn a_missing_launch_basis_never_turns_a_valid_carried_artifact_into_native_verif
         ));
         assert!(record.engram.carried_consumed_runs.is_empty());
     });
+    let observation = turn.finish();
+    let facts = observation["occurrence"]["observed_checks"]
+        .as_array()
+        .unwrap();
+    assert_eq!(facts.len(), 1);
+    assert_eq!(facts[0]["check_kind"], "test");
+    assert_eq!(
+        facts[0]["host_check_id"],
+        unadmitted_host_check_id(
+            observation["occurrence"]["host_turn_ref"].as_str().unwrap(),
+            "gate"
+        )
+    );
+    assert_eq!(facts[0]["observed_result"], "indeterminate");
+    assert!(facts[0].get("finished_at").is_none());
+    assert_ordinary_observation_has_no_native_credit(&turn, &observation);
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    let digest = engram_terminal_record_digest(&run).unwrap();
+    let verdict = engram_read_carried_run(&run, &digest).unwrap();
+    assert!(verdict.passed);
+    assert_eq!(verdict.exit_code, 0);
+    assert_eq!(
+        serde_json::to_value(verdict.source_id).unwrap(),
+        launcher_source_id_fixture()
+    );
+    turn.state.poll_engram_carried_runs();
+    assert_retired_run(&turn, &run);
+    assert_ordinary_turn_has_no_native_requests(&turn);
 }
 
 #[test]
@@ -3324,26 +3298,17 @@ fn expiry_never_converts_an_already_terminal_artifact_into_native_verification()
     ordinary_launch_gate(&turn, &worktree, false);
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     turn.state.poll_engram_carried_runs();
-    let digest = turn.record(|record| {
-        record.engram.carried_checks[0]
-            .terminal_digest
-            .clone()
-            .unwrap()
-    });
+    let digest = engram_terminal_record_digest(&run).unwrap();
     turn.record_mut(|record| {
-        record.engram.carried_checks[0].check.started_at =
-            (chrono::Utc::now() - chrono::Duration::hours(7)).to_rfc3339();
+        assert!(!engram_retire_launcher_checks(
+            record,
+            chrono::Utc::now() + chrono::Duration::hours(7),
+        ));
     });
     turn.state.poll_engram_carried_runs();
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
-    turn.record(|record| {
-        let carried = &record.engram.carried_checks[0];
-        assert!(engram_carried_check_expired(carried, chrono::Utc::now()));
-        assert!(!engram_carried_check_polls(carried, chrono::Utc::now()));
-        assert_eq!(carried.run_directory.as_deref(), Some(run.as_path()));
-        assert_eq!(carried.terminal_digest.as_deref(), Some(digest.as_str()));
-        assert!(record.engram.carried_consumed_runs.is_empty());
-    });
+    assert_retired_run(&turn, &run);
+    assert_eq!(engram_terminal_record_digest(&run), Some(digest));
 }
 
 #[test]
@@ -4213,9 +4178,8 @@ fn a_newly_found_place_of_outstanding_work_reaches_a_finished_check_only_from_it
 
 #[test]
 fn a_newly_found_place_keeps_the_carried_artifact_and_its_original_interference_cut() {
-    // Registration before the terminal read fences the launch; a later
-    // registration remains potential interference. Neither can be converted
-    // into a native verification by ordinary closing.
+    // Newly placed work still withholds ordinary source attribution, but
+    // cannot reopen retired launcher custody or create native verification.
     for (label, registered_before_terminal) in [
         ("carried-late-place-before-end", true),
         ("carried-late-place-before-settlement", false),
@@ -4234,34 +4198,12 @@ fn a_newly_found_place_keeps_the_carried_artifact_and_its_original_interference_
         let run = finish_run(&worktree, "passed", &"f".repeat(64));
         turn.state.poll_engram_carried_runs();
         let digest = engram_terminal_record_digest(&run).unwrap();
-        assert!(
-            turn.record(|record| record.engram.carried_checks[0].terminal_digest.is_some()),
-            "{label}: read as terminal"
-        );
+        assert_retired_run(&turn, &run);
         if !registered_before_terminal {
             admit_background_call(&turn, &other, &stopped, "writer", "Bash");
         }
-        assert_eq!(carried_fence(&turn), None, "{label}: elsewhere");
         place_other_work_in(&turn, &other, &stopped, "writer", &worktree);
-        let (fence, potential) = turn.record(|record| {
-            let carried = &record.engram.carried_checks[0];
-            (carried.fence.clone(), carried.potential.clone())
-        });
-        if registered_before_terminal {
-            // It precedes the first terminal read: fenced now.
-            assert!(fence.is_some(), "{label}");
-        } else {
-            // Keep the later registration separately from original custody.
-            assert_eq!(fence, None, "{label}");
-            assert!(
-                potential.as_ref().is_some_and(|(_, cause)| *cause
-                    == ClaudeHazardCause::OtherSession {
-                        session_id: other.clone(),
-                        name: "Test".to_owned(),
-                    }),
-                "{label}: {potential:?}"
-            );
-        }
+        assert_retired_run(&turn, &run);
         let observation = turn.finish();
         assert_ordinary_observation_has_no_native_credit(&turn, &observation);
         // Withholding is an explicit null `source_change`; with no baseline
@@ -4276,14 +4218,8 @@ fn a_newly_found_place_keeps_the_carried_artifact_and_its_original_interference_
             observation["occurrence"]["source_change"].is_null(),
             "retained work at closing withholds ordinary source attribution: {observation:#}"
         );
-        turn.record(|record| {
-            let carried = &record.engram.carried_checks[0];
-            assert_eq!(carried.run_directory.as_deref(), Some(run.as_path()));
-            assert_eq!(carried.terminal_digest.as_deref(), Some(digest.as_str()));
-            assert_eq!(carried.fence, fence);
-            assert_eq!(carried.potential, potential);
-            assert!(record.engram.carried_consumed_runs.is_empty());
-        });
+        assert_retired_run(&turn, &run);
+        assert_eq!(engram_terminal_record_digest(&run), Some(digest));
     }
 }
 

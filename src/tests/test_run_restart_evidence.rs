@@ -30,7 +30,6 @@ fn an_ordinary_terminal_artifact_keeps_exact_identity_without_automatic_evidence
     request["owner"] = json!(turn.session_id);
     request["detached"] = json!(true);
     fs::write(&request_path, serde_json::to_vec(&request).unwrap()).unwrap();
-    turn.state.poll_engram_carried_runs();
     let digest = engram_terminal_record_digest(&run_dir).unwrap();
     let original = {
         let inner = turn.state.inner.lock().unwrap();

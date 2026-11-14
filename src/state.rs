@@ -735,13 +735,12 @@ impl StateBroadcastSenders {
     }
 
     /// Sends one serialized delta, in the same order as [`Self::send_state`].
+    #[cfg(test)]
     fn send_delta(&self, payload: String) {
-        #[cfg(test)]
         let observed = payload.clone();
         let _ = self
             .stream_events
             .send(SseStreamEvent::Delta(Arc::from(payload)));
-        #[cfg(test)]
         let _ = self.delta_events.send(observed);
     }
 

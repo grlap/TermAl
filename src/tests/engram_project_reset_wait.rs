@@ -6,11 +6,15 @@ use crate::tests::delegation_support::test_app_state_with_delegation_codex_runti
 use crate::tests::engram_host_adapter::real_engram_control_fixture_path;
 use crate::tests::phase_sync::DEADLOCK_GUARD;
 
+#[path = "engram_post_fence_drain.rs"]
+mod post_fence_drain;
+
 #[derive(Default)]
 struct ConnectionCleanupTransport {
     requests: Mutex<Vec<Value>>,
     shutdowns: Mutex<Vec<String>>,
     cleanup_gate: Mutex<Option<(mpsc::SyncSender<String>, mpsc::Receiver<()>)>>,
+    cleanup_failure: Mutex<Option<String>>,
 }
 
 impl ConnectionCleanupTransport {
@@ -70,7 +74,10 @@ impl EngramControlTransport for ConnectionCleanupTransport {
                 }
             }
         }
-        Ok(())
+        match self.cleanup_failure.lock().unwrap().as_ref() {
+            Some(message) => Err(EngramTransportError::protocol(message.clone())),
+            None => Ok(()),
+        }
     }
 }
 
