@@ -223,7 +223,8 @@ fn human_start_is_held(
     explicit: bool,
 ) -> bool {
     let record = &inner.sessions[index];
-    !record.is_local_session()
+    engram_named_selection_capture_pending(record)
+        || !record.is_local_session()
         || delegated_child_dispatch_is_blocked_locked(inner, index)
         || matches!(
             record.session.status,
@@ -771,6 +772,7 @@ impl AppState {
                     });
                 }
             };
+            finish_engram_named_root_selection_locked(&mut inner, index);
             // Keep the sole unsent dispatch even if capture itself fails.
             let fence = human_prompt_persistence_fence(&inner, session_id);
             #[cfg(test)]
