@@ -628,6 +628,7 @@ fn test_user_input_message(message_id: &str) -> Message {
             is_secret: false,
             multi_select: false,
             options: Some(vec![UserInputQuestionOption {
+                id: None,
                 description: "Run the focused review path.".to_owned(),
                 label: "Focused".to_owned(),
             }]),

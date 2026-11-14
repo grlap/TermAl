@@ -367,6 +367,7 @@ fn project_digest_orders_mixed_protocol_approvals_and_skips_trimmed_acp_head() {
         supported_decisions: None,
     };
     let acp_pending = |request_id: &str| AcpPendingApproval {
+        question: None,
         allow_once_option_id: Some("allow-once".to_owned()),
         allow_always_option_id: None,
         reject_option_id: Some("reject-once".to_owned()),

@@ -354,7 +354,10 @@ fn find_latest_project_pending_approval<'a>(
 fn has_live_pending_approval(record: &SessionRecord, message_id: &str) -> bool {
     record.pending_claude_approvals.contains_key(message_id)
         || record.pending_codex_approvals.contains_key(message_id)
-        || record.pending_acp_approvals.contains_key(message_id)
+        || record
+            .pending_acp_approvals
+            .get(message_id)
+            .is_some_and(|pending| pending.question.is_none())
 }
 
 /// Selects the latest registered message without scanning transcript bodies.
@@ -393,7 +396,10 @@ fn registered_pending_approval_message_id(record: &SessionRecord) -> Option<Stri
     let acp_head = record
         .pending_acp_approval_order
         .front()
-        .filter(|message_id| record.pending_acp_approvals.contains_key(*message_id))
+        .filter(|message_id| {
+            record.pending_acp_approvals.get(*message_id)
+                .is_some_and(|pending| pending.question.is_none())
+        })
         .and_then(|message_id| {
             record
                 .message_positions
@@ -401,8 +407,14 @@ fn registered_pending_approval_message_id(record: &SessionRecord) -> Option<Stri
                 .copied()
                 .map(|position| (position, message_id.clone()))
         });
-    let acp_candidate =
-        acp_head.or_else(|| latest_registered_message(record, record.pending_acp_approvals.keys()));
+    let acp_candidate = acp_head.or_else(|| {
+        latest_registered_message(
+            record,
+            record.pending_acp_approvals.iter()
+                .filter(|(_, pending)| pending.question.is_none())
+                .map(|(id, _)| id),
+        )
+    });
     let other_candidate = latest_registered_message(
         record,
         record
@@ -428,7 +440,10 @@ fn registered_pending_interaction_message_id(record: &SessionRecord) -> Option<S
             .keys()
             .chain(record.pending_claude_user_inputs.keys())
             .chain(record.pending_codex_mcp_elicitations.keys())
-            .chain(record.pending_codex_app_requests.keys()),
+            .chain(record.pending_codex_app_requests.keys())
+            .chain(record.pending_acp_approvals.iter()
+                .filter(|(_, pending)| pending.question.is_some())
+                .map(|(id, _)| id)),
     )
 }
 

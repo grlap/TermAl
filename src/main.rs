@@ -1389,6 +1389,7 @@ include!("opencode.rs");
 include!("kimi.rs");
 include!("kimi_read_only.rs");
 include!("kimi_approvals.rs");
+include!("kimi_questions.rs");
 include!("turns.rs");
 include!("recorders.rs");
 include!("claude.rs");

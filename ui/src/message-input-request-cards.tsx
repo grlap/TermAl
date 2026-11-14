@@ -39,7 +39,7 @@ function buildUserInputDraft(
   for (const question of questions) {
     const answers = submittedAnswers?.[question.id] ?? [];
     const optionLabels = new Set(
-      (question.options ?? []).map((option) => option.label),
+      (question.options ?? []).map((option) => option.id ?? option.label),
     );
     const selectedOptions = answers.filter((answer) => optionLabels.has(answer));
     const customAnswers = answers.filter((answer) => !optionLabels.has(answer));
@@ -73,7 +73,9 @@ function buildUserInputSummary(
         </div>
         <div className="user-input-summary-value">
           {renderHighlightedText(
-            submittedAnswers[question.id]!.join(", "),
+            submittedAnswers[question.id]!.map((answer) =>
+              question.options?.find((option) => option.id === answer)?.label ?? answer,
+            ).join(", "),
             searchQuery,
             searchHighlightTone,
           )}
@@ -122,6 +124,13 @@ export function UserInputRequestCard({
   // native radio group and steal each other's selection.
   const instanceId = useId();
   const pending = message.state === "pending";
+  // Permission-channel questions carry exact response IDs. A single fixed
+  // choice can be sent directly through the same guarded submit lifecycle.
+  const singleQuestion = message.questions.length === 1 ? message.questions[0] : undefined;
+  const directQuestion = singleQuestion &&
+    !singleQuestion.multiSelect && !singleQuestion.isOther &&
+    !!singleQuestion.options?.length &&
+    singleQuestion.options.every((option) => !!option.id);
   // The whole card freezes while a submission is in flight, not only the
   // Submit/Skip buttons: editing the draft mid-flight would desync what the
   // user sees from what was sent.
@@ -209,7 +218,7 @@ export function UserInputRequestCard({
       };
       const options = question.options ?? [];
       const optionLabels = new Set(
-        options.map((option) => option.label),
+        options.map((option) => option.id ?? option.label),
       );
       const selectedAnswers = [...field.selectedOptions];
       const customAnswer = field.customAnswer.trim();
@@ -302,11 +311,24 @@ export function UserInputRequestCard({
               {options.length > 0 ? (
                 <div className="user-input-options">
                   {options.map((option) => (
-                    <label key={option.label} className="user-input-option">
+                    directQuestion ? (
+                      <button
+                        key={option.id}
+                        type="button"
+                        className="approval-button"
+                        disabled={!interactive}
+                        onClick={() => dispatchSubmission({
+                          [question.id]: [option.id ?? option.label],
+                        })}
+                      >
+                        {renderHighlightedText(option.label, searchQuery, searchHighlightTone)}
+                      </button>
+                    ) : (
+                    <label key={option.id ?? option.label} className="user-input-option">
                       <input
                         type={question.multiSelect ? "checkbox" : "radio"}
                         name={`user-input-${instanceId}-${question.id}`}
-                        checked={field.selectedOptions.includes(option.label)}
+                        checked={field.selectedOptions.includes(option.id ?? option.label)}
                         disabled={!interactive}
                         onChange={() =>
                           updateField(question.id, {
@@ -317,12 +339,12 @@ export function UserInputRequestCard({
                               ? field.otherSelected
                               : false,
                             selectedOptions: question.multiSelect
-                              ? field.selectedOptions.includes(option.label)
+                              ? field.selectedOptions.includes(option.id ?? option.label)
                                 ? field.selectedOptions.filter(
-                                    (selected) => selected !== option.label,
+                                    (selected) => selected !== (option.id ?? option.label),
                                   )
-                                : [...field.selectedOptions, option.label]
-                              : [option.label],
+                                : [...field.selectedOptions, option.id ?? option.label]
+                              : [option.id ?? option.label],
                           })
                         }
                       />
@@ -343,6 +365,7 @@ export function UserInputRequestCard({
                         </span>
                       </span>
                     </label>
+                    )
                   ))}
                   {usesOther ? (
                     <label className="user-input-option">
@@ -398,14 +421,16 @@ export function UserInputRequestCard({
 
       {pending ? (
         <div className="approval-actions">
-          <button
-            className="approval-button"
-            type="button"
-            onClick={handleSubmit}
-            disabled={dispatched || submissionPending || !actionsEnabled}
-          >
-            Submit answers
-          </button>
+          {!directQuestion ? (
+            <button
+              className="approval-button"
+              type="button"
+              onClick={handleSubmit}
+              disabled={dispatched || submissionPending || !actionsEnabled}
+            >
+              Submit answers
+            </button>
+          ) : null}
           {message.declinable ? (
             <button
               className="approval-button approval-button-reject"

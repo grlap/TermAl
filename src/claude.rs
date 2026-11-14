@@ -466,6 +466,7 @@ fn parse_claude_ask_user_question_list(raw_questions: &[Value]) -> Result<Vec<Us
                                 ));
                             }
                             Ok(UserInputQuestionOption {
+                                id: None,
                                 description: raw_option
                                     .get("description")
                                     .and_then(Value::as_str)

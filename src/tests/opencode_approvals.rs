@@ -459,6 +459,7 @@ fn opencode_approval_is_session_scoped_and_stopping_never_grants() {
     let auto = create(&state, json!({"opencodeApprovalMode":"auto-approve"}));
     let ask = create(&state, json!({}));
     let approval = AcpPendingApproval {
+        question: None,
         request_id: json!(1),
         allow_once_option_id: Some("once".to_owned()),
         allow_always_option_id: None,

@@ -37,6 +37,9 @@ enum ParallelAgentStatus {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UserInputQuestionOption {
+    /// Opaque protocol value when it differs from the displayed label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
     description: String,
     label: String,
 }
@@ -425,8 +428,8 @@ enum Message {
         questions: Vec<UserInputQuestion>,
         state: InteractionRequestState,
         /// Whether the browser may skip this request without answers. Pending
-        /// Claude AskUserQuestion permission requests are declinable — a
-        /// permission deny carries the skip back to the agent. Codex
+        /// Claude and Kimi permission questions are declinable — the owning
+        /// protocol carries the skip back to the agent. Codex
         /// `request_user_input` and already self-resolved audit cards are not.
         /// Always serialized (the backend owns the flag; `default` only
         /// covers payloads persisted before it existed) so the UI treats it

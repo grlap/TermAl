@@ -1104,6 +1104,7 @@ fn kimi_uses_advertised_auth_live_model_config_and_manual_permissions() {
     );
 
     let approval = AcpPendingApproval {
+        question: None,
         allow_once_option_id: Some("once".into()),
         allow_always_option_id: Some("always".into()),
         reject_option_id: Some("reject".into()),

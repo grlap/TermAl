@@ -393,6 +393,33 @@ impl SessionRecorder {
         state.register_claude_pending_user_input(&session_id, message_id, request)
     }
 
+    /// Uses the shared question card while retaining ACP's existing live
+    /// request ownership, cancellation and runtime-replacement cleanup.
+    fn push_acp_user_input_request(&mut self, request: AcpPendingApproval) -> Result<()> {
+        recorder_finish_streaming_text(self)?;
+        let question = request
+            .question
+            .clone()
+            .ok_or_else(|| anyhow!("missing ACP question"))?;
+        let message_id = self.state.allocate_message_id();
+        self.state.push_message(
+            &self.session_id,
+            Message::UserInputRequest {
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Kimi needs your input".to_owned(),
+                detail: "Choose an answer or skip this question.".to_owned(),
+                questions: vec![question],
+                state: InteractionRequestState::Pending,
+                declinable: true,
+                submitted_answers: None,
+            },
+        )?;
+        self.state
+            .register_acp_pending_approval(&self.session_id, message_id, request)
+    }
+
     /// ACP-specific approval entry point. Mirrors `push_claude_approval` but
     /// registers the pending approval against the ACP runtime handle so the
     /// user's decision gets forwarded to the ACP agent's permission request.

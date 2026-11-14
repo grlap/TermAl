@@ -798,6 +798,7 @@ async fn submit_codex_user_input_route_updates_message_and_publishes_message_upd
         is_secret: false,
         multi_select: false,
         options: Some(vec![UserInputQuestionOption {
+            id: None,
             description: "Use the recommended option".to_owned(),
             label: "Yes".to_owned(),
         }]),
@@ -946,6 +947,7 @@ fn claude_user_input_validation_fixture() -> ClaudePendingUserInput {
                 is_secret: false,
                 multi_select: false,
                 options: Some(vec![UserInputQuestionOption {
+                    id: None,
                     description: "Only the changed module".to_owned(),
                     label: "Focused".to_owned(),
                 }]),
@@ -959,10 +961,12 @@ fn claude_user_input_validation_fixture() -> ClaudePendingUserInput {
                 multi_select: true,
                 options: Some(vec![
                     UserInputQuestionOption {
+                        id: None,
                         description: "Run tests".to_owned(),
                         label: "Tests".to_owned(),
                     },
                     UserInputQuestionOption {
+                        id: None,
                         description: "Run lint".to_owned(),
                         label: "Lint".to_owned(),
                     },
@@ -1104,6 +1108,7 @@ async fn submit_claude_user_input_route_delivers_all_permission_answers() {
             is_secret: false,
             multi_select: false,
             options: Some(vec![UserInputQuestionOption {
+                id: None,
                 description: "Only the changed module".to_owned(),
                 label: "Focused".to_owned(),
             }]),
@@ -1117,10 +1122,12 @@ async fn submit_claude_user_input_route_delivers_all_permission_answers() {
             multi_select: true,
             options: Some(vec![
                 UserInputQuestionOption {
+                    id: None,
                     description: "Run tests".to_owned(),
                     label: "Tests".to_owned(),
                 },
                 UserInputQuestionOption {
+                    id: None,
                     description: "Run lint".to_owned(),
                     label: "Lint".to_owned(),
                 },
@@ -1291,6 +1298,7 @@ async fn submit_claude_user_input_route_answers_permission_transport_via_allow()
             is_secret: false,
             multi_select: false,
             options: Some(vec![UserInputQuestionOption {
+                id: None,
                 description: "Only the changed module".to_owned(),
                 label: "Focused".to_owned(),
             }]),
@@ -1304,10 +1312,12 @@ async fn submit_claude_user_input_route_answers_permission_transport_via_allow()
             multi_select: true,
             options: Some(vec![
                 UserInputQuestionOption {
+                    id: None,
                     description: "Run the test suite".to_owned(),
                     label: "Tests".to_owned(),
                 },
                 UserInputQuestionOption {
+                    id: None,
                     description: "Run the linter".to_owned(),
                     label: "Lint".to_owned(),
                 },
@@ -1640,6 +1650,7 @@ fn register_single_question_claude_input(
         is_secret: false,
         multi_select: false,
         options: Some(vec![UserInputQuestionOption {
+            id: None,
             description: "Use the focused scope".to_owned(),
             label: "Focused".to_owned(),
         }]),

@@ -452,6 +452,7 @@ struct OpenCodeConfigSnapshot {
 /// Represents ACP pending approval.
 #[derive(Clone)]
 struct AcpPendingApproval {
+    question: Option<UserInputQuestion>,
     allow_once_option_id: Option<String>,
     allow_always_option_id: Option<String>,
     reject_option_id: Option<String>,

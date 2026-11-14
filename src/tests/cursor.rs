@@ -1665,6 +1665,7 @@ fn matches_acp_model_options_by_name_or_label() {
 #[test]
 fn acp_approval_option_mapping_fails_closed_across_semantic_classes() {
     let allow_only = AcpPendingApproval {
+        question: None,
         allow_once_option_id: Some("allow-once".to_owned()),
         allow_always_option_id: Some("allow-always".to_owned()),
         reject_option_id: None,
@@ -1677,6 +1678,7 @@ fn acp_approval_option_mapping_fails_closed_across_semantic_classes() {
     );
 
     let reject_only = AcpPendingApproval {
+        question: None,
         allow_once_option_id: None,
         allow_always_option_id: None,
         reject_option_id: Some("reject-once".to_owned()),

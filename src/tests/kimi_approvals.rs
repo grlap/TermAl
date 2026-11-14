@@ -8,6 +8,8 @@
 
 use super::*;
 
+mod questions;
+
 const RUNTIME: &str = "kimi-approvals-runtime";
 
 fn create_kimi(state: &AppState, extra: Value) -> String {

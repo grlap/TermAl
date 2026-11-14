@@ -18,8 +18,8 @@
 // The pending lookup fans out across all three agents' maps:
 // `update_approval` searches `pending_claude_approvals` (keyed by
 // message_id), `pending_codex_approvals`, and `pending_acp_approvals`
-// to find the right response channel. `submit_user_input` handles both
-// Claude and Codex. Claude AskUserQuestion answers return through the
+// to find the right response channel. `submit_user_input` handles
+// Claude, Codex and Kimi. Claude AskUserQuestion answers return through the
 // `can_use_tool` permission response: an allow decision whose
 // `updatedInput.answers` carries exact question text as the key, a label
 // string for single-select, and a label array for multi-select. A declined
@@ -60,6 +60,11 @@ enum PendingUserInputRuntimeAction {
         pending: CodexPendingUserInput,
         response_answers: BTreeMap<String, BTreeMap<String, Vec<String>>>,
     },
+    Acp {
+        handle: AcpRuntimeHandle,
+        pending: AcpPendingApproval,
+        outcome: Value,
+    },
 }
 
 /// Maps completed Claude user input onto an AskUserQuestion permission allow
@@ -87,6 +92,16 @@ fn claude_user_input_decline_runtime_command(
 impl PendingUserInputRuntimeAction {
     fn send(&self) -> std::result::Result<(), ApiError> {
         match self {
+            Self::Acp { handle, pending, outcome } => handle
+                .input_tx
+                .send(AcpRuntimeCommand::JsonRpcMessage(
+                    json_rpc_result_response_message(
+                        pending.request_id.clone(), json!({ "outcome": outcome }),
+                    ),
+                ))
+                .map_err(|err| ApiError::internal(format!(
+                    "failed to deliver user input response to Kimi: {err}"
+                ))),
             Self::Claude {
                 handle,
                 command,
@@ -120,6 +135,12 @@ impl PendingUserInputRuntimeAction {
 
     fn restore_claim(&self, record: &mut SessionRecord, message_id: &str) {
         match self {
+            Self::Acp { pending, .. } => {
+                record
+                    .pending_acp_approvals
+                    .entry(message_id.to_owned())
+                    .or_insert_with(|| pending.clone());
+            }
             Self::Claude { pending, .. } => {
                 record
                     .pending_claude_user_inputs
@@ -661,6 +682,11 @@ impl AppState {
                 .get(message_id)
                 .cloned()
                 .ok_or_else(|| ApiError::conflict("approval request is no longer live"))?;
+            if pending.question.is_some() {
+                return Err(ApiError::conflict(
+                    "answer the question instead of approving it",
+                ));
+            }
             let handle = match &record.runtime {
                 SessionRuntime::Acp(handle) => handle.clone(),
                 SessionRuntime::Claude(_) | SessionRuntime::Codex(_) | SessionRuntime::None => {
@@ -778,9 +804,10 @@ impl AppState {
         })
     }
 
-    /// Submits a structured user-input response to the live Claude or Codex
+    /// Submits a structured user-input response to the live Claude, Codex or Kimi
     /// runtime that owns the transcript card. Claude receives a permission
-    /// allow/deny; Codex receives its JSON-RPC result.
+    /// allow/deny; Codex receives its JSON-RPC result; Kimi receives the exact
+    /// selected permission-option ID (or dismissal).
     fn submit_user_input(
         &self,
         session_id: &str,
@@ -899,7 +926,26 @@ impl AppState {
                         Some(display_answers),
                     )
                 }
-                Agent::Cursor | Agent::Gemini | Agent::OpenCode | Agent::Kimi => {
+                Agent::Kimi => {
+                    let pending = record
+                        .pending_acp_approvals
+                        .get(message_id)
+                        .cloned()
+                        .ok_or_else(|| ApiError::conflict("user input request is no longer live"))?;
+                    let handle = match &record.runtime {
+                        SessionRuntime::Acp(handle) if !record.runtime_stop_in_progress => {
+                            handle.clone()
+                        }
+                        _ => return Err(ApiError::conflict("Kimi session is not currently running")),
+                    };
+                    let (outcome, display_answers) = kimi_question_answer(&pending, answers, declined)?;
+                    record.pending_acp_approvals.remove(message_id);
+                    (
+                        PendingUserInputRuntimeAction::Acp { handle, pending, outcome },
+                        display_answers,
+                    )
+                }
+                Agent::Cursor | Agent::Gemini | Agent::OpenCode => {
                     return Err(ApiError::conflict(
                         "this agent does not support structured user input",
                     ));
@@ -914,6 +960,9 @@ impl AppState {
                 action.restore_claim(record, message_id);
                 return Err(err);
             }
+            record
+                .pending_acp_approval_order
+                .retain(|pending_message_id| pending_message_id != message_id);
             display_answers
         };
 
@@ -941,7 +990,11 @@ impl AppState {
                 if let Some(Message::UserInputRequest { detail, .. }) =
                     record.session.messages.get_mut(message_index)
                 {
-                    *detail = CLAUDE_USER_SKIPPED_QUESTIONS_DETAIL.to_owned();
+                    *detail = if record.session.agent == Agent::Kimi {
+                        "The user skipped this question.".to_owned()
+                    } else {
+                        CLAUDE_USER_SKIPPED_QUESTIONS_DETAIL.to_owned()
+                    };
                 }
             }
             sync_session_interaction_state(

@@ -1228,6 +1228,7 @@ function sameUserInputQuestions(
         previousOptions.length === nextOptions.length &&
         previousOptions.every(
           (option, optionIndex) =>
+            option.id === nextOptions[optionIndex]?.id &&
             option.label === nextOptions[optionIndex]?.label &&
             option.description === nextOptions[optionIndex]?.description,
         )

@@ -1023,6 +1023,8 @@ export type ApprovalMessage = BaseMessage & {
 };
 
 export type UserInputQuestionOption = {
+  /** Opaque response value; absent for protocols that answer by label. */
+  id?: string;
   description: string;
   label: string;
 };
@@ -1063,8 +1065,8 @@ export type UserInputRequestMessage = BaseMessage & {
   state: InteractionRequestState;
   /**
    * Whether the card offers a Skip action that resolves the request without
-   * answers. Only Claude questions that arrived over the permission channel
-   * are declinable; skipping sends a deny telling Claude to decide alone.
+   * answers. Claude permission questions and Kimi ACP questions are declinable;
+   * the backend maps Skip to the owning protocol's dismissal response.
    * Always present — the backend serializes it unconditionally.
    */
   declinable: boolean;

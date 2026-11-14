@@ -1459,14 +1459,42 @@ fn handle_acp_request(
 
     match method {
         "session/request_permission" => {
-            let (description, detail) = summarize_acp_permission_request(params, agent);
             let options = params
                 .get("options")
                 .and_then(Value::as_array)
                 .cloned()
                 .unwrap_or_default();
 
+            if agent == AcpAgent::Kimi && kimi_permission_is_question(params, &options) {
+                let Some(question) = kimi_permission_question(params, &options) else {
+                    // A malformed choice cannot fall back to generic Approve.
+                    input_tx
+                        .send(AcpRuntimeCommand::JsonRpcMessage(
+                            json_rpc_result_response_message(
+                                request_id,
+                                json!({ "outcome": { "outcome": "cancelled" } }),
+                            ),
+                        ))
+                        .map_err(|err| anyhow!("failed to dismiss malformed Kimi question: {err}"))?;
+                    return Ok(());
+                };
+                let approval = AcpPendingApproval {
+                    question: Some(question),
+                    allow_once_option_id: None,
+                    allow_always_option_id: None,
+                    reject_option_id: find_acp_permission_option(
+                        &options,
+                        &["reject_once", "reject_always"],
+                    ),
+                    request_id,
+                };
+                recorder.push_acp_user_input_request(approval)?;
+                return Ok(());
+            }
+
+            let (description, detail) = summarize_acp_permission_request(params, agent);
             let approval = AcpPendingApproval {
+                question: None,
                 allow_once_option_id: find_acp_permission_option(&options, &["allow_once"]),
                 allow_always_option_id: find_acp_permission_option(&options, &["allow_always"]),
                 // Prefer a one-time refusal. If only persistent refusal exists,
