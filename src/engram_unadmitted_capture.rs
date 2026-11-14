@@ -377,6 +377,10 @@ struct EngramRuntimeClosingJob {
     last_error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     terminal_failure: Option<String>,
+    // An acknowledged next-opening selection may leave this exact old job
+    // capturing its original scope. Never restore this process-local proof.
+    #[serde(skip)]
+    naming_successor: Option<EngramClosingNamingSuccessor>,
 }
 
 impl EngramRuntimeClosingJob {
@@ -395,6 +399,7 @@ impl EngramRuntimeClosingJob {
             retry_at: unadmitted_observation_timestamp(),
             last_error: None,
             terminal_failure: None,
+            naming_successor: None,
         }
     }
 

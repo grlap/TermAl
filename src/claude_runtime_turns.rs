@@ -264,6 +264,15 @@ impl AppState {
             return Ok(None);
         }
         let observations_enabled = ordinary_runtime_observation_enabled(&inner, session_id);
+        let record = &inner.sessions[index];
+        let adopting = cause != ClaudeUnownedCause::Unassigned
+            && record.runtime_projection_allowed()
+            && !record.runtime_stop_in_progress
+            && matches!(record.session.status, SessionStatus::Idle | SessionStatus::Error);
+        if adopting {
+            let generation = record.active_turn_generation.wrapping_add(1).max(1);
+            apply_engram_named_root_selection_locked(&mut inner, index, generation);
+        }
         let opening_root = observations_enabled.then(|| runtime_observation_opening_root(&inner, session_id)).flatten();
         let message_id = inner.next_message_id();
         let (
@@ -351,6 +360,7 @@ impl AppState {
             EngramHost::turn_running_beside(&mut inner, index);
         }
         let revision = self.commit_persisted_delta_locked(&mut inner)?;
+        finish_engram_named_root_selection_locked(&mut inner, index);
         self.publish_delta_locked(
             &inner,
             DeltaEvent::MessageCreated {

@@ -771,6 +771,7 @@ impl AppState {
                     });
                 }
             };
+            finish_engram_named_root_selection_locked(&mut inner, index);
             // Keep the sole unsent dispatch even if capture itself fails.
             let fence = human_prompt_persistence_fence(&inner, session_id);
             #[cfg(test)]

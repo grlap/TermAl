@@ -197,6 +197,8 @@ impl EngramHost<'_> {
     /// The turn of the session at `index` started. Called under the state
     /// lock, by the dispatch that holds it.
     pub(crate) fn turn_started(inner: &mut StateInner, index: usize) {
+        let generation = inner.sessions[index].active_turn_generation;
+        apply_engram_named_root_selection_locked(inner, index, generation);
         engram_note_turn_started(inner, index);
         start_ordinary_runtime_observation(inner, index);
     }

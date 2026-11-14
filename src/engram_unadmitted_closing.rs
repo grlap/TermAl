@@ -41,7 +41,7 @@ impl AppState {
             }) {
                 return Ok(EngramRuntimeClosingOutcome::BindingRecoveryPending);
             }
-            job.scope.require_current(&inner, session_id)?;
+            job.require_current_for_capture(&inner, session_id)?;
             Self::engram_source_root_target_locked(&inner, session_id)
                 .map_err(EngramTransportError::local_state)?
         };
@@ -90,7 +90,7 @@ impl AppState {
                 ));
             }
             let inner = self.inner.lock().expect("state mutex poisoned");
-            job.scope.require_current(&inner, session_id)?;
+            job.require_current_for_capture(&inner, session_id)?;
             let mut scope =
                 EngramRuntimeClosingScope::capture_with_binding(&inner, session_id, Some(&binding))
                     .map_err(EngramTransportError::local_state)?;
@@ -236,11 +236,7 @@ impl AppState {
                 || !target
                     .source_root_read_fence
                     .same_store(&inner, &target.project_id)
-                || record
-                    .engram
-                    .work_binding
-                    .as_ref()
-                    .is_some_and(|current| current != &binding)
+                || !job.capture_binding_is_current(&inner, session_id, &binding)
             {
                 return Err(EngramTransportError::local_state(
                     "runtime closing basis changed during its read",
@@ -355,15 +351,12 @@ impl AppState {
             }) {
                 return Ok(EngramRuntimeClosingOutcome::BindingRecoveryPending);
             }
-            job.scope.require_current(&inner, session_id)?;
+            job.require_current_for_capture(&inner, session_id)?;
             let current = Self::engram_source_root_target_locked(&inner, session_id)
                 .map_err(EngramTransportError::local_state)?;
             if current.as_ref().is_none_or(|current| {
                 current.connection != target.connection
-                    || current
-                        .work_binding
-                        .as_ref()
-                        .is_some_and(|current| current != &binding)
+                    || !job.capture_binding_is_current(&inner, session_id, &binding)
             }) || !target
                 .source_root_read_fence
                 .same_store(&inner, &target.project_id)
