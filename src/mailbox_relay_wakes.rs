@@ -5,6 +5,30 @@
 std::thread_local! {
     static TEST_MAILBOX_RELAY_BEFORE_REDRIVE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
     static TEST_MAILBOX_RELAY_AFTER_FIRST_ADMISSION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    // Ends a home wake batch after this many rows, exactly as an expired time
+    // budget does, so a partial batch is reproducible without wall-clock load.
+    static TEST_MAILBOX_RELAY_HOME_BATCH_ROWS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    // The same limit for the next batch only. Zero spends a batch's budget
+    // before its first row, as a slow start on a loaded machine can.
+    static TEST_MAILBOX_RELAY_NEXT_HOME_BATCH_ROWS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    // Whether the last batch on this thread attempted its whole home page and
+    // found no more, as opposed to stopping before a row.
+    static TEST_MAILBOX_RELAY_HOME_SCAN_COMPLETE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// A test's row budget for the batch starting now (never in production): a
+/// one-shot limit for this batch, otherwise the standing limit.
+fn mailbox_relay_test_batch_rows() -> Option<usize> {
+    #[cfg(test)]
+    {
+        TEST_MAILBOX_RELAY_NEXT_HOME_BATCH_ROWS
+            .with(std::cell::Cell::take)
+            .or_else(|| TEST_MAILBOX_RELAY_HOME_BATCH_ROWS.with(std::cell::Cell::get))
+    }
+    #[cfg(not(test))]
+    {
+        None
+    }
 }
 
 struct MailboxRelayNotification {
@@ -928,6 +952,7 @@ impl AppState {
 
     async fn run_mailbox_relay_wake_batch(&self, home_after: i64, native_after: i64) -> (i64, i64) {
         let started = Instant::now();
+        let test_rows = mailbox_relay_test_batch_rows();
         let worker = self.clone();
         let rows = run_blocking_api(move || {
             let connection=worker.mailbox_store.connection().map_err(mailbox_api_error)?;
@@ -940,6 +965,7 @@ impl AppState {
         for (row, json) in &rows {
             if self.federation_executor_wake_signal.is_stopping()
                 || started.elapsed() >= Duration::from_secs(2)
+                || test_rows.is_some_and(|rows| home_attempted >= rows)
             {
                 break;
             }
@@ -1049,9 +1075,14 @@ impl AppState {
                 .await;
             }
         }
-        if rows.len() < 8 && home_attempted == rows.len() {
+        let home_scan_complete = rows.len() < 8 && home_attempted == rows.len();
+        if home_scan_complete {
             home_next = 0;
         }
+        // A pass that attempted no row from the first cursor also reports a
+        // zero home cursor; a test driver tells the two apart by this record.
+        #[cfg(test)]
+        TEST_MAILBOX_RELAY_HOME_SCAN_COMPLETE.with(|complete| complete.set(home_scan_complete));
         let worker = self.clone();
         let native=run_blocking_api(move || {
             let connection=worker.mailbox_store.connection().map_err(mailbox_api_error)?;

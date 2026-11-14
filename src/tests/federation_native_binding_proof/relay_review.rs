@@ -506,7 +506,9 @@ async fn mailbox_relay_review_boot_scan_does_not_reset_notifications_created_aft
     for index in 0..8 {
         append_to_central(&fixture, &format!("initial-boot-boundary-{index}"));
     }
-    fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
+    // Every pre-boot wake must be attempted before the boot snapshot; one
+    // time-bounded batch need not reach all eight.
+    drain_mailbox_relay_wakes(&fixture.central).await;
     let mut boot = MailboxRelayBootRecovery::default();
     fixture
         .central
@@ -515,7 +517,7 @@ async fn mailbox_relay_review_boot_scan_does_not_reset_notifications_created_aft
         .unwrap();
     assert!(!boot.scan_complete);
     let (_, later) = append_to_central(&fixture, "new-boundary-after-boot-snapshot");
-    fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
+    drain_mailbox_relay_wakes(&fixture.central).await;
     fixture.central.mailbox_store.connection().unwrap().execute(
         "UPDATE mailbox_relay_notifications SET handed_off=1,queued=1 WHERE through_sequence=?1", [later.sequence]).unwrap();
     fixture
@@ -538,6 +540,107 @@ async fn mailbox_relay_review_boot_scan_does_not_reset_notifications_created_aft
     assert!(
         later_handoff,
         "a fresh process-owned handoff is outside the boot snapshot"
+    );
+    fixture.finish().await;
+}
+
+/// Clears the test batch row limit even if the test panics.
+struct HomeBatchRowLimit;
+impl HomeBatchRowLimit {
+    fn set(rows: usize) -> Self {
+        TEST_MAILBOX_RELAY_HOME_BATCH_ROWS.with(|limit| limit.set(Some(rows)));
+        Self
+    }
+}
+impl Drop for HomeBatchRowLimit {
+    fn drop(&mut self) {
+        TEST_MAILBOX_RELAY_HOME_BATCH_ROWS.with(|limit| limit.set(None));
+    }
+}
+
+/// Limits only the next batch, and clears an unused limit even on panic.
+struct NextHomeBatchRowLimit;
+impl NextHomeBatchRowLimit {
+    fn set(rows: usize) -> Self {
+        TEST_MAILBOX_RELAY_NEXT_HOME_BATCH_ROWS.with(|limit| limit.set(Some(rows)));
+        Self
+    }
+}
+impl Drop for NextHomeBatchRowLimit {
+    fn drop(&mut self) {
+        TEST_MAILBOX_RELAY_NEXT_HOME_BATCH_ROWS.with(|limit| limit.set(None));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_relay_review_drain_repeats_a_first_batch_that_attempts_no_row() {
+    // A loaded machine can spend the first batch's whole budget before its
+    // first row. That batch reports the same cursors as a drained one, so the
+    // drain must not take it for the end.
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::new(false).await;
+    let _handles = central_handle(&fixture);
+    for index in 0..8 {
+        append_to_central(&fixture, &format!("zero-row-first-batch-{index}"));
+    }
+    let _first = NextHomeBatchRowLimit::set(0);
+    drain_mailbox_relay_wakes(&fixture.central).await;
+    let undelivered: i64 = fixture
+        .central
+        .mailbox_store
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM mailbox_relay_wakes WHERE delivered=0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        undelivered, 0,
+        "a batch that attempted no row does not end the drain"
+    );
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_relay_review_boot_scan_snapshot_does_not_assume_one_batch_drains_every_wake() {
+    // The worker's home batch is bounded by time as well as by eight rows. On
+    // a loaded machine it can stop early; three rows reproduces that exactly.
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::new(false).await;
+    let _handles = central_handle(&fixture);
+    let _limit = HomeBatchRowLimit::set(3);
+    for index in 0..8 {
+        append_to_central(&fixture, &format!("initial-boot-boundary-{index}"));
+    }
+    drain_mailbox_relay_wakes(&fixture.central).await;
+    let (undelivered, notifications): (i64, i64) = fixture
+        .central
+        .mailbox_store
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM mailbox_relay_wakes WHERE delivered=0),
+                    (SELECT COUNT(*) FROM mailbox_relay_notifications)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        undelivered, 0,
+        "every wake is delivered before the boot scan"
+    );
+    assert_eq!(notifications, 8, "every wake has a pre-boot notification");
+    let mut boot = MailboxRelayBootRecovery::default();
+    fixture
+        .central
+        .reconcile_mailbox_relay_notifications_after_boot(&mut boot)
+        .await
+        .unwrap();
+    assert!(
+        !boot.scan_complete,
+        "eight pre-boot notifications fill the first scan page"
     );
     fixture.finish().await;
 }

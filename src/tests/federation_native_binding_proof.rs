@@ -273,6 +273,51 @@ impl Fixture {
     }
 }
 
+/// Runs the worker's bounded relay wake batches until a pass reports no page
+/// left, as the supervisor does. A batch may stop early on its time budget, so
+/// a test that needs every pending wake attempted drains instead of assuming
+/// one batch did. Passes that make progress are bounded by the obligations
+/// present at the start, never by elapsed time.
+async fn drain_mailbox_relay_wakes(app: &AppState) {
+    let pending = |sql: &str| -> usize {
+        let count: i64 = app
+            .mailbox_store
+            .connection()
+            .unwrap()
+            .query_row(sql, [], |row| row.get(0))
+            .unwrap();
+        usize::try_from(count).unwrap()
+    };
+    let home = pending("SELECT COUNT(*) FROM mailbox_relay_wakes WHERE delivered=0");
+    let native = pending("SELECT COUNT(*) FROM mailbox_relay_notifications WHERE handed_off=0");
+    // A delivered home wake can add one notification to hand off.
+    let mut progress_left = 2 * home + native + 1;
+    let mut cursors = (0, 0);
+    loop {
+        assert!(
+            !app.federation_executor_wake_signal.is_stopping(),
+            "relay wakes cannot drain while the worker is stopping"
+        );
+        let next = app.run_mailbox_relay_wake_batch(cursors.0, cursors.1).await;
+        // Zero cursors alone are not the end: from the first cursor, a pass
+        // whose budget ran out before its first row reports them too.
+        let home_scan_complete = TEST_MAILBOX_RELAY_HOME_SCAN_COMPLETE.with(std::cell::Cell::take);
+        if next == (0, 0) && home_scan_complete {
+            return;
+        }
+        // A pass whose budget ran out before its first row returns the same
+        // cursors; the next pass starts a fresh budget there.
+        if next != cursors {
+            assert!(
+                progress_left > 0,
+                "relay wake batches kept advancing past {home} home and {native} native obligations"
+            );
+            progress_left -= 1;
+        }
+        cursors = next;
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn federation_native_binding_proof_real_owned_channel_control() {
     let _scope = TestTempRootDirectoryScope::repository_local();
