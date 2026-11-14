@@ -84,8 +84,8 @@ receipt, two eleven-second inventory response budgets and ten seconds of detach/
 headroom (68 seconds). It bounds waiting, not a blocked mutex or SQL commit.
 The MCP follow-up HTTP request has a separate derived allowance: release (68 s),
 two reconciliation responses (22 s), durability retry (5 s), unarchive response
-(31 s), ordinary provider preparation and the review-freeze fence (40 s), and
-ordinary request overhead (30 s): 196 seconds. It is single-attempt,
+(31 s), ordinary provider preparation and the review-freeze fence (60 s), and
+ordinary request overhead (30 s): 216 seconds. It is single-attempt,
 not automatically replayed on timeout; a network failure still has an unknown
 outcome and must be checked before retrying. Concurrent recovery returns a conflict
 instead of waiting indefinitely on another follow-up's recovery lock.

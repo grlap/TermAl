@@ -64,9 +64,9 @@ fn engram_operation_timeout(requested: Duration) -> Duration {
 }
 
 fn warn_slow_engram_call(started: std::time::Instant, warned: &mut bool, operation: &str) {
-    let elapsed = started.elapsed();
-    if !*warned && elapsed >= ENGRAM_CALL_WARNING_AFTER {
-        *warned = true;
+    if let Some(elapsed) = take_slow_operation_warning(
+        started.elapsed(), warned, ENGRAM_CALL_WARNING_AFTER,
+    ) {
         eprintln!("engram warning> {operation} still running after {} ms", elapsed.as_millis());
     }
 }

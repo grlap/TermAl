@@ -148,6 +148,7 @@ impl ReviewIdentityGit {
             binary: self.runner.binary.clone(),
             deadline: self.runner.deadline,
             timings: self.runner.timings.clone(),
+            warning: self.runner.warning.clone(),
         };
         let mut child = Self {
             root,
@@ -356,7 +357,7 @@ impl ReviewIdentityGit {
             .arg(format!("--work-tree={}", identity_git_path(&self.root)?))
             .args(args);
         let output = if let Some(input) = input {
-            run_bounded_read_input(
+            run_bounded_read_input_with_warning(
                 &mut command,
                 self.runner.deadline,
                 if args.first() == Some(&"check-ignore") {
@@ -365,13 +366,17 @@ impl ReviewIdentityGit {
                     REVIEW_IDENTITY_PAYLOAD_LIMIT + 1024 * 1024
                 },
                 input,
+                Some(self.runner.warning.clone()),
+            Some(self.runner.deadline),
             )?
         } else {
-            run_bounded_read_command(
+            run_bounded_read_command_with_warning(
                 &mut command,
                 self.runner.deadline,
                 REVIEW_FREEZE_OUTPUT_LIMIT,
                 false,
+                Some(self.runner.warning.clone()),
+            Some(self.runner.deadline),
             )?
         };
         if !output.status.success() && !(absent && output.status.code() == Some(1)) {

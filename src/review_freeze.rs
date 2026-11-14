@@ -102,6 +102,7 @@ struct ReviewFreezeGit {
     binary: PathBuf,
     deadline: std::time::Instant,
     timings: Option<Arc<SourceReadTimings>>,
+    warning: Arc<Mutex<BoundedReadWarning>>,
 }
 
 impl ReviewFreezeGit {
@@ -131,6 +132,8 @@ impl ReviewFreezeGit {
     // solely for bounded check-ignore queries on supplied notification paths.
     fn for_ignore_query(cwd: &FsPath, deadline: Option<std::time::Instant>,
         timings: Option<Arc<SourceReadTimings>>) -> Result<Self> {
+        let started = std::time::Instant::now();
+        let deadline = capture_deadline(deadline.unwrap_or(started + REVIEW_FREEZE_TIMEOUT));
         check_capture_cancellation()?;
         let root = fs::canonicalize(cwd)?;
         // Never allow Windows' current-directory executable search, a relative
@@ -144,8 +147,9 @@ impl ReviewFreezeGit {
         let git = Self {
             root,
             binary,
-            deadline: capture_deadline(deadline.unwrap_or_else(||std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT)),
+            deadline,
             timings,
+            warning: BoundedReadWarning::shared(started),
         };
         Ok(git)
     }
@@ -230,11 +234,13 @@ impl ReviewFreezeGit {
             eprintln!("Git timing thread={:?} args={args:?} remaining_ms={}",
                 std::thread::current().id(), remaining_at_start.as_millis());
         }
-        let output = run_bounded_read_command(
+        let output = run_bounded_read_command_with_warning(
             &mut command,
             self.deadline,
             REVIEW_FREEZE_OUTPUT_LIMIT,
             false,
+            Some(self.warning.clone()),
+            Some(self.deadline),
         )
         .map_err(|error| {
             review_freeze_git_failure(error, args, started.elapsed(), remaining_at_start)
