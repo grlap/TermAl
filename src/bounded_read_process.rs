@@ -85,6 +85,7 @@ thread_local! {
 struct BoundedReadObservation {
     started: std::time::Instant,
     warning_operation: Option<String>,
+    complete_stderr_limit: Option<usize>,
     warned: bool,
     stage: &'static str,
     launch_lock_wait: Option<Duration>,
@@ -101,6 +102,7 @@ impl BoundedReadObservation {
         Self {
             started: std::time::Instant::now(), stage: "spawn",
             warning_operation: None, warned: false,
+            complete_stderr_limit: None,
             // The legacy Windows Command path does not expose its lock wait.
             launch_lock_wait: if cfg!(windows) { None } else { Some(Duration::ZERO) },
             read_deadline: None,
@@ -177,8 +179,23 @@ fn run_engram_bounded_read_command(
     output_limit: usize,
     operation: &str,
 ) -> Result<std::process::Output> {
+    run_engram_bounded_read_command_with_stderr_limit(
+        command, deadline, output_limit, operation, None,
+    )
+}
+
+// Source admission validates every diagnostic byte. Other read callers retain
+// their existing truncating stderr policy and the same finite process owner.
+fn run_engram_bounded_read_command_with_stderr_limit(
+    command: &mut BoundedReadCommand,
+    deadline: std::time::Instant,
+    output_limit: usize,
+    operation: &str,
+    complete_stderr_limit: Option<usize>,
+) -> Result<std::process::Output> {
     let mut observed = BoundedReadObservation::new();
     observed.warning_operation = Some(operation.to_owned());
+    observed.complete_stderr_limit = complete_stderr_limit;
     #[cfg(windows)]
     let result = run_bounded_read_windows_observed(command, deadline, output_limit, |_| Ok(()), &mut observed);
     #[cfg(not(windows))]
@@ -306,7 +323,10 @@ fn run_bounded_read_windows_observed(
             .take_stderr()
             .context("bounded read process stderr missing")?;
         let out = bounded_read_pipe(stdout, output_limit, false);
-        let err = bounded_read_pipe(stderr, 64 * 1024, true);
+        let err = match observed.complete_stderr_limit {
+            Some(limit) => bounded_read_pipe(stderr, limit, false),
+            None => bounded_read_pipe(stderr, 64 * 1024, true),
+        };
         observed.stage = "spawn";
         check_capture_cancellation()?;
         if current_capture_cancellation().is_some() {
@@ -563,7 +583,10 @@ fn run_bounded_read_process_input_observed(
             .take_stderr()
             .context("bounded read process stderr missing")?;
         let out = bounded_read_pipe(stdout, output_limit, false);
-        let err = bounded_read_pipe(stderr, 64 * 1024, true);
+        let err = match observed.complete_stderr_limit {
+            Some(limit) => bounded_read_pipe(stderr, limit, false),
+            None => bounded_read_pipe(stderr, 64 * 1024, true),
+        };
         observed.stage = "spawn";
         if let Some(tree) = &tree {
             tree.resume_after_attach(&process)?;
