@@ -155,6 +155,224 @@ async fn mailbox_relay_review_r2_ordinary_user_send_survives_a_refused_relay_hea
     }
 }
 
+async fn user_send_skips_refused_relay_behind_history(missing_metadata: bool, late_refusal: bool) {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::new(false).await;
+    let _handles = central_handle(&fixture);
+    let (append, receipt) = append_to_central(&fixture, "refused-relay-behind-history");
+    fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
+    let input = claude_input(&fixture);
+    let original_queue = {
+        let mut inner = fixture.central.inner.lock().unwrap();
+        let index = inner.find_session_index(&fixture.native).unwrap();
+        let record = inner.session_mut_by_index(index).unwrap();
+        assert_eq!(record.queued_prompts.len(), 1);
+        let mut historical = record.queued_prompts[0].clone();
+        historical.pending_prompt.id = "retained-historical-user".into();
+        historical.pending_prompt.text = "historical input with unknown delivery".into();
+        historical.pending_prompt.source = None;
+        historical.source = QueuedPromptSource::User;
+        historical.promotion_disposition_known = false;
+        historical.engram_ordinary_handoff = true;
+        record.queued_prompts.push_front(historical);
+        assert_eq!(ordinary_queue_position(record), Some(1));
+        assert_eq!(record.session.status, SessionStatus::Idle);
+        assert!(!record.orchestrator_auto_dispatch_blocked);
+        assert!(!queued_head_held_for_durability(record));
+        serde_json::to_value(&record.queued_prompts).unwrap()
+    };
+
+    let app = fixture.central.clone();
+    let peer = fixture.channel.current_authority().unwrap();
+    let refuse = move || {
+        if missing_metadata {
+            app.mailbox_store
+                .connection()
+                .unwrap()
+                .execute("DELETE FROM mailbox_relay_notifications", [])
+                .unwrap();
+        } else {
+            app.transition_federation_peer(&peer, FederationMembershipState::Revoked)
+                .unwrap();
+        }
+    };
+    if late_refusal {
+        TEST_MAILBOX_RELAY_AFTER_SEND_REVALIDATION.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(refuse));
+        });
+    } else {
+        refuse();
+    }
+
+    let result = fixture
+        .central
+        .dispatch_turn(
+            &fixture.native,
+            user_prompt("fresh user after retained history"),
+        )
+        .expect("relay refusal must not reject a fresh ordinary user prompt");
+    let dispatch = match result {
+        DispatchTurnResult::Dispatched(dispatch)
+        | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        DispatchTurnResult::Queued => {
+            panic!("fresh user input must start beside the refused relay")
+        }
+    };
+    {
+        let inner = fixture.central.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&fixture.native).unwrap()];
+        assert_eq!(
+            serde_json::to_value(&record.queued_prompts).unwrap(),
+            original_queue,
+            "both historical input and refused relay must remain unchanged and unpromoted"
+        );
+    }
+    deliver_turn_dispatch(&fixture.central, dispatch).unwrap();
+    match recv_within_guard(&input, "fresh ordinary user prompt") {
+        Ok(ClaudeRuntimeCommand::Prompt(prompt)) => {
+            assert_eq!(prompt.text, "fresh user after retained history");
+        }
+        _ => panic!("expected the fresh user prompt, never the refused relay or historical input"),
+    }
+    assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    let retained = fixture
+        .central
+        .mailbox_store
+        .mailbox_relay_notification(&append.target, &receipt.mailbox_id, receipt.sequence)
+        .unwrap();
+    if missing_metadata {
+        assert!(
+            retained.is_none(),
+            "ordinary input must not fabricate relay metadata"
+        );
+    } else {
+        let retained = retained.unwrap();
+        assert!(!retained.acknowledged && !retained.handed_off);
+    }
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ordinary_user_skips_revoked_relay_behind_historical_queue_row() {
+    user_send_skips_refused_relay_behind_history(false, false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ordinary_user_skips_missing_relay_metadata_behind_historical_queue_row() {
+    user_send_skips_refused_relay_behind_history(true, false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ordinary_user_skips_relay_revoked_after_revalidation_behind_history() {
+    user_send_skips_refused_relay_behind_history(false, true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ordinary_user_skips_relay_metadata_removed_after_revalidation_behind_history() {
+    user_send_skips_refused_relay_behind_history(true, true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ordinary_user_waits_for_durability_held_relay_behind_history() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    for missing_metadata in [false, true] {
+        let fixture = Fixture::new(false).await;
+        let _handles = central_handle(&fixture);
+        let (append, receipt) = append_to_central(&fixture, "held-relay-behind-history");
+        fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
+        let input = claude_input(&fixture);
+        let (before, held_id, hold) = {
+            let mut inner = fixture.central.inner.lock().unwrap();
+            let index = inner.find_session_index(&fixture.native).unwrap();
+            let record = inner.session_mut_by_index(index).unwrap();
+            assert_eq!(record.queued_prompts.len(), 1);
+            let mut historical = record.queued_prompts[0].clone();
+            historical.pending_prompt.id = "historical-before-held-relay".into();
+            historical.pending_prompt.source = None;
+            historical.source = QueuedPromptSource::User;
+            historical.promotion_disposition_known = false;
+            historical.engram_ordinary_handoff = true;
+            record.queued_prompts.push_front(historical);
+            let selected = &record.queued_prompts[1];
+            let held_id = selected.pending_prompt.id.clone();
+            let hold = QueuedPromptDurabilityHold {
+                nonce: "unacknowledged-relay-fixture".into(),
+                content: queued_prompt_durability_content(selected),
+                failure: None,
+                acknowledged: false,
+            };
+            record
+                .queued_prompt_durability_holds
+                .insert(held_id.clone(), hold.clone());
+            assert_eq!(ordinary_queue_position(record), Some(1));
+            assert!(!queued_head_held_for_durability(record));
+            assert!(queued_prompt_held_for_durability(
+                record,
+                &record.queued_prompts[1]
+            ));
+            (record.queued_prompts.clone(), held_id, hold)
+        };
+        if missing_metadata {
+            fixture
+                .central
+                .mailbox_store
+                .connection()
+                .unwrap()
+                .execute("DELETE FROM mailbox_relay_notifications", [])
+                .unwrap();
+        } else {
+            let peer = fixture.channel.current_authority().unwrap();
+            fixture
+                .central
+                .transition_federation_peer(&peer, FederationMembershipState::Revoked)
+                .unwrap();
+        }
+        assert!(matches!(
+            fixture
+                .central
+                .dispatch_turn(&fixture.native, user_prompt("user behind a held relay"))
+                .unwrap(),
+            DispatchTurnResult::Queued
+        ));
+        assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        {
+            let inner = fixture.central.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&fixture.native).unwrap()];
+            assert_eq!(record.session.status, SessionStatus::Idle);
+            assert_eq!(record.queued_prompts.len(), before.len() + 1);
+            let retained = record
+                .queued_prompts
+                .iter()
+                .take(before.len())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                serde_json::to_value(retained).unwrap(),
+                serde_json::to_value(before).unwrap()
+            );
+            assert_eq!(
+                record.queued_prompt_durability_holds.get(&held_id),
+                Some(&hold)
+            );
+            assert_eq!(
+                record.queued_prompts.back().unwrap().pending_prompt.text,
+                "user behind a held relay"
+            );
+        }
+        let notification = fixture
+            .central
+            .mailbox_store
+            .mailbox_relay_notification(&append.target, &receipt.mailbox_id, receipt.sequence)
+            .unwrap();
+        if missing_metadata {
+            assert!(notification.is_none());
+        } else {
+            let notification = notification.unwrap();
+            assert!(!notification.acknowledged && !notification.handed_off);
+        }
+        fixture.finish().await;
+    }
+}
+
 // A prompt queued behind a refused relay carrier is durable queue state: the
 // production delta persist must select its session, not only the synchronous
 // full save tests otherwise fall back to.

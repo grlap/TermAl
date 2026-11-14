@@ -277,6 +277,73 @@ fn ordinary_unproven_pause_stays_visible_until_one_resume() {
     recovery::assert_passive_original(&turn, &duties);
 }
 
+fn assert_non_relay_history_keeps_its_pause(with_runnable_successor: bool) {
+    let turn = retained_queue_fixture();
+    if with_runnable_successor {
+        turn.edit(|record| {
+            let mut pending = human_choices::selection_prompt("queued-ordinary-automation");
+            pending.text = "automation still waiting for Resume".into();
+            queue_prompt_on_record_with_source(
+                record,
+                pending,
+                Vec::new(),
+                QueuedPromptSource::Orchestrator,
+            );
+        });
+    }
+    let (before, generation) = turn.record(|record| {
+        assert!(record.orchestrator_auto_dispatch_blocked && record.session.queue_paused);
+        assert_eq!(
+            ordinary_queue_position(record),
+            with_runnable_successor.then_some(1)
+        );
+        assert!(
+            record
+                .queued_prompts
+                .iter()
+                .all(|queued| queued.pending_prompt.source.is_none())
+        );
+        (record.queued_prompts.clone(), record.active_turn_generation)
+    });
+    assert!(
+        matches!(
+            turn.state.dispatch_turn(&turn.session, prompt()).unwrap(),
+            DispatchTurnResult::Queued
+        ),
+        "a fresh user send must not bypass a non-relay historical pause"
+    );
+    turn.assert_no_prompt();
+    turn.record(|record| {
+        assert!(record.orchestrator_auto_dispatch_blocked && record.session.queue_paused);
+        assert_eq!(record.active_turn_generation, generation);
+        assert_eq!(record.queued_prompts.len(), before.len() + 1);
+        let retained = record
+            .queued_prompts
+            .iter()
+            .take(before.len())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            serde_json::to_value(retained).unwrap(),
+            serde_json::to_value(before).unwrap()
+        );
+        assert_eq!(
+            record.queued_prompts.back().unwrap().pending_prompt.text,
+            "Distinct ordinary input."
+        );
+    });
+    turn.assert_no_control();
+}
+
+#[test]
+fn non_relay_historical_pause_keeps_a_fresh_user_queued() {
+    assert_non_relay_history_keeps_its_pause(false);
+}
+
+#[test]
+fn non_relay_historical_pause_with_runnable_successor_keeps_a_fresh_user_queued() {
+    assert_non_relay_history_keeps_its_pause(true);
+}
+
 #[test]
 fn ordinary_queue_dispatches_durably_without_settling_history_after_restart_or_cancel() {
     let turn = retained_queue_fixture();

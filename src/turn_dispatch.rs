@@ -1605,7 +1605,8 @@ impl AppState {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner.find_session_index(session_id).and_then(|index| {
                 let record = &inner.sessions[index];
-                record.queued_prompts.front().and_then(|head| head.pending_prompt.source.as_ref())
+                ordinary_queue_position(record).and_then(|position| record.queued_prompts.get(position))
+                    .and_then(|head| head.pending_prompt.source.as_ref())
                     .and_then(|source| source.mailbox.as_ref())
                     .filter(|source| source.mailbox_id.starts_with("relay-mailbox-"))
                     .and_then(|_| QueuedTurnOwner::capture(record))
@@ -1639,7 +1640,8 @@ impl AppState {
         if late_relay_refused {
             // Qualify the refusal against the exact current metadata carrier;
             // the existing ordinary-user path keeps it and preserves FIFO.
-            if inner.sessions[index].queued_prompts.front()
+            let record = &inner.sessions[index];
+            if ordinary_queue_position(record).and_then(|position| record.queued_prompts.get(position))
                 .and_then(|queued|queued.pending_prompt.source.as_ref())
                 .and_then(|source|source.mailbox.as_ref())
                 .is_some_and(|source|source.mailbox_id.starts_with("relay-mailbox-")) {
@@ -1775,12 +1777,19 @@ impl AppState {
         let mut message_id = inner.next_message_id();
         let still_refused = refused_relay_head.as_ref().is_some_and(|owner| owner.matches(&inner.sessions[index]));
         let record = &inner.sessions[index];
+        let ordinary_head = ordinary_queue_position(record)
+            .and_then(|position| record.queued_prompts.get(position));
+        let ordinary_head_held_for_durability = ordinary_head
+            .is_some_and(|head| queued_prompt_held_for_durability(record, head));
+        // Non-runnable history keeps the ordinary pause boundary. Only the
+        // exact refused-relay bypass below may pass that retained front row.
+        let non_runnable_front = record.queued_prompts.front().is_some_and(|head|
+            !ordinary_queue_entry_is_runnable(record, head));
         let bypass_refused_carrier = still_refused && !session_is_busy
             && !capacity_automatic_prompt && record.provider_capacity_retry.is_none()
             && queued_prompt_source == QueuedPromptSource::User
-            && !queued_head_held_for_durability(record)
-            && record.queued_prompts.front().is_some_and(|head|
-                ordinary_queue_entry_is_runnable(record, head));
+            && !ordinary_head_held_for_durability
+            && ordinary_head.is_some();
         // Scheduling isolation only: use the existing explicit-user priority
         // paths without changing the persisted Stop/pause latch. The exact
         // refused carrier remains queued; ordinary-user FIFO is preserved.
@@ -1788,9 +1797,7 @@ impl AppState {
         let manual_can_overtake = bypass_refused_carrier || (!session_is_busy && orchestrator_auto_dispatch_blocked
             && !blocked_queue_contains_user_prompt && !capacity_automatic_prompt
             && queued_prompt_source == QueuedPromptSource::User
-            && !queued_head_held_for_durability(&inner.sessions[index])
-            && !inner.sessions[index].queued_prompts.front().is_some_and(|head|
-                !ordinary_queue_entry_is_runnable(&inner.sessions[index], head)));
+            && !ordinary_head_held_for_durability && !non_runnable_front);
         if still_refused && !manual_can_overtake {
             // Admission of ordinary work is separate from authority to promote
             // the retained relay carrier. Keep FIFO/durability and resume gates;
@@ -1926,9 +1933,8 @@ impl AppState {
             && !blocked_queue_contains_user_prompt
             && !capacity_automatic_prompt
             && queued_prompt_source == QueuedPromptSource::User
-            && !queued_head_held_for_durability(&inner.sessions[index])
-            && !inner.sessions[index].queued_prompts.front().is_some_and(|head|
-                !ordinary_queue_entry_is_runnable(&inner.sessions[index], head));
+            && !ordinary_head_held_for_durability
+            && (bypass_refused_carrier || !non_runnable_front);
 
         if recover_blocked_queue_with_existing_user_prompt {
             queue_prompt_on_record_with_source(
