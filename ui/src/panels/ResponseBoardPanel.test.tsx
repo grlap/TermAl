@@ -2536,6 +2536,90 @@ describe("ResponseBoardPanel", () => {
     }
   });
 
+  it("moves a card left of and above the board origin", async () => {
+    vi.useFakeTimers();
+    try {
+      mockDefaultBoardCards([pinnedCard]);
+      vi.mocked(updateResponseBoardCard).mockImplementation(
+        async (_cardId, geometry) => ({ ...pinnedCard, ...geometry }),
+      );
+      const { container } = render(
+        <ResponseBoardPanel
+          refreshToken="refresh-1"
+          workspaceTabId="workspace-board-1"
+          onOpenSource={() => {}}
+        />,
+      );
+      await act(async () => Promise.resolve());
+      const header = container.querySelector(".response-board-card-header") as Element;
+      const card = container.querySelector(".response-board-card") as HTMLElement;
+      // The card starts at (120, 80); the pointer travels 300 left and 250 up.
+      fireEvent.pointerDown(header, { button: 0, pointerId: 7, clientX: 100, clientY: 100 });
+      fireEvent.pointerMove(card, { pointerId: 7, clientX: -200, clientY: -150 });
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+        await Promise.resolve();
+      });
+      expect(updateResponseBoardCard).toHaveBeenCalledWith("card-1", {
+        x: -180,
+        y: -170,
+        w: 360,
+        h: 420,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops a transcript message left of and above the board origin", async () => {
+    mockDefaultBoardCards([]);
+    vi.mocked(stageResponseBoardCard).mockResolvedValue(pinnedCard);
+    const dataTransfer = new MemoryDataTransfer();
+    writeResponseBoardMessageDragData(dataTransfer as unknown as DataTransfer, {
+      sessionId: "session-1",
+      messageId: "message-1",
+    });
+    // The camera is panned so that the board origin is right of and below
+    // the drop point.
+    const { container } = render(
+      <ResponseBoardPanel
+        refreshToken="refresh-1"
+        workspaceTabId="workspace-board-1"
+        activeBoardTabId={RESPONSE_BOARD_DEFAULT_TAB_ID}
+        boardViews={{
+          [RESPONSE_BOARD_DEFAULT_TAB_ID]: { panX: 600, panY: 400, zoom: 1 },
+        }}
+        onOpenSource={() => {}}
+      />,
+    );
+    expect(
+      await screen.findByText(
+        "Drag a staged response here, or drop a transcript message.",
+      ),
+    ).toBeTruthy();
+    const surface = container.querySelector(".response-board-surface") as HTMLElement;
+    mockSurfaceRect(surface);
+    const dropEvent = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperties(dropEvent, {
+      clientX: { value: 300 },
+      clientY: { value: 180 },
+      dataTransfer: { value: dataTransfer },
+    });
+    act(() => {
+      surface.dispatchEvent(dropEvent);
+    });
+    await waitFor(() =>
+      expect(stageResponseBoardCard).toHaveBeenCalledWith({
+        sessionId: "session-1",
+        messageId: "message-1",
+        tabId: RESPONSE_BOARD_DEFAULT_TAB_ID,
+        placement: "placed",
+        x: -580,
+        y: -298,
+      }),
+    );
+  });
+
   it("sizes the board from its cards without forcing an oversized scroll plane", async () => {
     mockDefaultBoardCards([pinnedCard]);
 

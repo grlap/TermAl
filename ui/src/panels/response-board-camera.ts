@@ -9,6 +9,14 @@ const BOARD_PADDING = 72;
 const MIN_BOARD_ZOOM = 0.25;
 const MAX_BOARD_ZOOM = 2;
 
+// The backend accepts card positions within this range in either direction;
+// cards may sit left of or above the board origin.
+const MAX_BOARD_COORDINATE = 1_000_000;
+
+export function clampBoardCoordinate(value: number) {
+  return Math.min(MAX_BOARD_COORDINATE, Math.max(-MAX_BOARD_COORDINATE, value));
+}
+
 export function clampBoardZoom(value: number) {
   return Math.min(MAX_BOARD_ZOOM, Math.max(MIN_BOARD_ZOOM, value));
 }

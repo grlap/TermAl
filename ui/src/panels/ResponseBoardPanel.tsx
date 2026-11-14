@@ -30,6 +30,7 @@ import {
 } from "../response-board";
 import type { WorkspaceResponseBoardView } from "../workspace-types";
 import {
+  clampBoardCoordinate,
   clampBoardZoom,
   fitResponseBoardCardsInView,
   responseBoardViewShowsAnyCard,
@@ -558,8 +559,8 @@ export function ResponseBoardPanel({
         gesture.kind === "move"
           ? {
               ...card,
-              x: Math.max(0, gesture.x + deltaX),
-              y: Math.max(0, gesture.y + deltaY),
+              x: clampBoardCoordinate(gesture.x + deltaX),
+              y: clampBoardCoordinate(gesture.y + deltaY),
             }
           : {
               ...card,
@@ -918,11 +919,12 @@ export function ResponseBoardPanel({
       const clientY = Number.isFinite(event.clientY)
         ? event.clientY
         : rect.top + surface.clientHeight / 2;
-      const x = Math.max(
-        0,
+      const x = clampBoardCoordinate(
         (clientX - rect.left - view.panX) / view.zoom - 180,
       );
-      const y = Math.max(0, (clientY - rect.top - view.panY) / view.zoom - 28);
+      const y = clampBoardCoordinate(
+        (clientY - rect.top - view.panY) / view.zoom - 28,
+      );
       setError(null);
       const stagedCardId = event.dataTransfer.getData(
         RESPONSE_BOARD_STAGED_CARD_MIME,
