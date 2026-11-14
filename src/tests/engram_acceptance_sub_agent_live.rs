@@ -143,6 +143,7 @@ fn spawn_child(
                 work_ref: work.to_owned(),
                 agent: Some(Agent::Codex),
                 model: None,
+                retired_check_dispositions: Vec::new(),
                 criterion_evidence: vec![AcceptanceCriterionEvidenceRequest {
                     criterion: 1,
                     locators: vec![evidence.to_owned()],

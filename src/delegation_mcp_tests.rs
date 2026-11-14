@@ -19,6 +19,9 @@ mod spawn_brief;
 #[path = "delegation_mcp_evaluation_replay_tests.rs"]
 mod evaluation_replay;
 
+#[path = "delegation_mcp_retired_check_tests.rs"]
+mod retired_checks;
+
 #[path = "delegation_mcp_test_request_tests.rs"]
 mod test_request;
 

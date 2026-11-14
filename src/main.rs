@@ -1234,6 +1234,7 @@ include!("acceptance_evidence_recovery.rs");
 include!("acceptance_evaluation_replay.rs");
 include!("acceptance_named_root_sighting.rs");
 include!("acceptance_committed_input.rs");
+include!("acceptance_retired_checks.rs");
 include!("acceptance_native_input.rs");
 include!("acceptance_evidence_selection.rs");
 include!("acceptance_verification_evidence.rs");

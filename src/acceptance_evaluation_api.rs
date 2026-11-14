@@ -5,7 +5,7 @@
 // evaluate` under the evaluator's own identity, resent once when its outcome
 // is unknown). Does not own the brief or the submission shape
 // (acceptance_evaluation.rs), delegation lifecycle, or any tracker write other
-// than that evaluate call.
+// than that evaluate call and explicit requester-attributed retired-check notes.
 
 const TERMAL_EVALUATE_ACCEPTANCE_TOOL_NAME: &str = "termal_evaluate_acceptance";
 const TERMAL_EVALUATE_ACCEPTANCE_TOOL_DESCRIPTION: &str = "Ask TermAl to produce the acceptance evaluation an Engram task needs before it can be completed. Call this when the tracker refuses completion for a missing acceptance evaluation, or before `done` on a task that has acceptance criteria. Supply reuseDelegationId to explicitly prefer a previous eligible evaluator; omission preserves fresh spawning. Reuse permits at most three host-issued attempt keys and requires settled prior submission and brief delivery. Supply the task's workRef; agent (Claude or Codex) and model override the project's evaluator defaults. Supplying model requires an explicit agent; otherwise the request is refused before any tracker read. Without an agent default, a Claude/Codex parent prefers the other ready, nonblocking vendor, otherwise its own vendor. Other parents prefer ready, nonblocking Codex, then Claude, and fall back to Codex when neither is ready. TermAl reads the task and the project policy, selects the evaluation mode, and for an independent evaluation spawns a read-only evaluator child that records its verdicts in the tracker under its own identity: wait for it with termal_resume_after_delegations, then read the status or result for what was recorded. One evaluator runs per task: a request made while one is running is refused and names that delegation and its parent session, so wait on it or ask that session. For an undeclared same_session evaluation nothing is spawned and the returned brief tells you how to record it yourself. A complete owner source identity requires a persisted child attempt: a saved same_session preference falls back to another policy-admitted mode. A task pin or a same_session-only policy instead receives a refusal naming the required unpin or policy change.";
@@ -179,6 +179,13 @@ fn acceptance_evaluation_request_tool_definition() -> Value {
                     "description": "Evaluator agent. Overrides the project default. Auto prefers the other ready Claude/Codex vendor, otherwise the caller's supported vendor; other parents prefer ready Codex, then Claude. Auto skips vendors with an authoritative terminal usage-limit refusal observed in the last five minutes; a later correlated success clears that observation. Explicit, reuse and project choices are unchanged. Auto discloses a skipped vendor, or refuses without spawning when no alternative is ready, naming when the earliest observed window ends. Nothing retries automatically."
                 },
                 "model": { "type": "string", "description": "Evaluator model override. Requires an explicit agent so Auto cannot send a vendor-specific model to another vendor." },
+                "retiredCheckDispositions": {
+                    "type": "array", "maxItems": ACCEPTANCE_RETIRED_CHECKS_MAX,
+                    "description": "Explicitly exclude exact acknowledged checks on a retired root from this evaluation request admission. Each reason is recorded under your identity before the fresh evidence cut. The original result remains disclosed and earns no credit. Current-root checks cannot be excluded. Not carried to later evaluation requests; incompatible with reuseDelegationId.",
+                    "items": {"type": "object", "additionalProperties": false, "required": ["runId", "reason"],
+                        "properties": {"runId": {"type": "string", "minLength": 1, "maxLength": 256},
+                            "reason": {"type": "string", "minLength": 1, "maxLength": 1024}}}
+                },
                 "criterionEvidence": {
                     "type": "array", "maxItems": MAX_ACCEPTANCE_SELECTED_RECORDS,
                     "description": "Explicit criterion-to-evidence associations. TermAl reads these records whole even outside the newest notes window; this is discovery, not a claim that they satisfy the criterion.",
@@ -273,6 +280,8 @@ struct RequestAcceptanceEvaluationRequest {
     model: Option<String>,
     #[serde(default)]
     criterion_evidence: Vec<AcceptanceCriterionEvidenceRequest>,
+    #[serde(default)]
+    retired_check_dispositions: Vec<AcceptanceRetiredCheckRequest>,
 }
 
 #[derive(Serialize)]
@@ -936,6 +945,27 @@ impl AppState {
         now: impl Fn() -> std::time::Instant,
         automatic: bool,
     ) -> Result<AcceptanceEvaluationRequestResponse, ApiError> {
+        validate_acceptance_retired_check_requests(&request.retired_check_dispositions)?;
+        if !request.retired_check_dispositions.is_empty() && (automatic || request.reuse_delegation_id.is_some()) {
+            return Err(ApiError::bad_request("retired check dispositions require an explicit fresh evaluation request, without reuseDelegationId"));
+        }
+        self.prepare_acceptance_evaluation_with_dispositions_until(
+            parent_session_id, request, &read, deadline, &now, automatic, &[])
+    }
+
+    // Two phases only for an explicit disposition: validate and record its
+    // audit note, then take a wholly fresh canonical evidence bracket. The
+    // write never falls inside the judged evidence cut and is never retried.
+    fn prepare_acceptance_evaluation_with_dispositions_until(
+        &self,
+        parent_session_id: &str,
+        request: RequestAcceptanceEvaluationRequest,
+        read: &impl Fn(&EngramConnectionConfig, &[String], Duration) -> Result<Value, EngramTransportError>,
+        deadline: std::time::Instant,
+        now: &impl Fn() -> std::time::Instant,
+        automatic: bool,
+        dispositions: &[AcceptanceRetiredCheckDisposition],
+    ) -> Result<AcceptanceEvaluationRequestResponse, ApiError> {
         let reuse = self.reserve_acceptance_evaluation_reuse(parent_session_id, &request, automatic)?;
         if let Some(reservation) = reuse.as_ref() {
             if let Some(brief) = reservation.previous.acceptance_evaluation.as_ref()
@@ -1353,7 +1383,7 @@ impl AppState {
         )?;
         // Mandatory host disclosure is reserved before optional evidence is
         // shortened. A dropped hint must never look like it was still read.
-        let selection_notice = if selection_disclosures.is_empty() { String::new() }
+        let mut selection_notice = if selection_disclosures.is_empty() { String::new() }
             else { format!("Host evidence-selection disclosure:\n{}\n\n", selection_disclosures.join("\n")) };
         self.read_acceptance_binding_evidence(
             &target.store,
@@ -1562,7 +1592,23 @@ impl AppState {
         // at HEAD and an acknowledged verification record, refused otherwise,
         // with an additional sighting check for an unheld retained-root requester
         // (`acceptance_committed_input.rs`).
-        let committed_admission = self.require_acceptance_source_preflight(
+        if !request.retired_check_dispositions.is_empty() && dispositions.is_empty() {
+            let recorded = self.record_acceptance_retired_dispositions(
+                parent_session_id, connection, &target.store, &task, source_root.as_ref(),
+                &request.retired_check_dispositions, read, deadline, now)?;
+            // The note changed the evidence basis. Discard every preliminary
+            // task/evidence read and judge a new fully bracketed cut.
+            return self.prepare_acceptance_evaluation_with_dispositions_until(
+                parent_session_id, request, read, deadline, now, automatic, &recorded);
+        }
+        self.validate_acceptance_retired_dispositions(parent_session_id, connection,
+            &target.store, &task, source_root.as_ref(), dispositions)?;
+        if !dispositions.is_empty() {
+            let rows = dispositions.iter().map(|row| &row.disclosure).collect::<Vec<_>>();
+            selection_notice.push_str(&format!("Host-recorded retired check dispositions (context only, no verification credit):\n{}\n\n",
+                serde_json::to_string(&rows).map_err(|e| ApiError::internal(e.to_string()))?));
+        }
+        let committed_admission = self.require_acceptance_source_preflight_excluding(
             parent_session_id,
             &target.connection,
             &target.store,
@@ -1570,7 +1616,10 @@ impl AppState {
             source_root.as_ref(),
             deadline,
             &now,
+            dispositions,
         )?;
+        self.validate_acceptance_retired_dispositions(parent_session_id, connection,
+            &target.store, &task, source_root.as_ref(), dispositions)?;
         // Admission retains its existing guards. New attempts capture the
         // complete owner identity independently; no revision-string fallback.
         let place = source_root.as_ref().map_or_else(
@@ -1822,18 +1871,20 @@ impl AppState {
                     }
                 }
                 let unmeasured = unmeasured(&source_fingerprint);
+                let brief_bytes = MAX_ACCEPTANCE_BRIEF_BYTES.saturating_sub(selection_notice.len());
                 let base = build_same_session_acceptance_brief_with_plan(
                     &task,
                     source_fingerprint.as_deref(),
-                    MAX_ACCEPTANCE_BRIEF_BYTES,
+                    brief_bytes,
                 )?;
                 let (brief, cuts) = acceptance_same_session_brief_with_obligations(
                     &task,
                     source_fingerprint.as_deref(),
                     base,
                     &mut obligation_assessments,
-                    MAX_ACCEPTANCE_BRIEF_BYTES,
+                    brief_bytes,
                 );
+                let brief = format!("{selection_notice}{brief}");
                 Ok(AcceptanceEvaluationRequestResponse::SameSession {
                     mode,
                     brief,
@@ -2229,7 +2280,7 @@ impl AppState {
                         &parent,
                         RequestAcceptanceEvaluationRequest {
                             work_ref: authority.target.work_ref.clone(), reuse_delegation_id: Some(authority.delegation_id.clone()),
-                            agent: None, model: None, criterion_evidence: Vec::new(),
+                            agent: None, model: None, criterion_evidence: Vec::new(), retired_check_dispositions: Vec::new(),
                         }, read,
                         std::time::Instant::now() + acceptance_evaluation_request_tracker_budget(),
                         std::time::Instant::now, true,

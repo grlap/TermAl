@@ -1180,6 +1180,9 @@ impl TermalDelegationMcpBridge {
         );
         insert_optional_string(&mut body, "agent", arguments.get("agent"));
         insert_optional_string(&mut body, "model", arguments.get("model"));
+        if let Some(dispositions) = arguments.get("retiredCheckDispositions") {
+            body.insert("retiredCheckDispositions".to_owned(), dispositions.clone());
+        }
         if let Some(evidence) = arguments.get("criterionEvidence") {
             body.insert("criterionEvidence".to_owned(), evidence.clone());
         }

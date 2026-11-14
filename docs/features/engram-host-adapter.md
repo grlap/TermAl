@@ -2264,7 +2264,7 @@ callers and bodies:
 | Route | Caller | Meaning |
 | --- | --- | --- |
 | `POST /api/sessions/{id}/acceptance-evaluation-replay` | the owning parent root of an ended evaluator | resend its saved Unconfirmed write once, with body `{ delegationId }`; no caller verdicts, payload or new key |
-| `POST /api/sessions/{id}/acceptance-evaluations` (plural) | the parent session whose task needs judging | a request that *may create* an evaluation: it reads the tracker and either spawns an evaluator or answers with a same-session brief. Body `{ workRef, agent?, model?, reuseDelegationId? }` |
+| `POST /api/sessions/{id}/acceptance-evaluations` (plural) | the parent session whose task needs judging | a request that *may create* an evaluation: it reads the tracker and either spawns an evaluator or answers with a same-session brief. Body `{ workRef, agent?, model?, reuseDelegationId?, criterionEvidence?, retiredCheckDispositions? }` |
 | `POST /api/sessions/{id}/acceptance-evaluation` (singular) | the evaluator child itself | the *one* evaluation that child owns: `{id}` is the child, and the task, mode, bases and attempt key are the host's. Body `{ schemaVersion, attemptKey?, verdicts }` |
 
 The plural route is a collection the parent adds to; the singular route is the
@@ -2292,7 +2292,28 @@ and the [API table](../architecture.md).
 
 **Request.** `termal_evaluate_acceptance`, or
 `POST /api/sessions/{id}/acceptance-evaluations` with
-`{ "workRef", "agent"?, "model"?, "criterionEvidence"? }`. TermAl:
+`{ "workRef", "agent"?, "model"?, "criterionEvidence"?, "retiredCheckDispositions"? }`.
+An explicit fresh request may include up to four retired-check dispositions,
+each `{ "runId": "test-…", "reason": "…" }`. These apply only to exact,
+acknowledged registrations on the same claim's retired root. A current-root
+check cannot be excluded; an older generation on the same path must actually
+fail the existing root-rebound boundary, rather than qualify for unchanged
+source admission. Reasons must be nonempty and at most 1024 UTF-8 bytes.
+
+Before admitting that request, the host writes an ordinary attributed note
+under the requester's identity, retaining the original check, root, input,
+result, acknowledgement and reason. Missing artifacts are disclosed as unknown;
+an inconsistent historical receipt is disclosed alongside the original result.
+An unreadable or changed acknowledged body refuses the disposition. A failed,
+unknown or unacknowledged note write starts no evaluator. After acknowledgement,
+the host discards the preliminary reads and takes a fresh canonical evidence
+bracket. The complete disposition and note locator are mandatory context in the
+evaluator's brief. They grant no passed check, criterion waiver or test credit.
+Normal current-root sighting, source and criterion checks still apply. A later
+evaluation must name the dispositions again or obtain a current-root check;
+they are incompatible with `reuseDelegationId` and never carry automatically.
+
+TermAl:
 
 1. builds the [Work view](work-visualizer.md)'s host reader for the session's
    project, so task and policy reads run under the operator-validated binary,

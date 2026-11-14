@@ -8,6 +8,12 @@ use super::*;
 #[path = "acceptance_same_path_recovery.rs"]
 mod same_path_recovery;
 
+#[path = "acceptance_retired_check_disposition.rs"]
+mod retired_check_disposition;
+
+#[path = "acceptance_retired_check_audit.rs"]
+mod retired_check_audit;
+
 /// Arrange the completed second naming and publish its canonical proof.
 /// The registration is deliberately untouched: its root is historical fact.
 fn rename_same_workspace(state: &AppState, parent: &str, store: &EngramAuthorityStoreKey) {

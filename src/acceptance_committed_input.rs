@@ -686,7 +686,7 @@ impl AppState {
     /// retained-root request the sighting preflight. `Some` with the admission when the
     /// committed flow admitted the request, whose commit the evaluation then
     /// judges; `None` in the legacy flow.
-    fn require_acceptance_source_preflight(
+    fn require_acceptance_source_preflight_excluding(
         &self,
         parent_session_id: &str,
         reader: &EngramConnectionConfig,
@@ -695,9 +695,10 @@ impl AppState {
         root: Option<&AcceptanceEvaluationSourceRoot>,
         deadline: std::time::Instant,
         now: &impl Fn() -> std::time::Instant,
+        dispositions: &[AcceptanceRetiredCheckDisposition],
     ) -> Result<Option<AcceptanceCommittedInputAdmission>, ApiError> {
         match self
-            .acceptance_committed_input_decision(
+            .acceptance_committed_input_decision_excluding(
                 parent_session_id,
                 reader,
                 store,
@@ -705,6 +706,7 @@ impl AppState {
                 root,
                 deadline,
                 now,
+                dispositions,
             )
             .map_err(|refusal| refusal.into_api_error(&task.work_ref))?
         {
@@ -785,6 +787,22 @@ impl AppState {
         deadline: std::time::Instant,
         now: &impl Fn() -> std::time::Instant,
     ) -> Result<AcceptanceCommittedInputDecision, AcceptanceCommittedInputRefusal> {
+        self.acceptance_committed_input_decision_excluding(
+            parent_session_id, reader, store, task, root, deadline, now, &[])
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn acceptance_committed_input_decision_excluding(
+        &self,
+        parent_session_id: &str,
+        reader: &EngramConnectionConfig,
+        store: &EngramAuthorityStoreKey,
+        task: &AcceptanceEvaluationTask,
+        root: Option<&AcceptanceEvaluationSourceRoot>,
+        deadline: std::time::Instant,
+        now: &impl Fn() -> std::time::Instant,
+        dispositions: &[AcceptanceRetiredCheckDisposition],
+    ) -> Result<AcceptanceCommittedInputDecision, AcceptanceCommittedInputRefusal> {
         use AcceptanceCommittedInputDecision as Decision;
         use AcceptanceCommittedInputRefusal as Refusal;
         let Some(root) = root else {
@@ -840,7 +858,9 @@ impl AppState {
                                 })
                         })
                         .filter_map(|row| row.registration.as_ref()),
-                );
+                )
+                .filter(|row| !dispositions.iter().any(|d|
+                    acceptance_committed_input_registration_unchanged(&d.registration, row)));
             // Filtering by the new name must not erase an acknowledged check
             // and turn it into a legacy request. A current-name run still has
             // its ordinary admission rules; this guard only closes fallback.
