@@ -481,6 +481,7 @@ impl AppState {
                     &format!("canonical claim {} / {}", binding.work_id, binding.claim_id));
                 let mut failed = expected.failed(session_id, &error);
                 failed.terminal_failure = Some(error.message);
+                failed.naming_successor = None;
                 state.unadmitted_closing_jobs[position] = failed;
                 let notice = runtime_observation_focus_notice(&expected.trace.host_turn_ref,
                     focus_label.as_deref(), refreshed);
@@ -522,6 +523,7 @@ impl AppState {
                     ));
                     let mut failed = failed;
                     failed.terminal_failure = Some(error.message);
+                    failed.naming_successor = None;
                     state.unadmitted_closing_jobs[position] = failed;
                 } else {
                     state.unadmitted_closing_jobs[position] = failed;
