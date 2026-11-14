@@ -9,8 +9,9 @@
 // from another.
 mod test_run_history_store {
     use super::{
-        EngramAuthorityStoreKey, PersistMetadataStamp, PersistTracked, TestRunCommandObservation,
-        TestRunCompacted, TestRunEvidenceAssociation, TestRunRegistration,
+        EngramAuthorityStoreKey, PersistMetadataStamp, PersistTracked, TestRunCausalKey,
+        TestRunCommandObservation, TestRunCompacted, TestRunEvidenceAssociation,
+        TestRunRegistration, test_run_causal_key,
     };
     use std::collections::{BTreeMap, BTreeSet};
     use std::ops::Deref;
@@ -37,7 +38,9 @@ mod test_run_history_store {
     #[cfg(test)]
     impl SkipContractGuardForTiming {
         pub(super) fn new() -> Self {
-            Self { previous: TEST_SKIP_CONTRACT_GUARD.with(|skip| skip.replace(true)) }
+            Self {
+                previous: TEST_SKIP_CONTRACT_GUARD.with(|skip| skip.replace(true)),
+            }
         }
     }
 
@@ -79,8 +82,10 @@ mod test_run_history_store {
     }
 
     /// Candidates of one bucket, in map key order.
-    fn members<'a, K: Ord + ?Sized, Q: Ord>(map: &'a BTreeMap<Q, BTreeSet<String>>, bucket: &K)
-        -> impl Iterator<Item = &'a String> + 'a
+    fn members<'a, K: Ord + ?Sized, Q: Ord>(
+        map: &'a BTreeMap<Q, BTreeSet<String>>,
+        bucket: &K,
+    ) -> impl Iterator<Item = &'a String> + 'a
     where
         Q: std::borrow::Borrow<K>,
     {
@@ -136,7 +141,11 @@ mod test_run_history_store {
 
         /// Mutates one row and reindexes it under its actual map key. The
         /// closure cannot keep the borrow: its result may not reference the row.
-        pub(super) fn update<R>(&mut self, key: &str, change: impl FnOnce(&mut V) -> R) -> Option<R> {
+        pub(super) fn update<R>(
+            &mut self,
+            key: &str,
+            change: impl FnOnce(&mut V) -> R,
+        ) -> Option<R> {
             // Borrow the two fields separately; the rows' borrow stamps them.
             let rows: &mut BTreeMap<String, V> = &mut self.rows;
             let row = rows.get_mut(key)?;
@@ -155,7 +164,8 @@ mod test_run_history_store {
         /// tool identities; artifact presence and artifact run id. For
         /// compacted proofs: summary run id, and each nested observation's
         /// execution id and association store and binding ids. For
-        /// registrations: run id. Only result-filling paths use it (lifecycle
+        /// registrations: run id and original causal request key; for compacted
+        /// proofs also that key from its retained registration. Only result-filling paths use it (lifecycle
         /// read, verification record, checkpoint, confirmed cursor). Test
         /// builds rebuild the row's memberships before and after and panic
         /// on any difference.
@@ -181,7 +191,10 @@ mod test_run_history_store {
                 if let Some(before) = before {
                     let mut after = I::default();
                     after.add(key, row);
-                    assert_eq!(before, after, "update_unindexed_fields changed an indexed field of {key}");
+                    assert_eq!(
+                        before, after,
+                        "update_unindexed_fields changed an indexed field of {key}"
+                    );
                 }
             }
             Some(result)
@@ -226,7 +239,10 @@ mod test_run_history_store {
             let row = self.rows.get(key)?;
             count_maintenance();
             self.index.remove(key, row);
-            Some(RowGuard { store: self, key: key.to_owned() })
+            Some(RowGuard {
+                store: self,
+                key: key.to_owned(),
+            })
         }
 
         /// Test-only mutation of every row, each reindexed.
@@ -273,7 +289,10 @@ mod test_run_history_store {
 
     impl<V: Clone, I: Clone> Clone for IndexedRows<V, I> {
         fn clone(&self) -> Self {
-            Self { rows: self.rows.snapshot_clone(), index: self.index.clone() }
+            Self {
+                rows: self.rows.snapshot_clone(),
+                index: self.index.clone(),
+            }
         }
     }
 
@@ -382,7 +401,11 @@ mod test_run_history_store {
     pub(super) type TestRunCheckBucket = (Option<String>, Option<String>, String);
 
     fn check_bucket(row: &TestRunCommandObservation) -> TestRunCheckBucket {
-        (row.summary.owner_session_id.clone(), row.grant_identity.clone(), row.tool_identity.clone())
+        (
+            row.summary.owner_session_id.clone(),
+            row.grant_identity.clone(),
+            row.tool_identity.clone(),
+        )
     }
 
     /// Candidate indexes over live observations, keyed by actual map key.
@@ -398,8 +421,16 @@ mod test_run_history_store {
     impl RowIndex<TestRunCommandObservation> for TestRunObservationIndex {
         fn add(&mut self, key: &str, row: &TestRunCommandObservation) {
             for association in &row.evidence {
-                add_member(&mut self.lifecycle, TestRunLifecycleKey::of(association), key);
-                add_member(&mut self.producer, association.producer_observation_id.clone(), key);
+                add_member(
+                    &mut self.lifecycle,
+                    TestRunLifecycleKey::of(association),
+                    key,
+                );
+                add_member(
+                    &mut self.producer,
+                    association.producer_observation_id.clone(),
+                    key,
+                );
             }
             add_member(&mut self.check, check_bucket(row), key);
             add_member(&mut self.summary_run, row.summary.run_id.clone(), key);
@@ -410,8 +441,16 @@ mod test_run_history_store {
 
         fn remove(&mut self, key: &str, row: &TestRunCommandObservation) {
             for association in &row.evidence {
-                remove_member(&mut self.lifecycle, &TestRunLifecycleKey::of(association), key);
-                remove_member(&mut self.producer, &association.producer_observation_id, key);
+                remove_member(
+                    &mut self.lifecycle,
+                    &TestRunLifecycleKey::of(association),
+                    key,
+                );
+                remove_member(
+                    &mut self.producer,
+                    &association.producer_observation_id,
+                    key,
+                );
             }
             remove_member(&mut self.check, &check_bucket(row), key);
             remove_member(&mut self.summary_run, &row.summary.run_id, key);
@@ -442,6 +481,7 @@ mod test_run_history_store {
     /// Candidate indexes over compacted proofs, keyed by actual map key.
     #[derive(Clone, Debug, Default, PartialEq, Eq)]
     pub(super) struct TestRunCompactedIndex {
+        causal: BTreeMap<TestRunCausalKey, BTreeSet<String>>,
         lifecycle: BTreeMap<TestRunLifecycleKey, BTreeSet<String>>,
         summary_run: BTreeMap<String, BTreeSet<String>>,
         execution: BTreeMap<String, BTreeSet<String>>,
@@ -449,9 +489,16 @@ mod test_run_history_store {
 
     impl RowIndex<TestRunCompacted> for TestRunCompactedIndex {
         fn add(&mut self, key: &str, row: &TestRunCompacted) {
+            if let Some(causal) = row.registration.as_ref().and_then(test_run_causal_key) {
+                add_member(&mut self.causal, causal, key);
+            }
             for observation in &row.observations {
                 for association in &observation.evidence {
-                    add_member(&mut self.lifecycle, TestRunLifecycleKey::of(association), key);
+                    add_member(
+                        &mut self.lifecycle,
+                        TestRunLifecycleKey::of(association),
+                        key,
+                    );
                 }
                 add_member(&mut self.execution, observation.execution_id.clone(), key);
             }
@@ -459,9 +506,16 @@ mod test_run_history_store {
         }
 
         fn remove(&mut self, key: &str, row: &TestRunCompacted) {
+            if let Some(causal) = row.registration.as_ref().and_then(test_run_causal_key) {
+                remove_member(&mut self.causal, &causal, key);
+            }
             for observation in &row.observations {
                 for association in &observation.evidence {
-                    remove_member(&mut self.lifecycle, &TestRunLifecycleKey::of(association), key);
+                    remove_member(
+                        &mut self.lifecycle,
+                        &TestRunLifecycleKey::of(association),
+                        key,
+                    );
                 }
                 remove_member(&mut self.execution, &observation.execution_id, key);
             }
@@ -470,6 +524,9 @@ mod test_run_history_store {
     }
 
     impl TestRunCompactedIndex {
+        pub(super) fn causal(&self, key: &TestRunCausalKey) -> impl Iterator<Item = &String> {
+            members(&self.causal, key)
+        }
         pub(super) fn lifecycle(&self, key: &TestRunLifecycleKey) -> impl Iterator<Item = &String> {
             members(&self.lifecycle, key)
         }
@@ -484,33 +541,45 @@ mod test_run_history_store {
     /// Registration map keys by the run id each registration carries.
     #[derive(Clone, Debug, Default, PartialEq, Eq)]
     pub(super) struct TestRunRegistrationIndex {
+        causal: BTreeMap<TestRunCausalKey, BTreeSet<String>>,
         run: BTreeMap<String, BTreeSet<String>>,
     }
 
     impl RowIndex<TestRunRegistration> for TestRunRegistrationIndex {
         fn add(&mut self, key: &str, row: &TestRunRegistration) {
+            if let Some(causal) = test_run_causal_key(row) {
+                add_member(&mut self.causal, causal, key);
+            }
             add_member(&mut self.run, row.run_id.clone(), key);
         }
         fn remove(&mut self, key: &str, row: &TestRunRegistration) {
+            if let Some(causal) = test_run_causal_key(row) {
+                remove_member(&mut self.causal, &causal, key);
+            }
             remove_member(&mut self.run, &row.run_id, key);
         }
     }
 
     impl TestRunRegistrationIndex {
+        pub(super) fn causal(&self, key: &TestRunCausalKey) -> impl Iterator<Item = &String> {
+            members(&self.causal, key)
+        }
         pub(super) fn run(&self, run_id: &str) -> impl Iterator<Item = &String> {
             members(&self.run, run_id)
         }
     }
 
-    pub(super) type TestRunObservationStore = IndexedRows<TestRunCommandObservation, TestRunObservationIndex>;
+    pub(super) type TestRunObservationStore =
+        IndexedRows<TestRunCommandObservation, TestRunObservationIndex>;
     pub(super) type TestRunCompactedStore = IndexedRows<TestRunCompacted, TestRunCompactedIndex>;
-    pub(super) type TestRunRegistrationStore = IndexedRows<TestRunRegistration, TestRunRegistrationIndex>;
+    pub(super) type TestRunRegistrationStore =
+        IndexedRows<TestRunRegistration, TestRunRegistrationIndex>;
 }
 
-use test_run_history_store::{
-    TestRunCompactedStore, TestRunLifecycleKey, TestRunObservationStore, TestRunRegistrationStore,
-};
 #[cfg(test)]
 use test_run_history_store::{
-    contract_guard_skipped, SkipContractGuardForTiming, TEST_HISTORY_INDEX_MAINTENANCE,
+    SkipContractGuardForTiming, TEST_HISTORY_INDEX_MAINTENANCE, contract_guard_skipped,
+};
+use test_run_history_store::{
+    TestRunCompactedStore, TestRunLifecycleKey, TestRunObservationStore, TestRunRegistrationStore,
 };
