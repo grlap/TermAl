@@ -22,8 +22,7 @@
 //
 // What it does not own: the readiness budget (ENGRAM_READINESS_TIMEOUT is the
 // product's and unchanged), any receipt other than the `fixture-ready` one,
-// and other Engram processes (authority revoke and control calls keep their
-// own launches and budgets).
+// and other Engram processes, which keep their own launches and budgets.
 //
 // New file, not split from another; included from main.rs under cfg(test).
 
