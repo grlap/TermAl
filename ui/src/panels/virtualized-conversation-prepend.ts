@@ -288,6 +288,15 @@ export function useVirtualizedConversationPrependEffects({
       !shouldPreserveBottomGapAfterPrepend &&
       (mountedRangeWillChange || !preservedAnchorSlot)
     ) {
+      // The anchor restore waits for its pages to mount. Keep the estimated
+      // compensation with it, so newer input or a missing slot still keeps
+      // the viewport on its content instead of shifting by the prepend.
+      if (pendingPrependedMessageAnchorRef.current) {
+        pendingPrependedMessageAnchorRef.current = {
+          ...pendingPrependedMessageAnchorRef.current,
+          fallbackScrollDeltaPx: targetScrollTop - node.scrollTop,
+        };
+      }
       return;
     }
 
@@ -318,10 +327,26 @@ export function useVirtualizedConversationPrependEffects({
       return;
     }
 
+    const applyFallbackCompensation = () => {
+      const node = scrollContainerRef.current;
+      const delta = pendingAnchor.fallbackScrollDeltaPx;
+      if (!node || delta === undefined || Math.abs(delta) < 1) {
+        return;
+      }
+      // The live scrollTop already carries any newer input; adding the
+      // prepend's height keeps that input and the content together.
+      writeScrollTopAndSyncViewport(node, Math.max(node.scrollTop + delta, 0));
+      lastNativeScrollTopRef.current = node.scrollTop;
+    };
+
     if (pendingAnchor.userScrollGeneration !== getUserScrollGeneration()) {
       // A later wheel, key, thumb drag, or navigation owns the viewport now.
-      // Replaying the pre-prepend anchor would visibly undo that newer input.
+      // Replaying the pre-prepend anchor would visibly undo that newer input,
+      // but the prepend's own height must still be compensated.
       pendingPrependedMessageAnchorRef.current = null;
+      if (isActive) {
+        applyFallbackCompensation();
+      }
       return;
     }
 
@@ -348,6 +373,7 @@ export function useVirtualizedConversationPrependEffects({
       } else {
         pendingPrependedMessageAnchorRef.current = null;
         latestVisibleMessageAnchorRef.current = null;
+        applyFallbackCompensation();
       }
       return;
     }

@@ -7,7 +7,7 @@ import type { ConversationMarker } from "../types";
 import { groupCheckpointScrollbarDots } from "./checkpoint-scrollbar-dots";
 import "./checkpoint-scrollbar-dots.css";
 
-type ScrollbarFrame = { top: number; left: number; height: number };
+type ScrollbarFrame = { top: number; left: number; height: number; endInset: number };
 
 export function CheckpointScrollbarDots({
   markers, messageCount, scrollContainerRef, isActive, onJump,
@@ -23,8 +23,8 @@ export function CheckpointScrollbarDots({
   const chooserRef = useRef<HTMLDivElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const groups = useMemo(() => groupCheckpointScrollbarDots(
-    markers, messageCount, frame?.height ?? 0,
-  ), [markers, messageCount, frame?.height]);
+    markers, messageCount, frame?.height ?? 0, undefined, frame?.endInset,
+  ), [markers, messageCount, frame?.height, frame?.endInset]);
   const hasCheckpoints = markers.some(marker => marker.kind === "checkpoint");
 
   useLayoutEffect(() => {
@@ -38,8 +38,14 @@ export function CheckpointScrollbarDots({
     const measure = () => {
       scheduled = null;
       const rect = node.getBoundingClientRect();
-      const next = { top: rect.top + node.clientTop, left: rect.left + node.clientLeft + node.clientWidth - 7, height: node.clientHeight };
-      setFrame(current => current?.top === next.top && current.left === next.left && current.height === next.height ? current : next);
+      // A classic scrollbar has an arrow button at each end, as tall as the
+      // bar is wide; the thumb's centre stops half a thumb inside them.
+      const barWidth = Math.max(node.offsetWidth - node.clientWidth - node.clientLeft * 2, 0);
+      const track = Math.max(node.clientHeight - barWidth * 2, 0);
+      const thumb = Math.min(Math.max(track * node.clientHeight / Math.max(node.scrollHeight, 1), barWidth), track);
+      const endInset = barWidth > 0 ? Math.round(barWidth + thumb / 2) : 7;
+      const next = { top: rect.top + node.clientTop, left: rect.left + node.clientLeft + node.clientWidth - 7, height: node.clientHeight, endInset };
+      setFrame(current => current?.top === next.top && current.left === next.left && current.height === next.height && current.endInset === next.endInset ? current : next);
     };
     const schedule = () => {
       if (scheduled === null) scheduled = window.requestAnimationFrame(measure);

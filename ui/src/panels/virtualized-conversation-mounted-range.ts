@@ -323,6 +323,12 @@ export function useVirtualizedConversationMountedRangeEffects({
     ) {
       return;
     }
+    // A history prepend in this commit re-indexed the pages; this render's
+    // mounted range and DOM bounds predate it. The prepend's anchor restore
+    // owns the range until it lands.
+    if (pendingPrependedMessageAnchorRef.current) {
+      return;
+    }
 
     const isUserScrollCooldown =
       hasUserScrollInteractionRef.current &&
@@ -399,6 +405,12 @@ export function useVirtualizedConversationMountedRangeEffects({
       searchPinnedMountedPageRange !== null ||
       mountedPageRange.endIndex >= pagesLength
     ) {
+      return;
+    }
+    // A history prepend in this commit re-indexed the pages; this render's
+    // mounted range and DOM bounds predate it. The prepend's anchor restore
+    // owns the range until it lands.
+    if (pendingPrependedMessageAnchorRef.current) {
       return;
     }
 

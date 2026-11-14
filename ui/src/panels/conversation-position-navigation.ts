@@ -13,6 +13,9 @@ export type PositionNavigationContext = {
   renderedMessageCount: number;
   virtualizerHandleRef: VirtualizedConversationMessageListHandleRef;
   onNavigateStart?: () => void;
+  // Shows the loaded target without moving the scroll position (the thumb
+  // stays where the reader put it); false falls back to a scroll jump.
+  placeTarget?: (localIndex: number) => boolean;
 };
 
 export function createConversationPositionNavigation(current: () => PositionNavigationContext) {
@@ -55,7 +58,8 @@ export function createConversationPositionNavigation(current: () => PositionNavi
       const next = current();
       const local = target - next.messageStartIndex;
       return local >= 0 && local < next.renderedMessageCount &&
-        (next.virtualizerHandleRef.current?.jumpToMessageIndex(local, { align: "center", flush: true, preserveDetachedAuthority: true }) ?? false);
+        ((next.placeTarget?.(local) ?? false) ||
+          (next.virtualizerHandleRef.current?.jumpToMessageIndex(local, { align: "center", flush: true, preserveDetachedAuthority: true }) ?? false));
     };
     return new Promise(resolve => {
       let phase: "waiting" | "positioning" | "done" = "waiting";

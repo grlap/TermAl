@@ -8,19 +8,23 @@ export type CheckpointDotGroup = {
   topPx: number;
 };
 
+// `endInsetPx` is where the thumb's centre stops at either end of the bar
+// (its arrow button plus half the thumb), so a checkpoint's dot sits where the
+// thumb's centre is when that checkpoint is in view.
 export function groupCheckpointScrollbarDots(
   markers: readonly ConversationMarker[],
   messageCount: number,
   heightPx: number,
   minimumGapPx = 14,
+  endInsetPx = minimumGapPx / 2,
 ): CheckpointDotGroup[] {
   if (messageCount <= 0 || heightPx <= 0) return [];
-  const usableHeight = Math.max(0, heightPx - minimumGapPx);
+  const usableHeight = Math.max(0, heightPx - endInsetPx * 2);
   const checkpoints = markers
     .filter(marker => marker.kind === "checkpoint" && Number.isFinite(marker.messageIndexHint))
     .map(marker => ({
       marker,
-      topPx: minimumGapPx / 2 + usableHeight *
+      topPx: endInsetPx + usableHeight *
         Math.min(Math.max(marker.messageIndexHint, 0), messageCount - 1) /
         Math.max(1, messageCount - 1),
     }))

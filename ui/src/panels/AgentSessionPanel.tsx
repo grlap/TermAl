@@ -65,10 +65,12 @@ import {
   diffMessagesForPaneViewMode,
 } from "../SessionPaneView.messages";
 import { useSessionRecordSnapshot } from "../session-store";
+import { publishMessageStackUnloadedHistory } from "./message-stack-loaded-history";
 import { useStableEvent } from "./use-stable-event";
 import {
   includeUndeferredMessageTail,
   useInitialActiveTranscriptMessages,
+  type HistoryEstimatePx,
 } from "./useInitialActiveTranscriptMessages";
 import { MessageMetaMarkerMenuProvider } from "../message-meta-marker-menu-context";
 import { normalizeConversationMarkerColor } from "../conversation-marker-colors";
@@ -574,6 +576,8 @@ const SessionConversationPage = memo(
     const baseVisibleMessages = isActive
       ? includeUndeferredMessageTail(deferredMessages, session.messages)
       : session.messages;
+    // The history scroll below owns these values; page demand reads them.
+    const historyEstimatePxRef = useRef<HistoryEstimatePx>({ before: 0, after: 0 });
     const {
       hasOlderHistory,
       hasNewerHistory,
@@ -585,6 +589,7 @@ const SessionConversationPage = memo(
       hasOlderHistory: session.hasOlderHistory,
       hasNewerHistory: session.hasNewerHistory,
       scrollContainerRef,
+      historyEstimatePxRef,
       sessionId: session.id,
     });
     const transcriptCommitToken = sessionTranscriptCommitToken(session);
@@ -658,9 +663,15 @@ const SessionConversationPage = memo(
       () => visiblePendingPrompts.map((prompt) => prompt.id),
       [visiblePendingPrompts],
     );
+    // A window that reaches the live end has no newer history below it; a
+    // count ahead of its messages (a reply or prompt not yet rendered) is not
+    // estimated space to scroll into past the conversation's end.
+    const historyMessageCount = hasNewerHistory
+      ? conversationMessageCount
+      : Math.min(conversationMessageCount, conversationMessageStartIndex + visibleMessages.length);
     const conversationHistoryScroll = useConversationHistoryScroll({
       isActive,
-      messageCount: conversationMessageCount,
+      messageCount: historyMessageCount,
       messageStartIndex: conversationMessageStartIndex,
       renderedMessageCount: visibleMessages.length,
       scrollContainerRef,
@@ -669,6 +680,18 @@ const SessionConversationPage = memo(
       onNavigateStart: onOverviewNavigateStart,
       tailFollowIntent: liveTailPinned,
       virtualizerHandleRef,
+    });
+    useLayoutEffect(() => {
+      historyEstimatePxRef.current = {
+        before: conversationHistoryScroll.prefixHeight,
+        after: conversationHistoryScroll.suffixHeight,
+        heldAtViewport: conversationHistoryScroll.heldAtViewport,
+      };
+      const stack = scrollContainerRef.current;
+      if (stack) {
+        publishMessageStackUnloadedHistory(stack, historyEstimatePxRef.current);
+      }
+      // Every commit: the stack node can change without the estimates changing.
     });
     const messageRevealUserScrollGeneration =
       conversationHistoryScroll.virtualizerHandleRef.current?.getUserScrollGeneration() ??

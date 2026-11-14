@@ -38,6 +38,7 @@ import { usePendingUserInputSubmissions } from "./pending-user-input-submissions
 import {
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
   notifyMessageStackScrollWrite,
+  notifyMessageStackUserScrollIntent,
 } from "../message-stack-scroll-sync";
 import { MessageCard } from "../message-cards";
 import * as sessionHistoryDemand from "../session-history-demand";
@@ -514,6 +515,181 @@ describe("AgentSessionPanel virtualization", () => {
       expect(hydrationSpy).toHaveBeenLastCalledWith("search-session");
     } finally {
       hydrationSpy.mockRestore();
+    }
+  });
+
+  it.each(["wheel", "ArrowUp"] as const)("asks for the previous page when %s reaches the top of a resident window with older history above it", async (input) => {
+    const hydrationSpy = vi.spyOn(sessionHistoryDemand, "requestSessionHistoryPage");
+    const scrollNode = document.createElement("section");
+    const mocks = installLongTranscriptScrollNodeMocks(scrollNode);
+    const handleRef: VirtualizedConversationMessageListHandleRef = { current: null };
+    try {
+      const messages = makeTextMessages(100).map((message, index) => ({ ...message, id: `message-${901 + index}` }));
+      renderSessionPanelWithDefaults({
+        activeSession: makeSession("long-session", {
+          messages, messageCount: 1_000, messageStartIndex: 900, hasOlderHistory: true, hasNewerHistory: false,
+        }),
+        scrollContainerRef: { current: scrollNode },
+        virtualizerHandleRef: handleRef,
+      });
+      await act(async () => { await Promise.resolve(); });
+      const snapshot = handleRef.current!.getLayoutSnapshot();
+      const olderHistoryPx = snapshot.estimatedTotalHeightPx - (snapshot.estimatedResidentHeightPx ?? snapshot.estimatedTotalHeightPx);
+      // The 900 older messages are estimated above the resident window.
+      expect(olderHistoryPx).toBeGreaterThan(100_000);
+      hydrationSpy.mockClear();
+
+      // The top third of the viewport shows only the older-history estimate;
+      // the resident messages start below it.
+      await act(async () => {
+        mocks.setScrollTop(olderHistoryPx - 200);
+        if (input === "wheel") {
+          fireEvent.wheel(scrollNode, { deltaY: -120 });
+        } else {
+          // The pane publishes each ArrowUp as a keyboard intent first.
+          notifyMessageStackUserScrollIntent(scrollNode, { scrollKind: "incremental", direction: "up", viewportCanMove: true });
+        }
+        await Promise.resolve();
+      });
+      expect(hydrationSpy).toHaveBeenCalledWith("long-session");
+    } finally {
+      mocks.cleanup();
+      hydrationSpy.mockRestore();
+    }
+  });
+
+  it("asks for the next page when the viewport reaches the bottom of a resident window with newer history below it", async () => {
+    const newerSpy = vi.spyOn(sessionHistoryDemand, "requestSessionHistoryNewerPage").mockResolvedValue(true);
+    const scrollNode = document.createElement("section");
+    const mocks = installLongTranscriptScrollNodeMocks(scrollNode);
+    const handleRef: VirtualizedConversationMessageListHandleRef = { current: null };
+    try {
+      renderSessionPanelWithDefaults({
+        activeSession: makeSession("historical-window", {
+          messages: makeTextMessages(100), messageCount: 1_000, messageStartIndex: 0, hasOlderHistory: false, hasNewerHistory: true,
+        }),
+        scrollContainerRef: { current: scrollNode },
+        virtualizerHandleRef: handleRef,
+      });
+      await act(async () => { await Promise.resolve(); });
+      const snapshot = handleRef.current!.getLayoutSnapshot();
+      const totalPx = snapshot.estimatedTotalHeightPx;
+      const residentPx = snapshot.estimatedResidentHeightPx ?? totalPx;
+      // The 900 newer messages are estimated below the resident window.
+      expect(totalPx - residentPx).toBeGreaterThan(100_000);
+      newerSpy.mockClear();
+
+      // The bottom third of the viewport shows only the newer-history
+      // estimate; the resident messages end above it.
+      await act(async () => {
+        mocks.setScrollHeight(totalPx);
+        mocks.setScrollTop(residentPx - 400);
+        fireEvent.wheel(scrollNode, { deltaY: 120 });
+        await Promise.resolve();
+      });
+      expect(newerSpy).toHaveBeenCalledWith("historical-window");
+    } finally {
+      mocks.cleanup();
+      newerSpy.mockRestore();
+    }
+  });
+
+  it.each(["older", "newer"] as const)("asks for the %s page before the resident edge scrolls into view", async (direction) => {
+    const older = direction === "older";
+    const pageSpy = older
+      ? vi.spyOn(sessionHistoryDemand, "requestSessionHistoryPage")
+      : vi.spyOn(sessionHistoryDemand, "requestSessionHistoryNewerPage").mockResolvedValue(true);
+    const scrollNode = document.createElement("section");
+    const mocks = installLongTranscriptScrollNodeMocks(scrollNode);
+    const handleRef: VirtualizedConversationMessageListHandleRef = { current: null };
+    try {
+      renderSessionPanelWithDefaults({
+        activeSession: makeSession("prefetch-session", {
+          messages: makeTextMessages(100), messageCount: 1_000, messageStartIndex: older ? 900 : 0,
+          hasOlderHistory: older, hasNewerHistory: !older,
+        }),
+        scrollContainerRef: { current: scrollNode },
+        virtualizerHandleRef: handleRef,
+      });
+      await act(async () => { await Promise.resolve(); });
+      const snapshot = handleRef.current!.getLayoutSnapshot();
+      const totalPx = snapshot.estimatedTotalHeightPx;
+      const residentPx = snapshot.estimatedResidentHeightPx ?? totalPx;
+      const estimatePx = totalPx - residentPx;
+      expect(estimatePx).toBeGreaterThan(100_000);
+      pageSpy.mockClear();
+
+      // The resident edge is still a full 600 px viewport away: the viewport
+      // shows only resident messages, and the estimate is not yet in view.
+      await act(async () => {
+        mocks.setScrollHeight(totalPx);
+        mocks.setScrollTop(older ? estimatePx + 600 : residentPx - 1_200);
+        fireEvent.wheel(scrollNode, { deltaY: older ? -120 : 120 });
+        await Promise.resolve();
+      });
+      expect(pageSpy).toHaveBeenCalledWith("prefetch-session");
+    } finally {
+      mocks.cleanup();
+      pageSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    ["older", "partly", true],
+    ["newer", "partly", true],
+    ["older", "wholly", false],
+    ["newer", "wholly", false],
+  ] as const)("fills %s history shown %s in the viewport once it rests, without reader input: %s", async (direction, coverage, expected) => {
+    const older = direction === "older";
+    const pageSpy = older
+      ? vi.spyOn(sessionHistoryDemand, "requestSessionHistoryOlderPage").mockResolvedValue(true)
+      : vi.spyOn(sessionHistoryDemand, "requestSessionHistoryNewerPage").mockResolvedValue(true);
+    const scrollNode = document.createElement("section");
+    const mocks = installLongTranscriptScrollNodeMocks(scrollNode);
+    const handleRef: VirtualizedConversationMessageListHandleRef = { current: null };
+    try {
+      renderSessionPanelWithDefaults({
+        activeSession: makeSession("gap-session", {
+          messages: makeTextMessages(100), messageCount: 1_000, messageStartIndex: older ? 900 : 0,
+          hasOlderHistory: older, hasNewerHistory: !older,
+        }),
+        scrollContainerRef: { current: scrollNode },
+        virtualizerHandleRef: handleRef,
+      });
+      await act(async () => { await Promise.resolve(); });
+      const snapshot = handleRef.current!.getLayoutSnapshot();
+      const totalPx = snapshot.estimatedTotalHeightPx;
+      const residentPx = snapshot.estimatedResidentHeightPx ?? totalPx;
+      const estimatePx = totalPx - residentPx;
+      pageSpy.mockClear();
+
+      // A scrollbar jump (press, move, release on the track) lands with the
+      // loaded edge inside the 600 px viewport (partly), or with the viewport
+      // wholly inside the estimate, which the position seek fills instead. No
+      // wheel, key or touch follows.
+      const partlyTop = older ? estimatePx - 200 : residentPx - 400;
+      const whollyTop = older ? estimatePx - 5_000 : residentPx + 5_000;
+      await act(async () => {
+        mocks.setScrollHeight(totalPx);
+        fireEvent.mouseDown(scrollNode);
+        mocks.setScrollTop(coverage === "partly" ? partlyTop : whollyTop);
+        fireEvent.scroll(scrollNode);
+        fireEvent.mouseUp(window);
+        await Promise.resolve();
+      });
+      // Nothing is asked while the viewport may still be moving.
+      expect(pageSpy).not.toHaveBeenCalled();
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 260));
+      });
+      if (expected) {
+        expect(pageSpy).toHaveBeenCalledWith("gap-session");
+      } else {
+        expect(pageSpy).not.toHaveBeenCalled();
+      }
+    } finally {
+      mocks.cleanup();
+      pageSpy.mockRestore();
     }
   });
 

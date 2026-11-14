@@ -29,6 +29,10 @@ export type VisibleMessageAnchor = {
 export type PendingVisibleMessageAnchor = VisibleMessageAnchor & {
   remainingAttempts: number;
   userScrollGeneration: number;
+  // Set while a history prepend's compensation is still unapplied: the
+  // estimated scrollTop delta that keeps the viewport on its content when the
+  // exact anchor restore cannot run.
+  fallbackScrollDeltaPx?: number;
 };
 
 export type MessagePage = {

@@ -19,13 +19,59 @@ import {
 import {
   resolveHasOlderSessionHistory,
   requestSessionHistoryNewerPage,
+  requestSessionHistoryOlderPage,
   requestSessionHistoryPage,
 } from "../session-history-demand";
+import {
+  MESSAGE_STACK_UNLOADED_HISTORY_EVENT,
+  measureVisibleUnloadedHistory,
+} from "./message-stack-loaded-history";
 import type { Message } from "../types";
 
 const INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX = 160;
 const INITIAL_ACTIVE_TRANSCRIPT_WHEEL_DEMAND_THRESHOLD_PX = 8;
 const INITIAL_ACTIVE_TRANSCRIPT_TOUCH_PULL_DEMAND_THRESHOLD_PX = 8;
+// A visible gap that pages do not shrink (a window that cannot reach the
+// viewport) stops asking after this many pages, until the reader moves.
+const VISIBLE_GAP_PAGE_LIMIT = 6;
+// The viewport must rest this long before a visible gap is filled, so a
+// scrollbar drag passing the loaded edge does not load pages it leaves.
+const VISIBLE_GAP_REST_MS = 200;
+
+// Runs `check` once the viewport has rested; each call restarts the wait.
+function createRestScheduler(check: () => void) {
+  let timer: number | null = null;
+  return {
+    schedule() {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+      timer = window.setTimeout(() => {
+        timer = null;
+        check();
+      }, VISIBLE_GAP_REST_MS);
+    },
+    cancel() {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+    },
+  };
+}
+
+// `heldAtViewport`: the loaded messages are held at the viewport edge while a
+// position seek loads the history the viewport is over; their own edges then
+// demand nothing.
+export type HistoryEstimatePx = { before: number; after: number; heldAtViewport?: boolean };
+
+// How far ahead of an estimate the adjacent page is requested: four viewport
+// heights. Held PageUp moves about four screens while a page loads (measured
+// in a browser on a long live session), so the page arrives before keyboard
+// or wheel scrolling reaches the edge of the resident messages.
+function residentEdgePrefetchPx(node: HTMLElement) {
+  return Math.max(INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX, node.clientHeight * 4);
+}
 
 /** @internal Shared by the owning panel and focused regression tests; not a cross-panel API. */
 export function includeUndeferredMessageTail(
@@ -174,10 +220,15 @@ export function useInitialActiveTranscriptMessages({
   hasOlderHistory: explicitHasOlderHistory,
   hasNewerHistory: explicitHasNewerHistory,
   scrollContainerRef,
+  historyEstimatePxRef,
   sessionId,
 }: {
   isActive: boolean;
   messages: Message[];
+  // Estimated heights of the older (before) and newer (after) history that is
+  // not loaded, above and below the resident messages in the scroll content.
+  // Page demand is measured from the resident edges, not the scroll extent.
+  historyEstimatePxRef?: RefObject<HistoryEstimatePx>;
   // Pagination is authorized by explicit current window metadata, not counts
   // or hydration status. Unknown availability does not request a page.
   hasOlderHistory?: boolean;
@@ -211,10 +262,31 @@ export function useInitialActiveTranscriptMessages({
       return undefined;
     }
 
+    const isNearResidentTop = () => {
+      if (historyEstimatePxRef?.current?.heldAtViewport) {
+        return false;
+      }
+      if (node.scrollTop <= INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX) {
+        return true;
+      }
+      // With older history estimated above the resident messages, their top
+      // edge can sit anywhere in the scroll extent. Ask for the previous page
+      // while that edge is near, before it scrolls into view, and the viewport
+      // centre is resident. A centre inside the estimate is the position
+      // seek's to fill.
+      const residentTop = historyEstimatePxRef?.current?.before ?? 0;
+      return (
+        residentTop > 0 &&
+        node.scrollTop <= residentTop + residentEdgePrefetchPx(node) &&
+        node.scrollTop + node.clientHeight / 2 >= residentTop
+      );
+    };
     let lastTouchClientY: number | null = null;
     let hasDemandInteraction = false;
     let hasQueuedWheelDemandRender = false;
     let disposed = false;
+    let gapRequestInFlight = false;
+    let gapPagesSinceReaderInput = 0;
     const consumeOlderTranscriptPageDemand = () => {
       if (!hasDemandInteraction) {
         return;
@@ -237,7 +309,7 @@ export function useInitialActiveTranscriptMessages({
     const hydrateIfNearTop = () => {
       if (
         hasDemandInteraction &&
-        node.scrollTop <= INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX
+        isNearResidentTop()
       ) {
         consumeOlderTranscriptPageDemand();
       }
@@ -250,13 +322,15 @@ export function useInitialActiveTranscriptMessages({
         return;
       }
       hasDemandInteraction = true;
-      if (node.scrollTop <= INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX) {
+      gapPagesSinceReaderInput = 0;
+      if (isNearResidentTop()) {
         requestOlderTranscriptPageAfterWheel();
       }
     };
     const handleMouseDown = (event: MouseEvent) => {
       if (event.target === node) {
         hasDemandInteraction = true;
+        gapPagesSinceReaderInput = 0;
       }
     };
     const consumeKeyDown = (event: KeyboardEvent) => {
@@ -285,7 +359,7 @@ export function useInitialActiveTranscriptMessages({
       }
       hasDemandInteraction = true;
       if (
-        node.scrollTop <= INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX
+        isNearResidentTop()
       ) {
         consumeOlderTranscriptPageDemand();
       }
@@ -328,8 +402,9 @@ export function useInitialActiveTranscriptMessages({
         return;
       }
       const wasNearTopAtIntent =
-        node.scrollTop <= INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX;
+        isNearResidentTop();
       hasDemandInteraction = true;
+      gapPagesSinceReaderInput = 0;
       // A page request can synchronously publish new resident state. Defer it
       // until every listener on this normalized intent has first dropped any
       // stale scroll authority, regardless of DOM listener registration order.
@@ -357,7 +432,7 @@ export function useInitialActiveTranscriptMessages({
         lastTouchClientY !== null &&
         touch.clientY - lastTouchClientY >
           INITIAL_ACTIVE_TRANSCRIPT_TOUCH_PULL_DEMAND_THRESHOLD_PX &&
-        node.scrollTop <= INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX
+        isNearResidentTop()
       ) {
         consumeOlderTranscriptPageDemand();
       }
@@ -366,8 +441,42 @@ export function useInitialActiveTranscriptMessages({
     const handleTouchEnd = () => {
       lastTouchClientY = null;
     };
+    // Unloaded history showing above the loaded messages (after a scrollbar
+    // jump, or once the window moves) is loaded whatever put it there; no
+    // reader gesture is needed. A viewport wholly inside the estimate is the
+    // position seek's to fill.
+    const fillVisibleGapAbove = () => {
+      if (
+        disposed ||
+        gapRequestInFlight ||
+        gapPagesSinceReaderInput >= VISIBLE_GAP_PAGE_LIMIT
+      ) {
+        return;
+      }
+      if (!measureVisibleUnloadedHistory(node).above) {
+        return;
+      }
+      gapRequestInFlight = true;
+      gapPagesSinceReaderInput += 1;
+      void requestSessionHistoryOlderPage(sessionId).finally(() => {
+        gapRequestInFlight = false;
+        if (!disposed) {
+          gapAboveRest.schedule();
+        }
+      });
+    };
+    const gapAboveRest = createRestScheduler(fillVisibleGapAbove);
+    const handleScroll = () => {
+      hydrateIfNearTop();
+      gapAboveRest.schedule();
+    };
 
-    node.addEventListener("scroll", hydrateIfNearTop, { passive: true });
+    node.addEventListener("scroll", handleScroll, { passive: true });
+    node.addEventListener(
+      MESSAGE_STACK_UNLOADED_HISTORY_EVENT,
+      gapAboveRest.schedule,
+    );
+    gapAboveRest.schedule();
     node.addEventListener("wheel", handleWheel, { passive: true });
     node.addEventListener("mousedown", handleMouseDown, { passive: true });
     node.addEventListener(
@@ -382,7 +491,12 @@ export function useInitialActiveTranscriptMessages({
 
     return () => {
       disposed = true;
-      node.removeEventListener("scroll", hydrateIfNearTop);
+      gapAboveRest.cancel();
+      node.removeEventListener("scroll", handleScroll);
+      node.removeEventListener(
+        MESSAGE_STACK_UNLOADED_HISTORY_EVENT,
+        gapAboveRest.schedule,
+      );
       node.removeEventListener("wheel", handleWheel);
       node.removeEventListener("mousedown", handleMouseDown);
       node.removeEventListener(
@@ -402,6 +516,7 @@ export function useInitialActiveTranscriptMessages({
     hasOlderHistory,
     isActive,
     requestOlderTranscriptPage,
+    historyEstimatePxRef,
     scrollContainerRef,
     sessionId,
   ]);
@@ -417,6 +532,21 @@ export function useInitialActiveTranscriptMessages({
     let hasForwardDemandInteraction = false;
     let requestInFlight = false;
     let disposed = false;
+    let gapPagesSinceReaderInput = 0;
+    // Unloaded history showing below the loaded messages is loaded whatever
+    // put it there, like the gap above.
+    const fillVisibleGapBelow = () => {
+      if (disposed) {
+        return;
+      }
+      if (requestInFlight || gapPagesSinceReaderInput >= VISIBLE_GAP_PAGE_LIMIT) {
+        return;
+      }
+      if (measureVisibleUnloadedHistory(node).below) {
+        gapPagesSinceReaderInput += 1;
+        requestNewer();
+      }
+    };
     const requestNewer = () => {
       if (requestInFlight) {
         return;
@@ -424,22 +554,46 @@ export function useInitialActiveTranscriptMessages({
       requestInFlight = true;
       void requestSessionHistoryNewerPage(sessionId).finally(() => {
         requestInFlight = false;
+        if (!disposed) {
+          gapBelowRest.schedule();
+        }
       });
     };
-    const requestIfNearBottom = () => {
-      const bottomGap = node.scrollHeight - node.clientHeight - node.scrollTop;
-      if (
-        hasForwardDemandInteraction &&
-        bottomGap <= INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX
-      ) {
-        requestNewer();
+    const isNearResidentBottom = () => {
+      if (historyEstimatePxRef?.current?.heldAtViewport) {
+        return false;
       }
+      const viewportBottom = node.scrollTop + node.clientHeight;
+      if (
+        node.scrollHeight - viewportBottom <=
+        INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX
+      ) {
+        return true;
+      }
+      // The mirror of the top demand: newer history estimated below the
+      // resident messages moves their bottom edge up from the extent's end.
+      const after = historyEstimatePxRef?.current?.after ?? 0;
+      const residentBottom = node.scrollHeight - after;
+      return (
+        after > 0 &&
+        viewportBottom >= residentBottom - residentEdgePrefetchPx(node) &&
+        node.scrollTop + node.clientHeight / 2 < residentBottom
+      );
+    };
+    const gapBelowRest = createRestScheduler(fillVisibleGapBelow);
+    const requestIfNearBottom = () => {
+      if (hasForwardDemandInteraction && isNearResidentBottom()) {
+        requestNewer();
+        return;
+      }
+      gapBelowRest.schedule();
     };
     const handleWheel = (event: WheelEvent) => {
       if (event.ctrlKey || event.deltaY < INITIAL_ACTIVE_TRANSCRIPT_WHEEL_DEMAND_THRESHOLD_PX) {
         return;
       }
       hasForwardDemandInteraction = true;
+      gapPagesSinceReaderInput = 0;
       requestIfNearBottom();
     };
     const consumeKeyDown = (event: KeyboardEvent) => {
@@ -499,10 +653,9 @@ export function useInitialActiveTranscriptMessages({
         // pagination must not race it.
         return;
       }
-      const wasNearBottomAtIntent =
-        node.scrollHeight - node.clientHeight - node.scrollTop <=
-        INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX;
+      const wasNearBottomAtIntent = isNearResidentBottom();
       hasForwardDemandInteraction = true;
+      gapPagesSinceReaderInput = 0;
       queueMicrotask(() => {
         if (disposed) {
           return;
@@ -515,15 +668,25 @@ export function useInitialActiveTranscriptMessages({
       });
     };
     node.addEventListener("scroll", requestIfNearBottom, { passive: true });
+    node.addEventListener(
+      MESSAGE_STACK_UNLOADED_HISTORY_EVENT,
+      gapBelowRest.schedule,
+    );
     node.addEventListener("wheel", handleWheel, { passive: true });
     node.addEventListener(
       MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
       handleUserScrollIntent,
     );
     document.addEventListener("keydown", handleKeyDown, { capture: true });
+    gapBelowRest.schedule();
     return () => {
       disposed = true;
+      gapBelowRest.cancel();
       node.removeEventListener("scroll", requestIfNearBottom);
+      node.removeEventListener(
+        MESSAGE_STACK_UNLOADED_HISTORY_EVENT,
+        gapBelowRest.schedule,
+      );
       node.removeEventListener("wheel", handleWheel);
       node.removeEventListener(
         MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
@@ -533,7 +696,13 @@ export function useInitialActiveTranscriptMessages({
         capture: true,
       });
     };
-  }, [hasNewerHistory, isActive, scrollContainerRef, sessionId]);
+  }, [
+    hasNewerHistory,
+    historyEstimatePxRef,
+    isActive,
+    scrollContainerRef,
+    sessionId,
+  ]);
 
   return {
     hasOlderHistory,

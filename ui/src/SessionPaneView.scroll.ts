@@ -101,6 +101,7 @@ import {
   resolveSessionBottomFollowWriteScrollTop,
   type LatestTurnOutputState,
 } from "./session-live-tail-follow";
+import { clampScrollTopToLoadedHistory } from "./panels/message-stack-loaded-history";
 import type { SessionSearchMatch } from "./session-find";
 import type { Message, Session } from "./types";
 import type { PaneViewMode } from "./workspace-types";
@@ -1529,7 +1530,14 @@ export function useSessionPaneScrollState({
     cancelConversationMessageEntryReveals(node);
 
     const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-    const nextScrollTop = clamp(node.scrollTop + deltaY, 0, maxScrollTop);
+    const nextScrollTop = clampScrollTopToLoadedHistory(
+      node,
+      clamp(node.scrollTop + deltaY, 0, maxScrollTop),
+    );
+    if (Math.abs(nextScrollTop - node.scrollTop) < 0.5) {
+      // At the edge of loaded messages: wait there while the next page loads.
+      return;
+    }
     const reachesBottomFromDownwardInput = deltaY > 0 &&
       isMessageStackAtPhysicalBottom(
         nextScrollTop,

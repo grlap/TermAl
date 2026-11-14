@@ -1379,10 +1379,15 @@ export function VirtualizedConversationMessageList({
         pendingAggressiveIdleCompactionRef.current = true;
       }
 
+      // Pages mounted above the viewport replace their estimated spacer with
+      // real heights; anchor the visible message across that commit. A reader
+      // who scrolled away from the tail is anchored even near the bottom,
+      // where an unanchored shrink would also clamp scrollTop.
       if (
-        resolvedScrollKind === "incremental" &&
+        (resolvedScrollKind === "incremental" ||
+          resolvedScrollKind === "page_jump") &&
         nextRange.startIndex < currentRange.startIndex &&
-        !isScrollContainerNearBottom(node)
+        (!isScrollContainerNearBottom(node) || isDetachedFromBottomRef.current)
       ) {
         if (skipNextMountedPrependRestoreRef.current) {
           skipNextMountedPrependRestoreRef.current = false;
@@ -1449,7 +1454,7 @@ export function VirtualizedConversationMessageList({
 
       if (
         nextRange.startIndex < currentRange.startIndex &&
-        !isScrollContainerNearBottom(node)
+        (!isScrollContainerNearBottom(node) || isDetachedFromBottomRef.current)
       ) {
         if (skipNextMountedPrependRestoreRef.current) {
           skipNextMountedPrependRestoreRef.current = false;
