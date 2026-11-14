@@ -315,6 +315,66 @@ impl TelegramCallbackResponder for TelegramApiClient {
     }
 }
 
+/// Retains the HTTP classification of a decoded TermAl API failure. Transport
+/// errors and responses outside the API's error envelope remain unclassified.
+#[derive(Debug)]
+struct TermalApiError {
+    path: String,
+    status: StatusCode,
+    detail: String,
+    code: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct TermalApiErrorBody {
+    error: String,
+    #[serde(default)]
+    code: Option<String>,
+}
+
+impl std::fmt::Display for TermalApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.detail)
+    }
+}
+
+impl std::error::Error for TermalApiError {}
+
+fn termal_error_is_session_not_found(err: &anyhow::Error, session_id: &str) -> bool {
+    let path = format!("/api/sessions/{}", encode_uri_component(session_id));
+    err.downcast_ref::<TermalApiError>().is_some_and(|error| {
+        error.status == StatusCode::NOT_FOUND
+            && error.path == path
+            && error.code.as_deref() == Some("local_session_missing")
+    })
+}
+
+fn decode_termal_api_response<T: DeserializeOwned>(
+    path: &str,
+    status: StatusCode,
+    payload: &[u8],
+) -> Result<T> {
+    if !status.is_success() {
+        if let Ok(error) = serde_json::from_slice::<TermalApiErrorBody>(payload) {
+            return Err(TermalApiError {
+                path: path.to_owned(),
+                status,
+                detail: error.error,
+                code: error.code,
+            }
+            .into());
+        }
+        let detail = String::from_utf8_lossy(payload).trim().to_owned();
+        if detail.is_empty() {
+            bail!("TermAl `{path}` failed with HTTP {}", status.as_u16());
+        }
+        bail!("{detail}");
+    }
+
+    serde_json::from_slice(payload)
+        .with_context(|| format!("failed to decode TermAl `{path}` response"))
+}
+
 /// Represents TermAl API client.
 #[cfg(not(test))]
 struct TermalApiClient {
@@ -417,19 +477,7 @@ impl TermalApiClient {
         let payload = response
             .bytes()
             .with_context(|| format!("failed to read TermAl `{path}` response"))?;
-        if !status.is_success() {
-            if let Ok(error) = serde_json::from_slice::<ErrorResponse>(&payload) {
-                bail!("{}", error.error);
-            }
-            let detail = String::from_utf8_lossy(&payload).trim().to_owned();
-            if detail.is_empty() {
-                bail!("TermAl `{path}` failed with HTTP {}", status.as_u16());
-            }
-            bail!("{detail}");
-        }
-
-        serde_json::from_slice(&payload)
-            .with_context(|| format!("failed to decode TermAl `{path}` response"))
+        decode_termal_api_response(path, status, &payload)
     }
 }
 

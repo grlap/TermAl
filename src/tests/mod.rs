@@ -272,6 +272,7 @@ mod state_mutex;
 mod telegram;
 mod telegram_documents;
 mod telegram_forwarding;
+mod telegram_missing_sessions;
 mod telegram_relay_lifecycle;
 mod telegram_settings;
 mod telegram_support;

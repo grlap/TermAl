@@ -749,7 +749,25 @@ fn forward_new_assistant_message_outcome(
     chat_id: i64,
     session_id: &str,
 ) -> Result<TelegramAssistantForwardingOutcome> {
-    let response = termal.get_session(session_id)?;
+    let response = match termal.get_session(session_id) {
+        Ok(response) => response,
+        Err(err) if termal_error_is_session_not_found(&err, session_id) => {
+            // All three references can independently schedule another poll.
+            // Remove only this missing session; operational failures still retry.
+            let mut dirty = clear_forward_next_assistant_message_session_id(state, session_id);
+            dirty |= state.assistant_forwarding_cursors.remove(session_id).is_some();
+            if state.selected_session_id.as_deref() == Some(session_id) {
+                state.selected_session_id = None;
+                dirty = true;
+            }
+            log_telegram_error("failed to forward assistant message", &err);
+            return Ok(TelegramAssistantForwardingOutcome {
+                dirty,
+                ..TelegramAssistantForwardingOutcome::default()
+            });
+        }
+        Err(err) => return Err(err),
+    };
     let messages = &response.session.messages;
 
     let forward_without_existing_baseline =

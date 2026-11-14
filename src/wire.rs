@@ -246,7 +246,7 @@ impl ApiError {
         }
     }
 
-    /// Tags internal error handling without changing the wire response.
+    /// Tags error handling; selected kinds also have explicit wire contracts.
     fn with_kind(mut self, kind: ApiErrorKind) -> Self {
         self.kind = Some(kind);
         self
@@ -286,6 +286,18 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         if let Some(ApiErrorKind::OutputLimitExceeded { limit, outcome }) = self.kind {
             return OutputLimitResponse { limit, outcome }.response();
+        }
+        if matches!(self.kind, Some(ApiErrorKind::LocalSessionMissing)) {
+            // Remote HTTP errors have no local kind, even when their status is
+            // 404. Only absence from this server's lookup can emit this code.
+            return (
+                self.status,
+                Json(json!({
+                    "error": self.message,
+                    "code": "local_session_missing",
+                })),
+            )
+                .into_response();
         }
         if let Some(deadline) = self.durability_deadline
             && let Some(operation) = deadline.operation

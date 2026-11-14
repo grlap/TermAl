@@ -95,6 +95,15 @@ poll is intentionally not forwarded for queued Telegram prompts. Forwarding it
 would risk sending output from the pre-existing local turn. Supporting that case
 requires a stronger per-turn boundary from the session or agent layer.
 
+If a tracked session is deleted, the relay clears its armed reply, pending
+footer and matching selection, and persists that cleanup. It requires a 404
+from the exact session endpoint with the local API code
+`local_session_missing`. Only a missing local lookup emits that code; errors
+forwarded from remote sessions retain their status and message without gaining
+the local code. Remote 404s, transport failures and unclassified responses stay
+armed for retry. A relay connected to an older backend without this code also
+keeps retrying rather than discarding a pending reply.
+
 ## Storage
 
 UI configuration is stored only in the revisioned app state under
