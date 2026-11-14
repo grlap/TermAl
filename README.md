@@ -33,14 +33,16 @@ TermAl gives you one place to run, supervise, review, and steer long-running sof
 
 ## Agent Integrations
 
-TermAl integrates with Claude Code, OpenAI Codex, Gemini CLI, Cursor,
-OpenCode, and Kimi Code CLI. Agent protocol differences are normalized into the same session,
-message, approval, and streaming model in the UI.
+TermAl integrates with Claude Code, OpenAI Codex, Gemini (through the
+Antigravity CLI, `agy`), Cursor, OpenCode, and Kimi Code CLI. Agent protocol
+differences are normalized into the same session, message, approval, and
+streaming model in the UI.
 
 See the [agent comparison](docs/features/agent-integration-comparison.md) for
 protocol background and capability differences, and the
 [current integration contracts](docs/features/current-agent-contracts.md) for
-TermAl's supported adapter boundaries. OpenCode and Kimi have dedicated
+TermAl's supported adapter boundaries. Gemini, OpenCode and Kimi have dedicated
+[Gemini (Antigravity CLI)](docs/features/gemini-cli-integration.md),
 [OpenCode](docs/features/opencode-acp-integration.md) and
 [Kimi](docs/features/kimi-cli-integration.md) setup guides.
 
@@ -48,11 +50,27 @@ TermAl's supported adapter boundaries. OpenCode and Kimi have dedicated
 
 TermAl uses **Engram** for work tracking. A repository declares its project in
 `.engram-project`; the operator configures and enables the local integration,
-which gives agents Engram tools and work context. Its project setting
-[Execution Observability](docs/features/execution-observability.md), on by
-default, reports to Engram what each turn did, after the turn ran. The
+which gives agents Engram tools and work context. The
 [Engram host adapter](docs/features/engram-host-adapter.md) is the full host
 contract.
+
+[Execution Observability](docs/features/execution-observability.md) is a
+project-level ON/OFF setting, on by default. It observes; it never decides
+whether a turn may run. With the integration enabled:
+
+- **Host observations.** When a traced turn on a claimed item ends, TermAl
+  reports it to Engram once, after it ran: how it ended, whether it changed
+  source, and the checks it ran with their observed results. Turning the
+  setting OFF stops only these automatic reports.
+- **Named source roots.** An agent names the worktree its claim is measured
+  in. Naming takes effect at the agent's next turn.
+- **Registered verification.** A test-launcher run with committed input in
+  that named root is sent to Engram as registered verification. It is the
+  only source of test credit; a check that only appears in a turn report earns
+  none.
+- **Acceptance evaluation.** An item's acceptance criteria can be judged by
+  an independent evaluator session. For now, completing an item does not wait
+  for it.
 
 The [Work tab](docs/features/work-visualizer.md) is an **Engram-only, read-only**
 view with its own project selector. It offers Dependencies, Hierarchy, Labels,
@@ -61,7 +79,7 @@ the integration, create a claim, or change tracker data.
 
 ## Where TermAl stands
 
-As of 2026-10-29 (master `3fc13725`), updated 2026-11-01 for Execution
+As of 2026-10-29 (master `3fc13725`), updated 2026-11-14 for Execution
 Observability. The full snapshot, with limitations
 and next steps, is in [Project status](docs/features/project-status.md).
 
@@ -77,16 +95,30 @@ and next steps, is in [Project status](docs/features/project-status.md).
 - **Remote full gates.** The full gate runs on a satellite and reports
   back to the coordinator. It passed on master on both the Windows satellite
   and the Mac. See [Remote full gates](docs/features/remote-full-gates.md).
-- **Execution Observability on every harness (live observation pending).**
-  Codex, Claude, Cursor, Gemini, OpenCode and Kimi turns are delivered without
-  waiting for Engram, and each turn's end reaches Engram as one host
-  observation of its outcome, source change and checks. Tests on every harness
-  cover this; it is not yet observed on a running host. Turn gating has been
-  removed. See
+- **Execution Observability on every harness, confirmed on a running host.**
+  Turn gating has been removed. Codex, Claude, Cursor, Gemini (Antigravity
+  CLI), OpenCode and Kimi turns are delivered without waiting for Engram, and
+  each turn's end reaches Engram as a host observation of its outcome, source
+  change and checks. On the running build, a root session of each of the six
+  harnesses claimed an item, named a source root and earned test credit from
+  a registered test-launcher run there. See
   [Execution Observability](docs/features/execution-observability.md).
 
 **Active limitations**
 
+- Test credit comes only from a registered run on the host that holds the
+  claim. A run on another host, such as a remote full gate, is evidence for
+  review and landing but earns no test credit on an item.
+- A turn's own checks are reported without credit. Cursor, Gemini and
+  OpenCode report a passing check as indeterminate unless their tool update
+  carries the command's exit code.
+- When a session's working directory is outside its named root, the root's
+  first source-change report can come from the very turn that runs the test,
+  after the test. In the observed case, that first registered run, made in the
+  turn after naming, was recorded but did not satisfy that turn's
+  source-change obligation; a rerun in a later turn did.
+- In its default approval mode, Gemini (Antigravity CLI) asks for approval on
+  every tool call, including Engram and TermAl tools.
 - A program cannot yet send a prompt directly to a chosen session on another
   machine. A mailbox message is the supported route.
 - The running hosts do not yet have the SSH link diagnostics now on master.
@@ -303,7 +335,7 @@ Remotes are configured in Settings > Remotes and persisted in `~/.termal/termal.
 
 - [Rust](https://rustup.rs/) (edition 2024)
 - [Node.js](https://nodejs.org/) (see `.nvmrc` for version)
-- At least one supported agent: [Claude Code](https://claude.ai/code), [Codex](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Cursor](https://www.cursor.com/), [OpenCode](docs/features/opencode-acp-integration.md), or [Kimi Code CLI](docs/features/kimi-cli-integration.md)
+- At least one supported agent: [Claude Code](https://claude.ai/code), [Codex](https://github.com/openai/codex), Gemini through the [Antigravity CLI](docs/features/gemini-cli-integration.md), [Cursor](https://www.cursor.com/), [OpenCode](docs/features/opencode-acp-integration.md), or [Kimi Code CLI](docs/features/kimi-cli-integration.md)
 
 ### Run the backend
 
