@@ -17,6 +17,9 @@ src/api.rs, src/state.rs, src/runtime.rs, src/turns.rs, src/remote.rs,
 src/orchestrators.rs, and the Telegram relay fragments named below.
 */
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 // Every `eprintln!` in the crate, include! fragments and child modules alike,
 // goes through the host console log (host_log.rs): in server mode each line
 // gets a UTC timestamp and recurring diagnostics are rate limited per kind.

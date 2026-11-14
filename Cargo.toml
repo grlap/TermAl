@@ -21,6 +21,7 @@ hyper = { version = "1.8", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["http1", "server", "service", "tokio"] }
 icu_normalizer = { version = "=2.1.1", default-features = false, features = ["compiled_data"] }
 keyring-core = "1.0.0"
+mimalloc = { version = "0.1.48", features = ["v3"] }
 notify = "8"
 # Pinned: reads declared tests' TRX results; no default features, no serde.
 quick-xml = { version = "=0.42.0", default-features = false }
