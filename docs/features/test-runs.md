@@ -60,11 +60,30 @@ is still unconfirmed remains with its existing send owner; the reader never
 guesses a canonical message id. Reads create no run, send intent, delivered bit
 or local completion ledger. Private sender mappings remain local.
 
-This slice exposes the batch to its caller. The subsequent destination sender
-owns connecting it to the federation supervisor, constructing Engram requests
-and handling admission receipts; there is no production consumer that discards
-the batch. The existing custody columns and closed stored shapes are unchanged,
-so this read operation adds no store migration or reader floor.
+The joined federation supervisor drives this batch and sends
+`remote_verification_record` on the original requester's ordinary Engram
+connection, after that exact child advertises `remote_verification_record_v1`.
+The first authenticated completion and each target's exact request bytes and
+operation key are committed on the original send row before a write is tried.
+Unknown outcomes retry those same bytes on the same destination connection.
+The actual validated receipt is committed before retry custody ends. Local
+receipt replay precedes current claim or connection lookup; a new association
+is judged against current authority by Engram. Recorded uncredited receipts
+are final too. Pending, refused and uncredited outcomes are reported on the host
+console and retained in the original private settlement. Nothing creates a
+local execution, advances a human read/ACK cursor, or infers credit from PASS.
+Settled rows never issue another origin RPC; pending frozen operations recover
+without rereading the origin. Missing capability stays unsent and pending.
+
+Settlement adds one nullable `test_request_settlement_json` column to each of
+`mailbox_messages` and `mailbox_relay_intents`, through the existing atomic
+coordination migration. The reader floor becomes
+`8-direct-prompt-1-test-request-custody-1-remote-verification-1`.
+The original payload and private scope remain immutable, and no settlement or
+private mapping enters public mail, relay wire or Debug output. This floor is
+one way: an older TermAl binary refuses the migrated `coordination.sqlite`.
+A rollback needs the paired coordination backup taken before migration.
+No MAIN floor or federation protocol version changes.
 
 ### Custody storage upgrade and rollback
 

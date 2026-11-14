@@ -72,6 +72,108 @@ where
     (session, id, directory)
 }
 
+// Real held-claim capture fixture shared with the authenticated sender tests.
+pub(in crate::tests) fn destination(
+    state: AppState,
+    session: &str,
+) -> (
+    MailboxTestRequest,
+    Arc<ScriptedEngramControlTransport>,
+    MailboxTestSenderScope,
+) {
+    destination_with_targets(state, session, 1)
+}
+
+pub(in crate::tests) fn destination_with_targets(
+    state: AppState,
+    session: &str,
+    count: usize,
+) -> (
+    MailboxTestRequest,
+    Arc<ScriptedEngramControlTransport>,
+    MailboxTestSenderScope,
+) {
+    assert!((1..=MAILBOX_TEST_REQUEST_MAX_TARGETS).contains(&count));
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .unwrap()
+        .path()
+        .join("causal-destination");
+    fs::create_dir_all(&root).unwrap();
+    run_git_test_command(&root, &["init", "--quiet"]);
+    let project_id = create_test_project(&state, &root, "causal-destination");
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(session).unwrap();
+        inner.sessions[index].session.project_id = Some(project_id.clone());
+    }
+    let fixture = RunFixture {
+        state,
+        root,
+        project_id,
+    };
+    let bindings: Vec<_> = (0..count)
+        .map(|_| EngramControlWorkBinding {
+            root_execution_id: Uuid::new_v4().to_string(),
+            work_id: Uuid::new_v4().to_string(),
+            run_id: Uuid::new_v4().to_string(),
+            work_revision: 3,
+            claim_id: Uuid::new_v4().to_string(),
+            claim_fence: 2,
+        })
+        .collect();
+    let store = EngramAuthorityStoreKey {
+        database_path: fixture.root.join("disposable-engram.db"),
+        project_id: "causal-test-project".into(),
+    };
+    for binding in &bindings {
+        named_root::name_root(
+            &fixture,
+            &store,
+            binding,
+            session,
+            &fs::canonicalize(&fixture.root).unwrap(),
+            4,
+        );
+    }
+    let transport = ScriptedEngramControlTransport::new([]);
+    transport.replace_held_claims([Ok(EngramHeldClaims {
+        items: bindings
+            .iter()
+            .map(|binding| EngramHeldClaim {
+                work_id: binding.work_id.clone(),
+                short_ref: "fixture-work".into(),
+                claim_id: binding.claim_id.clone(),
+                claim_fence: binding.claim_fence,
+                focused: false,
+                control_binding: Some(binding.clone()),
+            })
+            .collect(),
+        omitted: 0,
+    })]);
+    fixture
+        .state
+        .install_test_engram_transport(transport.clone());
+    let mut request = crate::tests::mailboxes::test_request::typed_request(MailboxTestMode::Full);
+    let target = request.targets[0].clone();
+    request.targets = bindings
+        .into_iter()
+        .map(|binding| MailboxTestTarget {
+            work_ref: binding.work_id,
+            ..target.clone()
+        })
+        .collect();
+    (
+        request,
+        transport,
+        MailboxTestSenderScope {
+            project_id: fixture.project_id,
+            store,
+        },
+    )
+}
+
 pub(in crate::tests) fn finish(
     state: &AppState,
     id: &str,

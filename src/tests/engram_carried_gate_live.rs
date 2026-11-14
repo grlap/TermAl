@@ -9,6 +9,8 @@
 // New module, a child of the live root recovery module so the launcher's
 // `live` mode runs it.
 use super::*;
+#[path = "engram_remote_admission_live.rs"]
+mod remote_admission;
 
 const LIVE_GATE: &str = "node scripts/test-launcher.mjs full";
 

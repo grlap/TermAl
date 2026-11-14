@@ -5,6 +5,42 @@
 use super::*;
 use crate::engram_remote_verification::{Association, IntendedUse, Purpose, Reason, Request};
 
+#[test]
+fn sealed_producer_bounds_refuse_original_facts_without_truncation_or_coercion() {
+    let original = completion();
+    for change in ["reason", "exit", "run", "workspace", "key"] {
+        let mut fact = original.clone();
+        let mut destination = association(&source(), Purpose::Verification);
+        let mut key = "bounded-operation".to_owned();
+        match change {
+            "reason" => fact.result.reason = "x".repeat(257),
+            "exit" => fact.result.exit = Some(9_007_199_254_740_992),
+            "run" => fact.run_id = "x".repeat(129),
+            "workspace" => destination.root.workspace_id = "x".repeat(513),
+            "key" => key = "k".repeat(513),
+            _ => unreachable!(),
+        }
+        let bytes = serde_json::to_vec(&fact).unwrap();
+        assert!(Request::new(key, &fact, destination).is_err(), "{change}");
+        assert_eq!(serde_json::to_vec(&fact).unwrap(), bytes);
+    }
+    for character in ['\u{061c}', '\u{202e}', '\n'] {
+        let mut fact = original.clone();
+        fact.result.reason.push(character);
+        assert!(
+            Request::new(
+                "safe-key".into(),
+                &fact,
+                association(&source(), Purpose::Verification)
+            )
+            .is_err()
+        );
+    }
+    let mut impossible = credited("focused");
+    impossible["qualification"]["detail"] = json!("a credited receipt has no refusal detail");
+    assert!(request(&original).receipt(impossible).is_err());
+}
+
 fn source() -> EngramSourceId {
     let oid = sha256_hex(Uuid::new_v4().as_bytes());
     EngramSourceId {

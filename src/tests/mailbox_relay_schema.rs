@@ -405,8 +405,8 @@ fn delegation_review_custody_index_upgrades_step_six_and_bounds_orphan_lookup() 
         let current = columns(&reopened, table);
         assert_eq!(
             current.len(),
-            old.len() + 2,
-            "exactly two nullable columns are added to {table}"
+            old.len() + 3,
+            "exactly three nullable custody columns are added to {table}"
         );
         assert_eq!(
             &current[..old.len()],
@@ -423,6 +423,11 @@ fn delegation_review_custody_index_upgrades_step_six_and_bounds_orphan_lookup() 
                 ),
                 (
                     String::from("test_request_scope_json"),
+                    String::from("TEXT"),
+                    0_i64
+                ),
+                (
+                    String::from("test_request_settlement_json"),
                     String::from("TEXT"),
                     0_i64
                 ),

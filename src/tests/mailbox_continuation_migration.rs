@@ -34,10 +34,10 @@ fn retained_rows(connection: &rusqlite::Connection) -> Vec<Vec<Vec<rusqlite::typ
                 .prepare(&format!("SELECT * FROM {table} ORDER BY 1,2"))
                 .unwrap();
             let columns = statement.column_count();
-            let has_custody = *table == "mailbox_messages" && columns == 18;
+            let has_custody = *table == "mailbox_messages" && matches!(columns, 18 | 19);
             if *table == "mailbox_messages" {
                 assert!(
-                    matches!(columns, 16 | 18),
+                    matches!(columns, 16 | 18 | 19),
                     "unexpected mailbox snapshot shape"
                 );
                 if has_custody {
@@ -46,6 +46,9 @@ fn retained_rows(connection: &rusqlite::Connection) -> Vec<Vec<Vec<rusqlite::typ
                         statement.column_name(17).unwrap(),
                         "test_request_scope_json"
                     );
+                }
+                if columns == 19 {
+                    assert_eq!(statement.column_name(18).unwrap(), "test_request_settlement_json");
                 }
             }
             let mut rows = statement
@@ -64,6 +67,7 @@ fn retained_rows(connection: &rusqlite::Connection) -> Vec<Vec<Vec<rusqlite::typ
                 for row in &mut rows {
                     assert_eq!(row[16], rusqlite::types::Value::Null);
                     assert_eq!(row[17], rusqlite::types::Value::Null);
+                    if columns == 19 { assert_eq!(row[18], rusqlite::types::Value::Null); }
                     row.truncate(16);
                 }
             }

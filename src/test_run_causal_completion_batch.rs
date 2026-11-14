@@ -3,7 +3,6 @@
 const CAUSAL_COMPLETION_SCAN_ROWS: usize = 32;
 const CAUSAL_COMPLETION_BATCH: usize = 4;
 
-#[allow(dead_code)] // Slice 3 supplies the supervisor caller and admission sink.
 #[derive(Clone, Default)]
 struct CausalTestCompletionCursor {
     messages_after: i64,
@@ -11,13 +10,15 @@ struct CausalTestCompletionCursor {
     intents: bool,
 }
 
+#[derive(Clone)]
 struct CausalTestCompletionPlan {
     selector: CausalTestCompletionSelector,
     scope: Option<MailboxTestSenderScope>,
     peer: Option<FederationPeerSnapshot>,
+    settlement: Option<CausalTestSettlement>,
 }
 
-#[allow(dead_code)] // A private handoff, never a wire or persisted projection.
+// A private handoff, never a wire or persisted projection.
 struct CausalTestCompletionDelivery {
     selector: CausalTestCompletionSelector,
     scope: Option<MailboxTestSenderScope>,
@@ -35,10 +36,10 @@ impl MailboxStore {
         // history costs at most this many rows. No unindexed IS NOT NULL scan.
         let (query, after) = if cursor.intents {
             ("SELECT rowid,owner_session_id,idempotency_key,test_request_json,test_request_scope_json,receipt_json,peer_json
-              FROM mailbox_relay_intents WHERE rowid>?1 ORDER BY rowid LIMIT ?2", cursor.intents_after)
+              ,test_request_settlement_json FROM mailbox_relay_intents WHERE rowid>?1 ORDER BY rowid LIMIT ?2", cursor.intents_after)
         } else {
             ("SELECT rowid,sender_session_id,idempotency_key,test_request_json,test_request_scope_json,id,NULL
-              FROM mailbox_messages WHERE rowid>?1 ORDER BY rowid LIMIT ?2", cursor.messages_after)
+              ,test_request_settlement_json FROM mailbox_messages WHERE rowid>?1 ORDER BY rowid LIMIT ?2", cursor.messages_after)
         };
         let mut statement = connection.prepare(query)?;
         let mut rows =
@@ -86,10 +87,17 @@ impl MailboxStore {
             let scope = mailbox_test_scope_from_row(row, 4)?;
             let peer: Option<String> = row.get(6)?;
             let peer = peer.map(|json| serde_json::from_str(&json)).transpose()?;
+            let encoded: Option<String> = row.get(7)?;
+            let settlement = encoded.as_deref().map(|s|
+                CausalTestSettlement::decode(s, &selector, scope.as_ref())).transpose()?;
+            // The original receipt/refusal owns completion. Settled history
+            // never performs another federation RPC or creates another intent.
+            if settlement.as_ref().is_some_and(CausalTestSettlement::complete) { continue; }
             plans.push(CausalTestCompletionPlan {
                 selector,
                 scope,
                 peer,
+                settlement,
             });
             if plans.len() == CAUSAL_COMPLETION_BATCH {
                 break;
@@ -188,11 +196,8 @@ impl AppState {
         Ok(())
     }
 
-    // Slice 3 owns calling this from the joined federation supervisor, then
-    // building/admitting Engram requests and checking its receipts. Until that
-    // slice lands this has no production caller, by the staged-slice contract.
-    // No no-op consumer, new fact cache or persistent delivered bit exists.
-    #[allow(dead_code)]
+    // The joined supervisor supplies the admission sink. Original frozen
+    // pending operations recover without another origin read or live claim.
     async fn read_causal_test_completion_batch(
         &self,
         cursor: &mut CausalTestCompletionCursor,
@@ -213,12 +218,15 @@ impl AppState {
             if self.federation_executor_wake_signal.is_stopping() {
                 break;
             }
+            if let Some(saved) = &plan.settlement {
+                deliveries.push(CausalTestCompletionDelivery {
+                    selector: plan.selector, scope: plan.scope,
+                    completion: saved.completion.clone(),
+                });
+                continue;
+            }
             let worker = self.clone();
-            let check = CausalTestCompletionPlan {
-                selector: plan.selector.clone(),
-                scope: plan.scope.clone(),
-                peer: plan.peer.clone(),
-            };
+            let check = plan.clone();
             if run_blocking_api(move || worker.causal_test_completion_plan_current(&check))
                 .await
                 .is_err()
@@ -300,11 +308,7 @@ impl AppState {
                 continue;
             }
             let worker = self.clone();
-            let check = CausalTestCompletionPlan {
-                selector: plan.selector.clone(),
-                scope: plan.scope.clone(),
-                peer: plan.peer.clone(),
-            };
+            let check = plan.clone();
             if run_blocking_api(move || worker.causal_test_completion_plan_current(&check))
                 .await
                 .is_err()

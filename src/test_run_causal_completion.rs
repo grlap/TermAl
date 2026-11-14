@@ -12,7 +12,7 @@ fn test_run_causal_key(registration: &TestRunRegistration) -> Option<TestRunCaus
     ))
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CausalTestCompletionSelector {
     canonical_message_id: String,

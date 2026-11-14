@@ -660,6 +660,7 @@ async fn mailbox_relay_review_supervisor_kick_drains_more_than_one_bounded_page(
         let mut drain = FederationExecutorWakeDrain::default();
         let mut activation = FederationExecutorActivationWorker::default();
         let mut test_waits = RemoteTestRunWaitRecovery::default();
+        let mut causal_completions = CausalTestCompletionRecovery::default();
         let mut native = FederationMailboxWakeWorker::default();
         let mut relay = MailboxRelayWakeWorker {
             boot: MailboxRelayBootRecovery {
@@ -675,12 +676,14 @@ async fn mailbox_relay_review_supervisor_kick_drains_more_than_one_bounded_page(
             &mut native,
             &mut relay,
             &mut test_waits,
+            &mut causal_completions,
             &mut stop_rx,
             &mut host_rx,
             Duration::from_secs(3600),
         )
         .await;
         relay.shutdown().await;
+        causal_completions.shutdown().await;
         test_waits.shutdown().await;
         native.shutdown().await;
         activation.shutdown(&app).await;

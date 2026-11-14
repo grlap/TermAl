@@ -12,6 +12,7 @@ const MAILBOX_TEST_REQUEST_CUSTODY_SCHEMA_SQL: &str = "
 // downgrade helper discard custody to make that old-reader control pass.
 #[cfg(test)]
 fn remove_empty_test_request_custody_columns_for_test(connection: &rusqlite::Connection) {
+    remove_empty_test_request_settlement_columns_for_test(connection);
     for table in ["mailbox_messages", "mailbox_relay_intents"] {
         let retained: u64 = connection.query_row(
             &format!("SELECT COUNT(*) FROM {table} WHERE test_request_json IS NOT NULL OR test_request_scope_json IS NOT NULL"),

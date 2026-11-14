@@ -1258,6 +1258,8 @@ mod native_test_completion;
 include!("test_run_native_completion.rs");
 include!("test_run_causal_completion.rs");
 include!("test_run_causal_completion_batch.rs");
+include!("mailbox_test_request_settlement.rs");
+include!("engram_causal_completion_delivery.rs");
 include!("test_run_named_root.rs");
 include!("test_run_registration_target.rs");
 include!("test_run_exact_query.rs");

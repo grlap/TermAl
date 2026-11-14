@@ -36,7 +36,7 @@ pub(super) struct Association {
 // Reuse the retained completion without copying its fields or converting its
 // result. Historical Legacy inputs remain readable by that owner, but cannot
 // enter a NEW request, including one decoded after persistence/reload.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(
     try_from = "native_test_completion::Completion",
     into = "native_test_completion::Completion"
@@ -65,7 +65,7 @@ impl From<SourceCompletion> for native_test_completion::Completion {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Request {
     operation_key: String,
@@ -85,12 +85,78 @@ impl Request {
         completion: &native_test_completion::Completion,
         association: Association,
     ) -> Result<Self, ApiError> {
-        Ok(Self {
+        let request = Self {
             operation_key,
             completion: SourceCompletion::try_from(completion.clone())
                 .map_err(ApiError::bad_request)?,
             association,
-        })
+        };
+        request.validate()?;
+        Ok(request)
+    }
+
+    // Engram's producer bounds are narrower than historical native custody.
+    // Refuse the original intact; never shorten a reason or replace an endpoint.
+    pub(super) fn validate(&self) -> Result<(), ApiError> {
+        let invalid = || {
+            ApiError::bad_request(
+                "invalid_request: remote verification exceeds the sealed producer contract",
+            )
+        };
+        let label = |s: &str, max: usize| {
+            !s.is_empty() && s.trim() == s
+            && s.len() <= max && !s.chars().any(|c| c.is_control()
+                || matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'))
+        };
+        let completion = &self.completion.0;
+        completion.validate()?;
+        let binding = &self.association.binding;
+        if !label(&self.operation_key, 512)
+            || !label(&completion.origin.host_id, 512)
+            || !label(&completion.origin.runner_session_id, 512)
+            || !label(&completion.run_id, 128)
+            || !label(&completion.result.reason, 256)
+            || completion
+                .result
+                .exit
+                .is_some_and(|n| !(-9_007_199_254_740_991..=9_007_199_254_740_991).contains(&n))
+            || !label(&self.association.root.workspace_id, 512)
+            || self.association.root.generation <= 0
+            || [
+                &binding.root_execution_id,
+                &binding.work_id,
+                &binding.run_id,
+                &binding.claim_id,
+            ]
+            .iter()
+            .any(|id| !mailbox_relay_uuid(id))
+            || binding.work_revision <= 0
+            || binding.claim_fence <= 0
+        {
+            return Err(invalid());
+        }
+        match &self.association.intended_use {
+            IntendedUse::CommittedInput {
+                expected_commit, ..
+            } if !mailbox_test_hex_id(expected_commit) => return Err(invalid()),
+            IntendedUse::AuthorizedTestRef {
+                ref_name,
+                expected_tree,
+                purpose,
+            } => {
+                if !label(ref_name, 512)
+                    || !ref_name.starts_with("refs/heads/test/")
+                    || !mailbox_test_hex_id(expected_tree)
+                    || *purpose != Purpose::LandingGate
+                {
+                    return Err(invalid());
+                }
+            }
+            _ => {}
+        }
+        encode_engram_control_request(&self.clone().into_control_request())
+            .map_err(|_| invalid())?;
+        Ok(())
     }
 
     #[allow(dead_code)] // No automatic sender/activation is introduced here.
@@ -171,6 +237,12 @@ impl Receipt {
             || self.qualification.credited != self.qualification.reason.is_none()
             || self.verifications.len() != usize::from(self.qualification.credited)
             || (self.qualification.credited && self.origin.is_none())
+            || (self.qualification.credited && self.qualification.detail.is_some())
+            || self
+                .qualification
+                .detail
+                .as_ref()
+                .is_some_and(|detail| detail.len() > 384)
             || self
                 .verifications
                 .iter()

@@ -110,6 +110,7 @@ async fn federation_supervise(
     let mut relay_wakes = MailboxRelayWakeWorker::default();
     let mut sender_recovery = FederationExecutorSenderRecovery::default();
     let mut test_waits = RemoteTestRunWaitRecovery::default();
+    let mut causal_completions = CausalTestCompletionRecovery::default();
     loop {
         if *stop.borrow() || *host_stop.borrow() || app.federation_executor_wake_signal.is_stopping() {
             break;
@@ -131,6 +132,7 @@ async fn federation_supervise(
         relay_wakes.tick(&app, true).await;
         sender_recovery.tick(&app).await;
         test_waits.tick(&app, true).await;
+        causal_completions.tick(&app, true).await;
         if app.federation_executor_wake_signal.is_stopping() { break; }
         // The snapshot API releases StateInner before returning. Disabled and
         // standalone settings return no peers: no bind, secret lookup or SSH.
@@ -141,7 +143,7 @@ async fn federation_supervise(
                 // A failed authoritative read is not an empty registry. In
                 // particular, a pending durability fence must not tear down
                 // a healthy channel and invalidate verification in a loop.
-                if federation_wait_supervisor_tick(&app, &mut wake_drain, &mut activation, &mut native_wakes, &mut relay_wakes, &mut test_waits, &mut stop,
+                if federation_wait_supervisor_tick(&app, &mut wake_drain, &mut activation, &mut native_wakes, &mut relay_wakes, &mut test_waits, &mut causal_completions, &mut stop,
                     &mut host_stop, io.reconcile_interval).await { break; }
                 continue;
             }
@@ -250,10 +252,11 @@ async fn federation_supervise(
                 },
             );
         }
-        if federation_wait_supervisor_tick(&app, &mut wake_drain, &mut activation, &mut native_wakes, &mut relay_wakes, &mut test_waits, &mut stop,
+        if federation_wait_supervisor_tick(&app, &mut wake_drain, &mut activation, &mut native_wakes, &mut relay_wakes, &mut test_waits, &mut causal_completions, &mut stop,
             &mut host_stop, io.reconcile_interval).await { break; }
     }
     app.federation_executor_wake_signal.stop();
+    causal_completions.shutdown().await;
     test_waits.shutdown().await;
     relay_wakes.shutdown().await;
     native_wakes.shutdown().await;
@@ -301,6 +304,7 @@ async fn federation_wait_supervisor_tick(
     native_wakes: &mut FederationMailboxWakeWorker,
     relay_wakes: &mut MailboxRelayWakeWorker,
     test_waits: &mut RemoteTestRunWaitRecovery,
+    causal_completions: &mut CausalTestCompletionRecovery,
     stop: &mut tokio::sync::watch::Receiver<bool>,
     host_stop: &mut tokio::sync::watch::Receiver<bool>, interval: Duration,
 ) -> bool {
@@ -317,6 +321,7 @@ async fn federation_wait_supervisor_tick(
                 native_wakes.tick(app, false).await;
                 relay_wakes.tick(app, false).await;
                 test_waits.tick(app, false).await;
+                causal_completions.tick(app, false).await;
             },
         }
     }

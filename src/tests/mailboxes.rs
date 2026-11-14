@@ -7,6 +7,8 @@ use super::*;
 
 #[path = "mailbox_test_request.rs"]
 pub(super) mod test_request;
+#[path = "mailbox_test_request_settlement.rs"]
+mod test_request_settlement;
 
 pub(super) fn mailbox_test_state() -> (AppState, String, String) {
     let base = test_app_state();

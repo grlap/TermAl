@@ -4,7 +4,7 @@ use crate::tests::test_runs::test_run_registration::causal_completion_fixture::{
     compact, finish, producer,
 };
 
-struct Handles(Vec<AppState>);
+pub(super) struct Handles(Vec<AppState>);
 impl Drop for Handles {
     fn drop(&mut self) {
         for state in &self.0 {
@@ -13,7 +13,7 @@ impl Drop for Handles {
     }
 }
 
-async fn connect(fixture: &Fixture) -> (DomainServer, Handles) {
+pub(super) async fn connect(fixture: &Fixture) -> (DomainServer, Handles) {
     let channel = fixture.channel.clone();
     let checked = channel.clone();
     let server = DomainServer::start(federation_router(
