@@ -24,11 +24,10 @@ type FileSystem = {
 };
 
 let fs: FileSystem;
-// Vitest runs with ui/ as its root and working directory.
-const uiRoot = (globalThis as typeof globalThis & { process: { cwd(): string } }).process
-  .cwd()
-  .split("\\")
-  .join("/");
+// The ui/ directory, resolved from this file (ui/src/) rather than the working
+// directory, so the guard scans the same tree whichever directory Vitest is
+// started from.
+let uiRoot = "";
 let testFiles: string[] = [];
 
 // Directories Vitest never collects from; everything else under ui/ is
@@ -104,7 +103,11 @@ function rendersApp(file: string): boolean {
 
 beforeAll(async () => {
   const nodeFsModule = "node:fs";
+  const nodeUrlModule = "node:url";
   fs = (await import(nodeFsModule)) as FileSystem;
+  const { fileURLToPath } = (await import(nodeUrlModule)) as { fileURLToPath: (url: string) => string };
+  const moduleUrl = import.meta.url;
+  uiRoot = fileURLToPath(new URL("..", moduleUrl).href).split("\\").join("/").replace(/\/+$/u, "");
   testFiles = testFilesUnder("");
 });
 

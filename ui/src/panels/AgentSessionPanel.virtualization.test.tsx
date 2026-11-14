@@ -67,6 +67,19 @@ import type {
   Session,
 } from "../types";
 
+// Resolved beside this file, not from the working directory, so the tests
+// read the same stylesheet whichever directory Vitest is started from.
+async function readProductionStyles() {
+  const nodeFsModule = "node:fs";
+  const nodeUrlModule = "node:url";
+  const { readFileSync } = (await import(nodeFsModule)) as {
+    readFileSync: (path: string, encoding: "utf8") => string;
+  };
+  const { fileURLToPath } = (await import(nodeUrlModule)) as { fileURLToPath: (url: string) => string };
+  const moduleUrl = import.meta.url;
+  return readFileSync(fileURLToPath(new URL("../styles.css", moduleUrl).href), "utf8");
+}
+
 function makeSession(id: string, overrides?: Partial<Session>): Session {
   return {
     id,
@@ -694,19 +707,7 @@ describe("AgentSessionPanel virtualization", () => {
   });
 
   it("keeps the native history wrapper and long unbreakable messages shrinkable", async () => {
-    const nodeFsModule = "node:fs";
-    const { readFileSync } = (await import(nodeFsModule)) as {
-      readFileSync: (path: string, encoding: "utf8") => string;
-    };
-    const runtimeProcess = (
-      globalThis as typeof globalThis & {
-        process: { cwd: () => string };
-      }
-    ).process;
-    const stylesCss = readFileSync(
-      `${runtimeProcess.cwd()}/src/styles.css`,
-      "utf8",
-    );
+    const stylesCss = await readProductionStyles();
     const productionStyles = document.createElement("style");
     productionStyles.dataset.testProductionStyles = "true";
     productionStyles.textContent = stylesCss;
@@ -780,15 +781,8 @@ describe("AgentSessionPanel virtualization", () => {
     { name: "complete short conversation", count: 1, start: 0, older: false, newer: false, loaded: true, aligned: false },
     { name: "navigated historical window", count: 1, start: 500, older: true, newer: true, loaded: false, aligned: false },
   ])("uses bounded bottom alignment for $name", async ({ count, start, older, newer, loaded, aligned }) => {
-    const nodeFsModule = "node:fs";
-    const { readFileSync } = await import(nodeFsModule) as {
-      readFileSync: (path: string, encoding: "utf8") => string;
-    };
-    const runtimeProcess = (globalThis as typeof globalThis & {
-      process: { cwd: () => string };
-    }).process;
     const productionStyles = document.createElement("style");
-    productionStyles.textContent = readFileSync(`${runtimeProcess.cwd()}/src/styles.css`, "utf8");
+    productionStyles.textContent = await readProductionStyles();
     document.head.append(productionStyles);
     try {
       const { container } = renderSessionPanelWithDefaults({

@@ -56,6 +56,19 @@ import type {
 } from "../types";
 import { RESPONSE_BOARD_MESSAGE_MIME } from "../response-board";
 
+// Resolved beside this file, not from the working directory, so the tests
+// read the same stylesheet whichever directory Vitest is started from.
+async function readProductionStyles() {
+  const nodeFsModule = "node:fs";
+  const nodeUrlModule = "node:url";
+  const { readFileSync } = (await import(nodeFsModule)) as {
+    readFileSync: (path: string, encoding: "utf8") => string;
+  };
+  const { fileURLToPath } = (await import(nodeUrlModule)) as { fileURLToPath: (url: string) => string };
+  const moduleUrl = import.meta.url;
+  return readFileSync(fileURLToPath(new URL("../styles.css", moduleUrl).href), "utf8");
+}
+
 function extractCssBlock(source: string, headerPattern: RegExp) {
   const match = source.match(headerPattern);
   if (!match || match.index === undefined) {
@@ -791,19 +804,7 @@ describe("AgentSessionPanel conversation caching", () => {
   });
 
   it("keeps the queued-prompt group in normal flow across attachment state", async () => {
-    const nodeFsModule = "node:fs";
-    const { readFileSync } = (await import(nodeFsModule)) as {
-      readFileSync: (path: string, encoding: "utf8") => string;
-    };
-    const runtimeProcess = (
-      globalThis as typeof globalThis & {
-        process: { cwd: () => string };
-      }
-    ).process;
-    const stylesCss = readFileSync(
-      `${runtimeProcess.cwd()}/src/styles.css`,
-      "utf8",
-    );
+    const stylesCss = await readProductionStyles();
     const messageStackDeclarations = stylesCss.match(
       /\.message-stack\s*\{([^}]*)\}/s,
     )?.[1];
@@ -853,19 +854,7 @@ describe("AgentSessionPanel conversation caching", () => {
   });
 
   it("reveals only appended transcript entries with paint-only motion", async () => {
-    const nodeFsModule = "node:fs";
-    const { readFileSync } = (await import(nodeFsModule)) as {
-      readFileSync: (path: string, encoding: "utf8") => string;
-    };
-    const runtimeProcess = (
-      globalThis as typeof globalThis & {
-        process: { cwd: () => string };
-      }
-    ).process;
-    const stylesCss = readFileSync(
-      `${runtimeProcess.cwd()}/src/styles.css`,
-      "utf8",
-    );
+    const stylesCss = await readProductionStyles();
     const initialMessages = makeTextMessages(30);
     const activeSession = makeSession("session-message-reveal", {
       messages: initialMessages,
@@ -1014,19 +1003,7 @@ describe("AgentSessionPanel conversation caching", () => {
   });
 
   it("stacks the prompt above composer actions based on pane width", async () => {
-    const nodeFsModule = "node:fs";
-    const { readFileSync } = (await import(nodeFsModule)) as {
-      readFileSync: (path: string, encoding: "utf8") => string;
-    };
-    const runtimeProcess = (
-      globalThis as typeof globalThis & {
-        process: { cwd: () => string };
-      }
-    ).process;
-    const stylesCss = readFileSync(
-      `${runtimeProcess.cwd()}/src/styles.css`,
-      "utf8",
-    );
+    const stylesCss = await readProductionStyles();
 
     const composerDeclarations = extractCssBlock(
       stylesCss,

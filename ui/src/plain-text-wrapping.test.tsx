@@ -67,18 +67,14 @@ describe("renderPlainTextWithSoftBreaks", () => {
 
   it("keeps arbitrary character breaks as a fallback instead of competing with wbr", async () => {
     const nodeFsModule = "node:fs";
+    const nodeUrlModule = "node:url";
     const { readFileSync } = (await import(nodeFsModule)) as {
       readFileSync: (path: string, encoding: "utf8") => string;
     };
-    const runtimeProcess = (
-      globalThis as typeof globalThis & {
-        process: { cwd: () => string };
-      }
-    ).process;
-    const styles = readFileSync(
-      `${runtimeProcess.cwd()}/src/styles.css`,
-      "utf8",
-    );
+    const { fileURLToPath } = (await import(nodeUrlModule)) as { fileURLToPath: (url: string) => string };
+    // Resolved beside this file, not from the working directory.
+    const moduleUrl = import.meta.url;
+    const styles = readFileSync(fileURLToPath(new URL("./styles.css", moduleUrl).href), "utf8");
     const plainTextRule = styles.match(/\.plain-text-copy\s*\{([^}]*)\}/)?.[1];
     const inlineCodeRule = styles.match(
       /\.markdown-copy\s+:not\(pre\)\s*>\s*code\s*\{([^}]*)\}/,

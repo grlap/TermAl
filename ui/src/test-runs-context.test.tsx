@@ -82,9 +82,12 @@ it("keeps action-only consumers independent of run updates", () => {
 });
 it("truncates the marker in existing toolbar space without a reserved row or overlay", async () => {
   const moduleName = "node:fs";
+  const urlModuleName = "node:url";
   const fs = await import(moduleName) as { readFileSync: (path: string, encoding: string) => string };
-  const runtime = globalThis as typeof globalThis & { process: { cwd: () => string } };
-  const css = fs.readFileSync(`${runtime.process.cwd()}/src/panels/test-runs-panel.css`, "utf8");
+  const { fileURLToPath } = await import(urlModuleName) as { fileURLToPath: (url: string) => string };
+  // Resolved beside this file, not from the working directory.
+  const moduleUrl = import.meta.url;
+  const css = fs.readFileSync(fileURLToPath(new URL("./panels/test-runs-panel.css", moduleUrl).href), "utf8");
   const marker = css.match(/\.pane-view-strip \.test-run-session-marker \{([^}]+)\}/)?.[1] ?? "";
   expect(css).not.toContain("test-run-session-chrome");
   expect(marker).toContain("text-overflow: ellipsis");

@@ -34,15 +34,14 @@ describe("ThemeModeToggle", () => {
 
   it("sizes pane-bar-right for the theme toggle only, without a leftover second column", async () => {
     const nodeFsModule = "node:fs";
+    const nodeUrlModule = "node:url";
     const { readFileSync } = (await import(nodeFsModule)) as {
       readFileSync: (path: string, encoding: "utf8") => string;
     };
-    const runtimeProcess = (
-      globalThis as typeof globalThis & {
-        process: { cwd: () => string };
-      }
-    ).process;
-    const styles = readFileSync(`${runtimeProcess.cwd()}/src/styles.css`, "utf8");
+    const { fileURLToPath } = (await import(nodeUrlModule)) as { fileURLToPath: (url: string) => string };
+    // Resolved beside this file, not from the working directory.
+    const moduleUrl = import.meta.url;
+    const styles = readFileSync(fileURLToPath(new URL("./styles.css", moduleUrl).href), "utf8");
     const paneBarThemeRule = styles.match(
       /\.pane-bar-right\s+\.theme-mode-toggle\s*\{([^}]*)\}/,
     )?.[1];
