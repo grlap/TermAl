@@ -1271,6 +1271,10 @@ const SessionConversationPage = memo(
         const deliveryLabel = delivery?.disposition === "ambiguous"
           ? "Delivery outcome unknown"
           : delivery?.disposition === "accepted" ? "Prompt accepted by provider" : "Prompt handoff in progress";
+        // A settled history row (accepted or unknown delivery) never runs
+        // again; Dismiss only removes it from the queue. An in-flight
+        // hand-off has no Dismiss: its outcome is not settled yet.
+        const dismissible = historical && delivery?.disposition !== "handingOff";
         const card = historical ? (
           <article className="activity-card" aria-label="Prompt delivery status">
             <div className="activity-card-copy">
@@ -1280,6 +1284,13 @@ const SessionConversationPage = memo(
                 onOpenMailbox={onOpenMailbox} searchQuery={conversationSearchQuery}
                 searchHighlightTone={conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}` ? "active" : "match"} /> : null}
             </div>
+            {dismissible ? (
+              <button className="queue-resume-button" type="button"
+                title="Remove this row from the queue. The prompt is never sent again; its delivery record stays."
+                onClick={() => onCancelQueuedPrompt(session.id, prompt.id)}>
+                Dismiss
+              </button>
+            ) : null}
           </article>
         ) : (
           <PendingPromptCard prompt={prompt} sessionId={session.id}

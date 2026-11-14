@@ -235,6 +235,7 @@ mod prompt_delivery;
 mod prompt_delivery_codex_write;
 mod prompt_target_parity;
 mod provider_capacity_retry;
+mod queue_delivery_history;
 mod queued_prompt_durability;
 mod read_only_quoted_separators;
 mod read_only_refusal_rules;

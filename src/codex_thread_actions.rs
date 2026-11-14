@@ -311,7 +311,7 @@ impl AppState {
             let record = &mut inner.sessions[index];
             if record.external_session_id.as_deref() != Some(&context.thread_id)
                 || record.runtime_stop_in_progress
-                || !record.queued_prompts.is_empty()
+                || session_has_runnable_queued_prompt(record)
                 || matches!(
                     record.session.status,
                     SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping

@@ -741,6 +741,51 @@ describe("session model refresh controls", () => {
     expect(screen.getByRole("button", { name: "Roll back" })).toBeDisabled();
   });
 
+  it.each([
+    ["ambiguous", false],
+    ["accepted", false],
+    ["handingOff", true],
+    ["pending", true],
+  ] as const)("with only a %s queue row, Codex thread actions disabled = %s", (disposition, disabled) => {
+    render(
+      <CodexPromptSettingsCard
+        paneId="pane-codex"
+        session={makeSession("codex-session", {
+          agent: "Codex",
+          approvalPolicy: "never",
+          reasoningEffort: "medium",
+          sandboxMode: "workspace-write",
+          model: "gpt-5.4",
+          externalSessionId: "thread-live",
+          codexThreadState: "active",
+          pendingPrompts: [{ id: "row-1", timestamp: "2026-03-20T10:00:00Z", text: "earlier prompt" }],
+          promptDeliveries: [{ promptId: "row-1", disposition, attempt: 1 }],
+        })}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        modelOptionsError={null}
+        sessionNotice={null}
+        onArchiveThread={noopArchiveThread}
+        onCompactThread={noopCompactThread}
+        onForkThread={noopForkThread}
+        onRequestModelOptions={() => {}}
+        onRollbackThread={noopRollbackThread}
+        onSessionSettingsChange={() => {}}
+        onUnarchiveThread={noopUnarchiveThread}
+      />,
+    );
+
+    const notice = screen.queryByText("Wait for queued Codex prompts to finish before changing the live thread.");
+    if (disabled) {
+      expect(notice).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Fork thread" })).toBeDisabled();
+    } else {
+      expect(notice).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Fork thread" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Compact" })).toBeEnabled();
+    }
+  });
+
   it("switches the Codex archive controls when the live thread is archived", () => {
     const onArchiveThread = vi.fn();
     const onUnarchiveThread = vi.fn();

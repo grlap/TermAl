@@ -439,6 +439,40 @@ describe("AgentSessionPanel conversation caching", () => {
     },
   );
 
+  it.each(["ambiguous", "accepted"] as const)(
+    "dismisses a %s history row through the queue-removal callback, never by resuming it",
+    disposition => {
+      const onResumeSessionQueue = vi.fn();
+      const onCancelQueuedPrompt = vi.fn();
+      renderSessionPanelWithDefaults({
+        activeSession: makeSession("session-history", {
+          status: "idle", queuePaused: false, messages: [],
+          pendingPrompts: [{ id: "history", timestamp: "10:00", text: "Original exact prompt" }],
+          promptDeliveries: [{ promptId: "history", disposition, attempt: 1 }],
+        }),
+        onResumeSessionQueue, onCancelQueuedPrompt,
+      });
+      const dismiss = screen.getByRole("button", { name: "Dismiss" });
+      // The wording never claims the prompt was not sent.
+      expect(dismiss.getAttribute("title") ?? "").not.toMatch(/not (been )?sent|unsent/i);
+      fireEvent.click(dismiss);
+      expect(onCancelQueuedPrompt).toHaveBeenCalledWith("session-history", "history");
+      expect(onResumeSessionQueue).not.toHaveBeenCalled();
+    },
+  );
+
+  it("offers no Dismiss on an in-flight handingOff row", () => {
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-handoff", {
+        status: "idle", queuePaused: false, messages: [],
+        pendingPrompts: [{ id: "inflight", timestamp: "10:00", text: "Handing off" }],
+        promptDeliveries: [{ promptId: "inflight", disposition: "handingOff", attempt: 1 }],
+      }),
+      onResumeSessionQueue: vi.fn(), onCancelQueuedPrompt: vi.fn(),
+    });
+    expect(screen.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument();
+  });
+
   it("keeps an unknown original passive while generic Resume targets the ordinary queue", () => {
     const onResumeSessionQueue = vi.fn();
     const onCancelQueuedPrompt = vi.fn();
@@ -456,7 +490,9 @@ describe("AgentSessionPanel conversation caching", () => {
       }), onResumeSessionQueue, onCancelQueuedPrompt,
     });
     expect(screen.getByText("Original unknown A")).toBeInTheDocument();
-    expect(screen.getByLabelText("Prompt delivery status").querySelector("button")).toBeNull();
+    // The history row offers only Dismiss: no replay, resume or cancel.
+    expect([...screen.getByLabelText("Prompt delivery status").querySelectorAll("button")]
+      .map(button => button.textContent)).toEqual(["Dismiss"]);
     expect(screen.getByText("1 prompt waiting. Send a new prompt or resume the queue to continue.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Resume queued prompts" }));
     expect(onResumeSessionQueue).toHaveBeenCalledWith("session-mixed");

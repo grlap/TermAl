@@ -348,6 +348,9 @@ impl AppState {
             .expect("session index should be valid");
         let original_len = record.queued_prompts.len();
         let removed_head = handing_off_head(record);
+        // A delivery history row keeps its receipt, gaining a durable one if
+        // it only had the view its queue entry projected.
+        let removed_history = keep_delivery_history_of_removed_row(record, prompt_id);
         record
             .queued_prompts
             .retain(|queued| queued.pending_prompt.id != prompt_id);
@@ -360,7 +363,13 @@ impl AppState {
         settle_removed_handing_off_head(record, removed_head, QUEUE_REMOVAL_UNSENT_REASON);
         sync_pending_prompts(record);
 
-        let lifecycle = reconcile_removed_followup_prompt_locked(&mut inner, session_id, prompt_id);
+        // Dismissing delivery history never reports a follow-up as canceled
+        // before it started: its delivery may already have happened.
+        let lifecycle = if removed_history {
+            None
+        } else {
+            reconcile_removed_followup_prompt_locked(&mut inner, session_id, prompt_id)
+        };
         let detached = if lifecycle.is_some() {
             let delegation = inner
                 .find_delegation_index_by_child_session_id(session_id)

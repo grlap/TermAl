@@ -2,11 +2,12 @@
 // Does not own: transcript content, scroll authority, or activity rendering.
 // Split from: ui/src/panels/AgentSessionPanel.tsx.
 // Activity presentation uses explicit session state, never transcript residency.
+import { runnableQueuedPrompts } from "../queued-prompt-runnable";
 import type { Session } from "../types";
 
 export type SessionActivitySource = Pick<
   Session,
-  "agent" | "status" | "liveActivity" | "pendingPrompts" | "queuePaused"
+  "agent" | "status" | "liveActivity" | "pendingPrompts" | "promptDeliveries" | "queuePaused"
 > & { id?: string };
 
 type SessionActivityState =
@@ -36,7 +37,10 @@ export function resolveSessionActivity({
   testRunWaitPrompt = null,
 }: SessionActivityOptions) {
   const prompt = session.liveActivity?.prompt.trim() || null;
-  const pendingPrompt = session.pendingPrompts?.[0]?.text.trim() || null;
+  // Delivery history rows never run again, so only runnable rows can make the
+  // session wait on a paused queue or start its next turn.
+  const runnable = runnableQueuedPrompts(session);
+  const pendingPrompt = runnable[0]?.text.trim() || null;
   const describe = (
     state: SessionActivityState,
     label: string,
@@ -60,14 +64,14 @@ export function resolveSessionActivity({
   if (session.status === "error") {
     return describe("error", "encountered an error");
   }
-  if (session.queuePaused && (session.pendingPrompts?.length ?? 0) > 0) {
+  if (session.queuePaused && runnable.length > 0) {
     return describe("paused", "has a paused queue", pendingPrompt);
   }
   if (delegationWaitPrompt) {
     return describe("waiting", testRunWaitPrompt ? "is waiting for delegated sessions and test runs" : "is waiting for delegated sessions", [delegationWaitPrompt, testRunWaitPrompt].filter(Boolean).join("; "));
   }
   if (testRunWaitPrompt) return describe("waiting", "is waiting for test runs", testRunWaitPrompt);
-  if ((session.pendingPrompts?.length ?? 0) > 0) {
+  if (runnable.length > 0) {
     return describe("queued", "is starting the next turn", pendingPrompt, true);
   }
   return describe("idle", "is idle");

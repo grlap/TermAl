@@ -278,7 +278,8 @@ impl AppState {
                 "wait for the current Codex turn to finish before using thread actions",
             ));
         }
-        if !record.queued_prompts.is_empty() {
+        // Settled delivery history never runs again and does not hold the thread.
+        if session_has_runnable_queued_prompt(record) {
             return Err(ApiError::conflict(
                 "wait for queued Codex prompts to finish before using thread actions",
             ));

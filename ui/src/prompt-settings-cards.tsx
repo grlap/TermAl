@@ -12,6 +12,7 @@ import {
   OPENCODE_APPROVAL_OPTIONS,
 } from "./preferences-panels";
 import { ThemedCombobox } from "./preferences/themed-combobox";
+import { runnableQueuedPrompts } from "./queued-prompt-runnable";
 import {
   claudeEffortComboboxOptions,
   claudeEffortHint,
@@ -115,7 +116,8 @@ export function CodexPromptSettingsCard({
     },
   ];
   const hasLiveThread = Boolean(session.externalSessionId);
-  const hasQueuedPrompts = (session.pendingPrompts?.length ?? 0) > 0;
+  // Delivery history rows never run again, so they never block thread actions.
+  const hasQueuedPrompts = runnableQueuedPrompts(session).length > 0;
   const threadIsArchived = hasLiveThread && session.codexThreadState === "archived";
   const sessionBusy =
     session.status === "active" ||

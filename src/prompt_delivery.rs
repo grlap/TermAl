@@ -500,6 +500,81 @@ fn queue_receipted_orchestrator_prompt_on_record(
     nonce
 }
 
+/// Why a receipt-less history row is shown, and kept, as an ambiguous delivery.
+const UNRECEIPTED_HISTORY_REASON: &str =
+    "Earlier provider delivery could not be established; this historical queue entry will not be replayed";
+
+/// Before a queued row leaves the queue, keeps its delivery history: a
+/// receipt-less history row has only the ambiguous view its queue entry
+/// projects, so it gets a durable ambiguous receipt carrying the same reason.
+/// Returns whether the row is delivery history (settled or receipt-less), so
+/// a caller removing it claims nothing about whether it was sent.
+fn keep_delivery_history_of_removed_row(record: &mut SessionRecord, prompt_id: &str) -> bool {
+    let Some(queued) = record
+        .queued_prompts
+        .iter()
+        .find(|queued| queued.pending_prompt.id == prompt_id)
+    else {
+        return false;
+    };
+    if let Some(delivery) = record.prompt_deliveries.get(prompt_id) {
+        return delivery.disposition.is_settled();
+    }
+    if !unreceipted_queued_prompt_is_history(queued) {
+        return false;
+    }
+    let sequence = next_prompt_delivery_sequence(record);
+    record.prompt_deliveries.insert(
+        prompt_id.to_owned(),
+        PromptDelivery {
+            remote_prompt: None,
+            federation_operation: None,
+            federation_handoff_started: false,
+            disposition: PromptDeliveryDisposition::Ambiguous,
+            attempt: 0,
+            write_ahead: Uuid::new_v4().to_string(),
+            sequence,
+            message_id: None,
+            turn_generation: None,
+            attempt_key: None,
+            reason: Some(UNRECEIPTED_HISTORY_REASON.to_owned()),
+            entry: None,
+            write_ahead_acknowledged: false,
+            resume: None,
+            runtime_write: PromptRuntimeWrite::Untracked,
+        },
+    );
+    true
+}
+
+/// Whether a queued row with no receipt is kept only as history: its stored
+/// record gives no proof that it was never handed off, so clients see it as
+/// an ambiguous delivery and it is never replayed.
+fn unreceipted_queued_prompt_is_history(queued: &QueuedPromptRecord) -> bool {
+    !queued.promotion_disposition_known
+        || queued.engram_ordinary_handoff
+        || queued.promoted_message_index.is_some()
+}
+
+/// Whether a queued row is settled delivery history that never runs again:
+/// its receipt is settled (accepted, rejected or ambiguous), or it has no
+/// receipt and is kept only as history. A pending row or an in-flight
+/// hand-off still counts as queued work.
+fn queued_prompt_is_delivery_history(record: &SessionRecord, queued: &QueuedPromptRecord) -> bool {
+    match record.prompt_deliveries.get(&queued.pending_prompt.id) {
+        Some(delivery) => delivery.disposition.is_settled(),
+        None => unreceipted_queued_prompt_is_history(queued),
+    }
+}
+
+/// Whether the session has queued work that is not settled delivery history.
+fn session_has_runnable_queued_prompt(record: &SessionRecord) -> bool {
+    record
+        .queued_prompts
+        .iter()
+        .any(|queued| !queued_prompt_is_delivery_history(record, queued))
+}
+
 /// Refreshes the receipts clients see on the session.
 fn sync_prompt_delivery_view(record: &mut SessionRecord) {
     let mut view = record
@@ -524,9 +599,7 @@ fn sync_prompt_delivery_view(record: &mut SessionRecord) {
         if !record
             .prompt_deliveries
             .contains_key(&queued.pending_prompt.id)
-            && (!queued.promotion_disposition_known
-                || queued.engram_ordinary_handoff
-                || queued.promoted_message_index.is_some())
+            && unreceipted_queued_prompt_is_history(queued)
         {
             // No positive provider effect is inferred from a stored queue
             // record or a transcript position. Preserve its content as history.
@@ -535,7 +608,7 @@ fn sync_prompt_delivery_view(record: &mut SessionRecord) {
                 disposition: PromptDeliveryDisposition::Ambiguous,
                 attempt: 0,
                 message_id: None,
-                reason: Some("Earlier provider delivery could not be established; this historical queue entry will not be replayed".to_owned()),
+                reason: Some(UNRECEIPTED_HISTORY_REASON.to_owned()),
             });
         }
     }
