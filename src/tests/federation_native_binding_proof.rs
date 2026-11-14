@@ -6,6 +6,7 @@
 use super::*;
 
 mod alias_grammar;
+mod causal_test_completion;
 mod fixture_clock;
 mod prompt_policy;
 mod references;

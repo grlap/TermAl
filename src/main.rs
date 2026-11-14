@@ -1253,6 +1253,8 @@ include!("declared_run_source.rs");
 include!("declared_run_observer.rs");
 mod native_test_completion;
 include!("test_run_native_completion.rs");
+include!("test_run_causal_completion.rs");
+include!("test_run_causal_completion_batch.rs");
 include!("test_run_named_root.rs");
 include!("test_run_registration_target.rs");
 include!("test_run_exact_query.rs");

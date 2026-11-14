@@ -40,6 +40,32 @@ creates no verification record. Native completion and destination qualification
 remain separate owners. Remote observer identities omit causal custody and
 refuse injected custody rather than turning it into observer identity.
 
+### Reading an original causal completion
+
+The host-private `readCausalTestCompletion` operation uses the existing
+authenticated native mailbox relay route. It selects a run by its original
+requester, send key, canonical message and complete retained recipient/payload,
+not by a caller's guessed run or an observer reply. One SQLite snapshot must
+confirm both the original registration and its provider execution, including
+their compacted survivors. Pending or unavailable proof supplies no completion.
+The operation returns the retained SourceId completion unchanged, including
+failed/interrupted results and unavailable or changed endpoints; destination
+qualification remains Engram's decision.
+
+The transport batch derives work from original local message and sender-intent
+rows. It scans a bounded keyset page before filtering typed custody, rechecks
+the original receipt and authenticated route after I/O, and leaves disconnected
+or unsupported peers pending for another pass. An original send whose receipt
+is still unconfirmed remains with its existing send owner; the reader never
+guesses a canonical message id. Reads create no run, send intent, delivered bit
+or local completion ledger. Private sender mappings remain local.
+
+This slice exposes the batch to its caller. The subsequent destination sender
+owns connecting it to the federation supervisor, constructing Engram requests
+and handling admission receipts; there is no production consumer that discards
+the batch. The existing custody columns and closed stored shapes are unchanged,
+so this read operation adds no store migration or reader floor.
+
 ### Custody storage upgrade and rollback
 
 The MAIN predecessor ending in `-direct-prompt-1-direct-prompt-delivery-1`

@@ -7,6 +7,9 @@ use super::*;
 #[path = "test_run_causal_request.rs"]
 mod causal_request;
 
+#[path = "test_run_causal_completion_fixture.rs"]
+pub(in crate::tests) mod causal_completion_fixture;
+
 // Shared real native registration/provider fixture for authenticated
 // completion-consumer tests. Telemetry is synthetic; it grants no credit.
 pub(in crate::tests) fn native_completion_producer_fixture(
