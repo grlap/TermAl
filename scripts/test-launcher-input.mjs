@@ -26,6 +26,23 @@ export function sourceBinaryPath(env = process.env) {
 }
 
 const SOURCE_JSON_BYTES = 1024 * 1024;
+const SOURCE_WARNING_BYTES = 256 * 1024;
+const sourceSlowWarningLine = /^warning: (?:source observation|local Git query) is still running after 10 seconds; attempt=[0-9]+\/[0-9]+; elapsed_ms=[0-9]+\r?$/u;
+
+function sourceWarningDiagnostic(stderr, status) {
+  if (stderr == null || stderr.length === 0) return "";
+  if (status !== 0 || !Buffer.isBuffer(stderr) || stderr.length > SOURCE_WARNING_BYTES) return null;
+  let text;
+  try { text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(stderr); }
+  catch { return null; }
+  if (!text.endsWith("\n")) return null;
+  for (const line of text.slice(0, -1).split("\n")) {
+    // Require the whole line, including any trailing control character.
+    if (sourceSlowWarningLine.exec(line)?.[0] !== line) return null;
+  }
+  return text;
+}
+
 // The host reads each ordinary run artifact under this existing byte cap.
 // Count the exact UTF-8 wire image, including the writer's final newline.
 export const RUN_RECORD_JSON_BYTES = 1024 * 1024;
@@ -221,9 +238,11 @@ export async function captureCommitInputStatus(startDirectory = process.cwd(), s
       throw unavailable(result.error?.message ?? `owner exited ${result.status ?? "without a status"}${result.signal ? ` (${result.signal})` : ""}`);
     }
     const output = result.stdout;
-    if (!Buffer.isBuffer(output) || output.length > SOURCE_JSON_BYTES + 1 || result.stderr?.length) {
-      throw unavailable("owner output exceeded its bound or carried process stderr");
+    if (!Buffer.isBuffer(output) || output.length > SOURCE_JSON_BYTES + 1) {
+      throw unavailable("owner output exceeded its bound");
     }
+    const diagnostic = sourceWarningDiagnostic(result.stderr, result.status);
+    if (diagnostic === null) throw unavailable("owner carried unsupported or oversized process stderr");
     let observation;
     try {
       const json = new TextDecoder("utf-8", { fatal: true }).decode(output);
@@ -268,6 +287,7 @@ export async function captureCommitInputStatus(startDirectory = process.cwd(), s
     try {
       if (realpathSync.native(observation.root) !== realpathSync.native(root)) throw new Error("root mismatch");
     } catch { throw unavailable("owner canonical root differs from the requested root or cannot be resolved"); }
+    if (diagnostic) console.error(diagnostic.slice(0, -1));
     return { root: observation.root, commit: observation.source.slice("git-commit:".length), tree: observation.tree,
       status: observation.status, entries: observation.entries, sourceId };
   } finally { clearTimeout(warning); }
