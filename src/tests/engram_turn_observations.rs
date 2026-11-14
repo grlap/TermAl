@@ -13,6 +13,12 @@ mod source_root_naming;
 #[path = "engram_named_root_turn_sighting.rs"]
 mod named_root_turn_sighting;
 
+#[path = "engram_unclaimed_closing_scope.rs"]
+mod unclaimed_closing_scope;
+
+#[path = "engram_closing_binding_recovery.rs"]
+mod closing_binding_recovery;
+
 fn owner_source_of(turn: &EOCheckedTurn, root: &FsPath) -> Value {
     serde_json::to_value(turn.sources.get(root)).unwrap()
 }

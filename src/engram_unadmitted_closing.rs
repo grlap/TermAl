@@ -79,6 +79,18 @@ impl AppState {
                 // not a transport failure or a retry/removal obligation.
                 return Ok(EngramRuntimeClosingOutcome::Unclaimed);
             };
+            // A canonical read at retry time proves a current claim, not
+            // ownership of this closed turn. Recover only an association
+            // already retained at its opening; an unclaimed trace cannot
+            // acquire a later claim, even without a successor turn.
+            if job.trace.opening_root.as_ref().is_none_or(|opening| {
+                opening.store != store || opening.binding != binding
+            }) {
+                return Err(runtime_observation_scope_changed(
+                    &job.scope,
+                    "the closed turn retained no matching claim association",
+                ));
+            }
             if target
                 .work_binding
                 .as_ref()
