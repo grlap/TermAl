@@ -4,6 +4,7 @@
 // its prospective successor refresh follows installation of the old report.
 
 include!("engram_unadmitted_focus.rs");
+include!("engram_adopted_predecessor.rs");
 
 /// The test build's diagnostic line for one closing-capture attempt: the
 /// attempt number, the capture budget, the time its source measurement took,
@@ -34,6 +35,12 @@ impl AppState {
         session_id: &str,
         job: &EngramRuntimeClosingJob,
     ) -> Result<EngramRuntimeClosingOutcome, EngramTransportError> {
+        if job.trace.source_attribution_uncertain
+            && job.scope.historical_fields.get("adopted_successor_reason").and_then(Value::as_str)
+                == Some(ENGRAM_ADOPTED_PREDECESSOR_REASON)
+        {
+            return self.capture_adopted_predecessor_unadmitted(session_id, job);
+        }
         let target = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if inner.find_session_index(session_id).is_some_and(|index| {
@@ -41,7 +48,7 @@ impl AppState {
             }) {
                 return Ok(EngramRuntimeClosingOutcome::BindingRecoveryPending);
             }
-            job.scope.require_current(&inner, session_id)?;
+            job.require_current_for_capture(&inner, session_id)?;
             Self::engram_source_root_target_locked(&inner, session_id)
                 .map_err(EngramTransportError::local_state)?
         };
@@ -102,7 +109,7 @@ impl AppState {
                 ));
             }
             let inner = self.inner.lock().expect("state mutex poisoned");
-            job.scope.require_current(&inner, session_id)?;
+            job.require_current_for_capture(&inner, session_id)?;
             let mut scope =
                 EngramRuntimeClosingScope::capture_with_binding(&inner, session_id, Some(&binding))
                     .map_err(EngramTransportError::local_state)?;
@@ -248,11 +255,7 @@ impl AppState {
                 || !target
                     .source_root_read_fence
                     .same_store(&inner, &target.project_id)
-                || record
-                    .engram
-                    .work_binding
-                    .as_ref()
-                    .is_some_and(|current| current != &binding)
+                || !job.capture_binding_is_current(&inner, session_id, &binding)
             {
                 return Err(EngramTransportError::local_state(
                     "runtime closing basis changed during its read",
@@ -367,15 +370,12 @@ impl AppState {
             }) {
                 return Ok(EngramRuntimeClosingOutcome::BindingRecoveryPending);
             }
-            job.scope.require_current(&inner, session_id)?;
+            job.require_current_for_capture(&inner, session_id)?;
             let current = Self::engram_source_root_target_locked(&inner, session_id)
                 .map_err(EngramTransportError::local_state)?;
             if current.as_ref().is_none_or(|current| {
                 current.connection != target.connection
-                    || current
-                        .work_binding
-                        .as_ref()
-                        .is_some_and(|current| current != &binding)
+                    || !job.capture_binding_is_current(&inner, session_id, &binding)
             }) || !target
                 .source_root_read_fence
                 .same_store(&inner, &target.project_id)

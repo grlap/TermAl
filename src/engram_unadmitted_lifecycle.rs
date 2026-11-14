@@ -49,6 +49,7 @@ fn start_ordinary_runtime_observation(inner: &mut StateInner, index: usize) {
         return;
     }
     let opening_root = runtime_observation_opening_root(inner, &session_id);
+    let opening_scope = EngramRuntimeClosingScope::capture(inner, &session_id).ok();
     let record = &mut inner.sessions[index];
     // A repeated start cannot replace the same trace, and an unfinished
     // predecessor remains owned by its terminal/recovery path rather than
@@ -65,6 +66,7 @@ fn start_ordinary_runtime_observation(inner: &mut StateInner, index: usize) {
         prompt.prompt_id.clone(), record.active_turn_generation,
     ));
     record.engram.unadmitted_active_turn.as_mut().expect("installed trace").opening_root = opening_root;
+    record.engram.unadmitted_active_turn.as_mut().expect("installed trace").opening_scope = opening_scope;
     if record.claude_outstanding.any() {
         mark_runtime_observation_source_uncertain(record);
     }

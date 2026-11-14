@@ -79,7 +79,8 @@ struct StartedQueuedTurn {
 fn ordinary_queue_dispatch_is_held(
     inner: &StateInner, record: &SessionRecord, allow_blocked_dispatch: bool,
 ) -> bool {
-    session_resource_reset_in_progress(inner, record)
+    engram_named_selection_capture_pending(record)
+        || session_resource_reset_in_progress(inner, record)
         || record.engram.observation_delete_requested
         || record.runtime_stop_in_progress
         || matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
@@ -269,7 +270,8 @@ impl AppState {
         allow_blocked_dispatch: bool,
     ) -> Result<Option<StartedTurn>> {
         let record = &inner.sessions[index];
-        if session_resource_reset_in_progress(inner, record)
+        if engram_named_selection_capture_pending(record)
+            || session_resource_reset_in_progress(inner, record)
             || record.engram.observation_delete_requested
             || record.runtime_stop_in_progress
             || matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
@@ -1301,7 +1303,8 @@ impl AppState {
         // A head held for its durability acknowledgement keeps the queue,
         // and the prompt just committed behind it, queued; the
         // acknowledgement dispatches them (queued_prompt_durability.rs).
-        if queued_head_held_for_durability(&inner.sessions[index]) {
+        if engram_named_selection_capture_pending(&inner.sessions[index])
+            || queued_head_held_for_durability(&inner.sessions[index]) {
             return Ok(None);
         }
         let Some(position) = ordinary_queue_position(&inner.sessions[index]) else { return Ok(None); };
@@ -1326,7 +1329,10 @@ impl AppState {
         };
         let session_id = inner.sessions[index].session.id.clone();
         match self.commit_followup_prompt_locked_for_session(inner, followup, prompt_id, false, Some(&session_id)) {
-            Ok(revision) => Ok(Some((revision, started))),
+            Ok(revision) => {
+                finish_engram_named_root_selection_locked(inner, index);
+                Ok(Some((revision, started)))
+            }
             Err(error) => {
                 // A live follow-up admission has its own failure owner. For
                 // ordinary dispatch restore first, so the typed settlement
@@ -1513,6 +1519,7 @@ impl AppState {
                 ));
             }
         };
+        finish_engram_named_root_selection_locked(&mut inner, index);
         let StartedTurn {
             dispatch,
             message_delta,
@@ -1739,7 +1746,7 @@ impl AppState {
                 prompt = rendered_prompt;
             }
         }
-        let session_is_busy = matches!(
+        let session_is_busy = engram_named_selection_capture_pending(&inner.sessions[index]) || matches!(
             inner.sessions[index].session.status,
             SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
         ) || inner.sessions[index].runtime_stop_in_progress
@@ -1992,7 +1999,7 @@ impl AppState {
                 session_is_acceptance_evaluator_child_locked(&inner, session_id);
             let read_only_git = session_is_read_only_delegation_child_locked(&inner, session_id);
             let project_environment = project_environment_for_session_locked(&inner, session_id);
-            let started = self.start_turn_on_record_with_environment(
+            let mut started = self.start_turn_on_record_with_environment(
                 inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid"),
@@ -2007,11 +2014,13 @@ impl AppState {
                 read_only_git,
             )?;
             EngramHost::turn_started(&mut inner, index);
+            started.message_delta.session_mutation_stamp = inner.sessions[index].mutation_stamp;
             let revision = self
                 .commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, false, Some(session_id))
                 .map_err(|err| {
                     ApiError::internal(format!("failed to persist session state: {err:#}"))
                 })?;
+            finish_engram_named_root_selection_locked(&mut inner, index);
             self.publish_started_turn_message_delta(&inner, revision, started.message_delta);
             drop(inner);
             return Ok(DispatchTurnResult::Dispatched(started.dispatch));
@@ -2072,7 +2081,7 @@ impl AppState {
             session_is_acceptance_evaluator_child_locked(&inner, session_id);
         let read_only_git = session_is_read_only_delegation_child_locked(&inner, session_id);
         let project_environment = project_environment_for_session_locked(&inner, session_id);
-        let started = self.start_turn_on_record_with_environment(
+        let mut started = self.start_turn_on_record_with_environment(
             inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid"),
@@ -2087,11 +2096,13 @@ impl AppState {
             read_only_git,
         )?;
         EngramHost::turn_started(&mut inner, index);
+        started.message_delta.session_mutation_stamp = inner.sessions[index].mutation_stamp;
         let revision = self
             .commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, false, Some(session_id))
             .map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
             })?;
+        finish_engram_named_root_selection_locked(&mut inner, index);
         self.publish_started_turn_message_delta(&inner, revision, started.message_delta);
         drop(inner);
         return Ok(DispatchTurnResult::Dispatched(started.dispatch));

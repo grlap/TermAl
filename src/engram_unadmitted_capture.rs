@@ -46,6 +46,9 @@ struct EngramRuntimeObservedTurn {
     opening_root: Option<EngramRuntimeOpeningRoot>,
     #[serde(skip)]
     opening_prepared: bool,
+    // Process-local opening image; closing jobs persist it in their existing scope.
+    #[serde(skip)]
+    opening_scope: Option<EngramRuntimeClosingScope>,
 }
 
 // Equality covers every retained observation fact, not process-local
@@ -91,6 +94,7 @@ impl EngramRuntimeObservedTurn {
             source_attribution_uncertain: false,
             opening_root: None,
             opening_prepared: false,
+            opening_scope: None,
         }
     }
 
@@ -385,6 +389,7 @@ impl EngramRuntimeClosingJob {
         baseline: Option<EngramRuntimeCheckpointBasis>,
         scope: EngramRuntimeClosingScope,
     ) -> Self {
+        let scope = trace.opening_scope.clone().unwrap_or(scope);
         Self {
             trace,
             baseline,
@@ -664,7 +669,14 @@ fn prepare_runtime_observations(
     let checks = trace
         .commands
         .iter()
-        .map(|entry| entry.check.clone())
+        .map(|entry| {
+            let mut check = entry.check.clone();
+            if trace.source_attribution_uncertain {
+                check.source_basis = None;
+                check.host_evidence_ref = None;
+            }
+            check
+        })
         .collect::<Vec<_>>();
     let inline = checks.len().min(ENGRAM_OBSERVATION_MAX_CHECKS);
     let mut first = engram_unadmitted_turn_request(
