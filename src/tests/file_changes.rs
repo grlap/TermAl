@@ -180,6 +180,198 @@ fn file_change_capture_event(
     }
 }
 
+fn named_root_completion_fixture() -> (Arc<AppState>, String, String) {
+    let (state, owner, _) = file_change_capture_fixture();
+    let root = state.test_temp_root.as_ref().unwrap().path().to_path_buf();
+    init_git_document_test_repo(&root);
+    fs::write(root.join("fixture.txt"), "fixture\n").unwrap();
+    run_git_test_command_output(&root, &["add", "--", "fixture.txt"]);
+    run_git_test_command_output(&root, &["commit", "--no-gpg-sign", "-m", "fixture"]);
+    let named_root = root.join("sibling-root");
+    run_git_test_command_output(
+        &root,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            named_root.to_str().unwrap(),
+            "HEAD",
+        ],
+    );
+    let workdir = root.join("session-dir");
+    fs::create_dir(&workdir).unwrap();
+    let path = named_root.join("generated.rs");
+    fs::write(&path, "fn generated() {}\n").unwrap();
+    assert!(!path.starts_with(&workdir));
+    let (handle, _receiver) = test_codex_runtime_handle("file-change-completion");
+    let mut inner = state.inner.lock().unwrap();
+    let record = &mut inner.sessions[0];
+    record.runtime = SessionRuntime::Codex(handle);
+    record.session.workdir = workdir.to_string_lossy().into_owned();
+    record.session.status = SessionStatus::Active;
+    record.engram.observed_source_root_mut().unwrap().root =
+        named_root.to_string_lossy().into_owned();
+    drop(inner);
+    (state, owner, path.to_string_lossy().into_owned())
+}
+
+fn complete_named_root_turn(state: &AppState, owner: &str) {
+    let (token, turn_ref) = {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[0];
+        (
+            record.runtime.runtime_token().unwrap(),
+            record.engram.observed_turn_ref().unwrap().to_owned(),
+        )
+    };
+    // Run the real terminal path, which consumes the observation trace before
+    // completing file tracking. No Engram connection is needed for attribution.
+    state
+        .finish_turn_ok_if_runtime_and_generation_match(owner, &token, 1)
+        .unwrap();
+    let mut inner = state.inner.lock().unwrap();
+    let record = &mut inner.sessions[0];
+    assert!(record.engram.unadmitted_active_turn.is_none());
+    assert_eq!(
+        record.engram.runtime_closed_turn_ref.as_deref(),
+        Some(turn_ref.as_str())
+    );
+    assert_eq!(record.session.status, SessionStatus::Idle);
+    assert!(record.active_turn_start_message_count.is_none());
+    assert!(record.active_turn_file_change_grace_deadline.is_some());
+    // Start eligibility at the completion boundary without depending on how
+    // long persistence or queue reconciliation took on the test host.
+    record.active_turn_file_change_grace_deadline =
+        Some(std::time::Instant::now() + ACTIVE_TURN_FILE_CHANGE_GRACE);
+}
+
+fn assert_named_root_late_summary(state: &AppState, path: &str) {
+    let inner = state.inner.lock().unwrap();
+    let record = &inner.sessions[0];
+    let summaries = record
+        .session
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::FileChanges { files, .. } => Some(files),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        summaries.len(),
+        1,
+        "the completed turn retains its file summary"
+    );
+    assert_eq!(summaries[0].len(), 1);
+    assert_eq!(summaries[0][0].path, path);
+    assert_eq!(summaries[0][0].kind, WorkspaceFileChangeKind::Created);
+    assert!(!record.session.messages.iter().any(|message|
+        matches!(message, Message::Markdown { title, .. } if title == "Unresolved file changes")));
+    assert!(record.active_turn_file_changes.is_empty());
+}
+
+#[test]
+fn named_root_late_event_survives_actual_observation_close() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (state, owner, path) = named_root_completion_fixture();
+    complete_named_root_turn(&state, &owner);
+    state.record_active_turn_file_changes(&[file_change_capture_event(
+        &owner,
+        &path,
+        WorkspaceFileChangeKind::Created,
+    )]);
+    assert_named_root_late_summary(&state, &path);
+}
+
+#[test]
+fn named_root_capture_applied_after_actual_observation_close_stays_resolved() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (state, owner, path) = named_root_completion_fixture();
+    let capture = block_file_change_capture(
+        &state,
+        vec![file_change_capture_event(
+            &owner,
+            &path,
+            WorkspaceFileChangeKind::Created,
+        )],
+    );
+    complete_named_root_turn(&state, &owner);
+    assert_eq!(capture.finish(), 0);
+    assert_named_root_late_summary(&state, &path);
+}
+
+#[test]
+fn named_root_completion_keeps_pre_close_scope_change_fences() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    for change in ["claim", "store", "seal", "naming"] {
+        let (state, owner, path) = named_root_completion_fixture();
+        let capture = block_file_change_capture(
+            &state,
+            vec![file_change_capture_event(
+                &owner,
+                &path,
+                WorkspaceFileChangeKind::Created,
+            )],
+        );
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let record = &mut inner.sessions[0];
+            match change {
+                "claim" => {
+                    record.engram.observed_source_root_mut().unwrap().claim_id =
+                        "replacement-claim".to_owned()
+                }
+                "store" => {
+                    record
+                        .engram
+                        .observed_source_root_mut()
+                        .unwrap()
+                        .common_dir_key = "replacement-store".to_owned()
+                }
+                "seal" => {
+                    record
+                        .engram
+                        .observed_source_root_mut()
+                        .unwrap()
+                        .sealed_revision = Some("sealed".to_owned())
+                }
+                "naming" => {
+                    record
+                        .engram
+                        .unadmitted_active_turn
+                        .as_mut()
+                        .unwrap()
+                        .opening_root
+                        .as_mut()
+                        .unwrap()
+                        .store
+                        .project_id = "replacement-project".to_owned()
+                }
+                _ => unreachable!(),
+            }
+        }
+        complete_named_root_turn(&state, &owner);
+        assert_eq!(capture.finish(), 0);
+        let inner = state.inner.lock().unwrap();
+        let messages = &inner.sessions[0].session.messages;
+        assert!(
+            !messages
+                .iter()
+                .any(|message| matches!(message, Message::FileChanges { .. })),
+            "{change}"
+        );
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|message| matches!(message,
+            Message::Markdown { title, .. } if title == "Unresolved file changes"))
+                .count(),
+            1,
+            "{change}"
+        );
+    }
+}
+
 #[test]
 fn global_file_changes_summary_covers_distinct_workdir_and_named_root() {
     let (state, owner, _) = file_change_capture_fixture();

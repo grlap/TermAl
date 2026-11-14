@@ -16,9 +16,60 @@ struct FileChangeTrackingLifetime {
 #[derive(Default)]
 struct FileChangeTrackingPublication {
     completed: bool,
+    // The observation close consumes the live trace before file tracking
+    // completes. Keep its scope for in-flight captures and debounced events.
+    closed_scope: Option<FileChangeTrackingScope>,
     late_summary_id: Option<String>,
     observed_changes: usize,
     bounded: bool,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct FileChangeTrackingScope {
+    naming: Option<(EngramAuthorityStoreKey, String)>,
+    source_root: Option<EngramTurnSourceRoot>,
+}
+
+impl FileChangeTrackingScope {
+    fn from_record(record: &SessionRecord) -> Self {
+        Self {
+            naming: record.engram.observed_naming_identity(),
+            source_root: record.engram.observed_source_root().cloned(),
+        }
+    }
+
+    fn for_tracking(record: &SessionRecord) -> Self {
+        // A live trace still owns the scope: changes to its claim, store or
+        // seal must invalidate an older capture. Fall back only after close.
+        if record.engram.unadmitted_active_turn.is_none()
+            && let Some(scope) = record.file_change_tracking.as_ref().and_then(|tracking| {
+                tracking
+                    .publication
+                    .lock()
+                    .expect("file tracking mutex poisoned")
+                    .closed_scope
+                    .clone()
+            })
+        {
+            return scope;
+        }
+        Self::from_record(record)
+    }
+}
+
+fn freeze_active_turn_file_change_scope(record: &mut SessionRecord) {
+    if record.file_change_tracking.is_none() && record.active_turn_start_message_count.is_none() {
+        return;
+    }
+    let scope = FileChangeTrackingScope::from_record(record);
+    let tracking = record
+        .file_change_tracking
+        .get_or_insert_with(|| Arc::new(FileChangeTrackingLifetime::new(None)));
+    tracking
+        .publication
+        .lock()
+        .expect("file tracking mutex poisoned")
+        .closed_scope = Some(scope);
 }
 
 impl FileChangeTrackingLifetime {
@@ -51,6 +102,7 @@ struct FileChangeOwnerCapture {
 
 impl FileChangeOwnerCapture {
     fn from_record(record: &mut SessionRecord, captured_at: std::time::Instant) -> Self {
+        let scope = FileChangeTrackingScope::for_tracking(record);
         let tracking = record.file_change_tracking.get_or_insert_with(|| {
             // Older/manual tracking setups have no prompt anchor. They still
             // acquire a non-reused process-local lifetime on first capture.
@@ -69,13 +121,14 @@ impl FileChangeOwnerCapture {
             reset_required: record.runtime_reset_required,
             paused: record.orchestrator_auto_dispatch_blocked,
             workdir: record.session.workdir.clone(),
-            naming: record.engram.observed_naming_identity(),
-            source_root: record.engram.observed_source_root().cloned(),
+            naming: scope.naming,
+            source_root: scope.source_root,
             delete_requested: record.engram.observation_delete_requested,
         }
     }
 
     fn still_owns(&self, record: &SessionRecord) -> bool {
+        let scope = FileChangeTrackingScope::for_tracking(record);
         let completed = self
             .tracking
             .publication
@@ -93,8 +146,8 @@ impl FileChangeOwnerCapture {
             && record.runtime_stop_in_progress == self.stop_in_progress
             && record.runtime_reset_required == self.reset_required
             && record.orchestrator_auto_dispatch_blocked == self.paused
-            && record.engram.observed_naming_identity() == self.naming
-            && record.engram.observed_source_root() == self.source_root.as_ref()
+            && scope.naming == self.naming
+            && scope.source_root == self.source_root
             && record.engram.observation_delete_requested == self.delete_requested
             && (record.runtime.runtime_token() == self.runtime
                 || (completed && record.runtime.runtime_token().is_none()))

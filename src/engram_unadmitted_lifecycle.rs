@@ -265,8 +265,9 @@ impl AppState {
             push_message_on_record(&mut inner.sessions[index], message);
             return;
         }
-        trace.observed_outcome = Some(outcome);
         let session_id = record.session.id.clone();
+        freeze_active_turn_file_change_scope(&mut inner.sessions[index]);
+        trace.observed_outcome = Some(outcome);
         // Consume both endpoints. An evaluation-request measurement can
         // compare only its own turn's first close, never bridge later gaps.
         // Only a later recorded closing sighting supplies a successor's
