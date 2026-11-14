@@ -330,6 +330,10 @@ struct MailboxRelayRequest {
     deny_unknown_fields
 )]
 enum MailboxRelayOperation {
+    /// Original typed request only; no observer adoption or verification credit.
+    ReadCausalTestCompletion {
+        selector: CausalTestCompletionSelector,
+    },
     /// Native observed completion only; no remote verification admission.
     ObserveTestRun {
         actor: MailboxRelayPrincipal,

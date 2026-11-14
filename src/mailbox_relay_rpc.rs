@@ -121,7 +121,10 @@ impl AppState {
         self.native_mailbox_relay_home_checked(true)
     }
 
-    fn native_mailbox_relay_home_checked(&self, record_refusal: bool) -> Result<MailboxRelayHome, ApiError> {
+    fn native_mailbox_relay_home_checked(
+        &self,
+        record_refusal: bool,
+    ) -> Result<MailboxRelayHome, ApiError> {
         let store_id = {
             let connection = self.mailbox_store.connection().map_err(mailbox_api_error)?;
             mailbox_relay_store_id(&connection).map_err(mailbox_api_error)?
@@ -188,11 +191,20 @@ impl AppState {
         authenticated_origin: &FederationHostIdentity,
     ) -> Result<Value, ApiError> {
         let value = match operation {
-            MailboxRelayOperation::ObserveTestRun { actor, project_scope, run_id } => {
-                serde_json::to_value(self.read_remote_test_run_origin(
-                    &actor, &project_scope, &run_id, lease, authenticated_origin,
-                )?)
-            }
+            MailboxRelayOperation::ReadCausalTestCompletion { selector } => serde_json::to_value(
+                self.read_causal_test_completion(&selector, lease, authenticated_origin)?,
+            ),
+            MailboxRelayOperation::ObserveTestRun {
+                actor,
+                project_scope,
+                run_id,
+            } => serde_json::to_value(self.read_remote_test_run_origin(
+                &actor,
+                &project_scope,
+                &run_id,
+                lease,
+                authenticated_origin,
+            )?),
             MailboxRelayOperation::Describe { native_session_id } => {
                 let descriptor = self.native_mailbox_relay_descriptor(&native_session_id)?;
                 let authority = MailboxRelayAuthority {
@@ -214,15 +226,26 @@ impl AppState {
                 )?;
                 let receipt = self
                     .mailbox_store
-                    .append_mailbox_relay(&append, &lease.with_current(self, |_, peer|Ok(peer.clone()))?,
-                        || authority.lock(), |guard| {
-                        let peer = federation_snapshot_locked(&guard._inner, &lease.channel.snapshot.peer.host_id)
+                    .append_mailbox_relay(
+                        &append,
+                        &lease.with_current(self, |_, peer| Ok(peer.clone()))?,
+                        || authority.lock(),
+                        |guard| {
+                            let peer = federation_snapshot_locked(
+                                &guard._inner,
+                                &lease.channel.snapshot.peer.host_id,
+                            )
                             .map_err(|error| relay_store_error(&error.message))?;
-                        federation_participation_qualified(&guard._inner.federation,
-                            &guard._inner.preferences.federation, &peer, &lease.incarnation)
+                            federation_participation_qualified(
+                                &guard._inner.federation,
+                                &guard._inner.preferences.federation,
+                                &peer,
+                                &lease.incarnation,
+                            )
                             .map_err(|error| relay_store_error(&error.message))?;
-                        Ok(())
-                    })
+                            Ok(())
+                        },
+                    )
                     .map_err(mailbox_api_error)?;
                 self.federation_executor_wake_signal.kick();
                 serde_json::to_value(receipt)
@@ -303,7 +326,8 @@ impl AppState {
                     .map_err(mailbox_api_error)?
                     .ok_or_else(|| ApiError::not_found("native mailbox association not found"))?;
                 conversation.require_home(&home)?;
-                self.mailbox_store.attach_mailbox_relay_home_progress(&mut message)
+                self.mailbox_store
+                    .attach_mailbox_relay_home_progress(&mut message)
                     .map_err(mailbox_api_error)?;
                 let authority =
                     self.mailbox_relay_home_authority(lease, &home, std::slice::from_ref(&actor))?;
@@ -379,10 +403,21 @@ impl AppState {
                 let queued = self.queue_native_mailbox_relay_wake(&wake, Some(lease))?;
                 serde_json::to_value(queued)
             }
-            MailboxRelayOperation::InspectWake { actor, conversation, target, mailbox_id, sequence } => {
+            MailboxRelayOperation::InspectWake {
+                actor,
+                conversation,
+                target,
+                mailbox_id,
+                sequence,
+            } => {
                 actor.require_origin(authenticated_origin)?;
                 serde_json::to_value(self.observe_native_mailbox_relay_target(
-                    &actor, &conversation, &target, &mailbox_id, sequence, Some(lease),
+                    &actor,
+                    &conversation,
+                    &target,
+                    &mailbox_id,
+                    sequence,
+                    Some(lease),
                 )?)
             }
         };

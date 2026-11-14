@@ -306,36 +306,9 @@ impl AppState {
         let Some(expected) = expected else {
             return Ok(pending());
         };
-        // One selected-field SQLite snapshot proves the same original native
-        // observation and registration. Raw launcher JSON is never a producer.
-        let mut connection = open_sqlite_state_read_connection(self.persistence_path.as_path())
-            .map_err(|_| ApiError::internal("native completion persistence is unavailable"))?;
-        let transaction = connection
-            .transaction()
-            .map_err(|_| ApiError::internal("native completion snapshot is unavailable"))?;
-        let metadata = read_metadata_for_fence(
-            &transaction,
-            &[
-                "testRunRegistrations",
-                "testRunCompacted",
-                "testRunObservations",
-            ],
-        )
-        .map_err(|_| ApiError::internal("native completion read-back failed"))?;
-        let Some(metadata) = metadata else {
+        let Some(durable) = self.read_durable_native_test_run(&expected)? else {
             return Ok(pending());
         };
-        let compacted = metadata
-            .test_run_compacted
-            .get(run)
-            .filter(|row| row.compacted && row.summary.run_id == run);
-        let stored = metadata
-            .test_run_registrations
-            .get(run)
-            .or_else(|| compacted.and_then(|row| row.registration.as_ref()));
-        if stored != Some(&expected) {
-            return Ok(pending());
-        }
         let mut origin = expected
             .native_origin
             .clone()
@@ -354,39 +327,7 @@ impl AppState {
             locator_identity: locator,
             started_at: expected.started_at.clone(),
         };
-        let completion = expected
-            .native_completion
-            .as_ref()
-            .filter(|retained| {
-                metadata
-                    .test_run_observations
-                    .get(&retained.execution_id)
-                    .or_else(|| {
-                        compacted
-                            .filter(|row| row.registration.as_ref() == Some(&expected))
-                            .and_then(|row| {
-                                // Retirement moves original executions into this same
-                                // durable survivor. Never search another run's history.
-                                let mut exact = row
-                                    .observations
-                                    .iter()
-                                    .filter(|row| row.execution_id == retained.execution_id);
-                                exact.next().filter(|_| exact.next().is_none())
-                            })
-                    })
-                    .is_some_and(|row| {
-                        row.runtime_identity.is_some()
-                            && row.summary.ended_at.is_some()
-                            && row.summary.owner_session_id.as_deref()
-                                == Some(expected.owning_session_id.as_str())
-                            && row.artifact.as_ref().is_some_and(|artifact| {
-                                artifact.run_id == run
-                                    && artifact.request_identity.as_deref()
-                                        == Some(expected.request_identity.as_str())
-                            })
-                    })
-            })
-            .map(|retained| retained.completion.clone());
+        let completion = durable.completion;
         lease.with_current(self, |inner, peer| {
             if peer.local != identity.origin.host
                 || !mailbox_relay_peer_current_locked(inner, peer, peer.enrollment_generation)
