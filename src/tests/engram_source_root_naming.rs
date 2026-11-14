@@ -91,6 +91,9 @@ mod unknown_fields;
 #[path = "engram_source_root_off_rebind.rs"]
 mod off_rebind;
 
+#[path = "engram_source_root_binding.rs"]
+mod binding;
+
 #[path = "engram_named_root_stale_fence.rs"]
 mod stale_fence;
 
@@ -5720,7 +5723,7 @@ fn recognised_tests_name_the_bound_claim_and_the_other_live_named_claim() {
             )
             .expect("second root named");
         request_naming(&claimed, &label, Some(&first), vec![held.clone()])
-            .expect("explicitly select the first claim through the current naming owner");
+            .expect("confirm the focused claim without changing its association");
         if case == "expired" {
             held.items.pop();
             claimed.transport.replace_held_claims([Ok(held)]);
@@ -5900,7 +5903,7 @@ fn focusing_another_named_claim_selects_its_next_ordinary_opening_and_check_fact
         )
         .expect("second root named");
     request_naming(&claimed, label, Some(&first), vec![held.clone()])
-        .expect("explicitly select the first claim before its ordinary opening");
+        .expect("confirm the focused claim before its ordinary opening");
     claimed.begin("The first ordinary claim owns this opening.");
     claimed.record(|record| assert_eq!(record.engram.work_binding, Some(first_binding.clone())));
     claimed.record(|record| {
@@ -6197,8 +6200,8 @@ fn ordinary_other_root_notice_fixture(
         .unwrap();
     assert_eq!(
         claimed.record(|record| record.engram.work_binding.clone()),
-        Some(other.clone()),
-        "explicit naming selects the requested held association"
+        Some(current.clone()),
+        "naming another held claim does not select it for this session"
     );
     claimed
         .state
@@ -6213,7 +6216,7 @@ fn ordinary_other_root_notice_fixture(
     assert_eq!(
         claimed.record(|record| record.engram.work_binding.clone()),
         Some(current),
-        "explicitly naming the own claim restores this fixture's measured association"
+        "naming the focused claim keeps this fixture's measured association"
     );
     (claimed, worktree, other)
 }
