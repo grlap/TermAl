@@ -46,6 +46,9 @@ struct EngramRuntimeObservedTurn {
     opening_root: Option<EngramRuntimeOpeningRoot>,
     #[serde(skip)]
     opening_prepared: bool,
+    // Process-local opening image; closing jobs persist it in their existing scope.
+    #[serde(skip)]
+    opening_scope: Option<EngramRuntimeClosingScope>,
 }
 
 // Equality covers every retained observation fact, not process-local
@@ -91,6 +94,7 @@ impl EngramRuntimeObservedTurn {
             source_attribution_uncertain: false,
             opening_root: None,
             opening_prepared: false,
+            opening_scope: None,
         }
     }
 

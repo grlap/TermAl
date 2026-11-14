@@ -264,7 +264,18 @@ impl AppState {
             return Ok(None);
         }
         let observations_enabled = ordinary_runtime_observation_enabled(&inner, session_id);
+        let record = &inner.sessions[index];
+        let adopting = cause != ClaudeUnownedCause::Unassigned
+            && record.runtime_projection_allowed()
+            && !record.runtime_stop_in_progress
+            && matches!(record.session.status, SessionStatus::Idle | SessionStatus::Error);
+        if adopting {
+            let generation = record.active_turn_generation.wrapping_add(1).max(1);
+            mark_engram_adopted_naming_predecessor_locked(&mut inner, index);
+            apply_engram_named_root_selection_locked(&mut inner, index, generation);
+        }
         let opening_root = observations_enabled.then(|| runtime_observation_opening_root(&inner, session_id)).flatten();
+        let opening_scope = observations_enabled.then(|| EngramRuntimeClosingScope::capture(&inner, session_id).ok()).flatten();
         let message_id = inner.next_message_id();
         let (
             adopted_generation,
@@ -311,6 +322,10 @@ impl AppState {
                 record.adopted_claude_turn_generation = Some(generation);
                 if observations_enabled {
                     adopt_runtime_observation(record, &message_id, generation, opening_root);
+                    if let Some(trace) = record.engram.unadmitted_active_turn.as_mut()
+                        .filter(|trace| trace.generation == generation) {
+                        trace.opening_scope = opening_scope;
+                    }
                 }
             }
             record.unmediated_claude_turn = Some(UnmediatedClaudeTurn {
@@ -351,6 +366,7 @@ impl AppState {
             EngramHost::turn_running_beside(&mut inner, index);
         }
         let revision = self.commit_persisted_delta_locked(&mut inner)?;
+        finish_engram_named_root_selection_locked(&mut inner, index);
         self.publish_delta_locked(
             &inner,
             DeltaEvent::MessageCreated {

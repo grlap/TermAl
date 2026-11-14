@@ -49,6 +49,7 @@ fn start_ordinary_runtime_observation(inner: &mut StateInner, index: usize) {
         return;
     }
     let opening_root = runtime_observation_opening_root(inner, &session_id);
+    let opening_scope = EngramRuntimeClosingScope::capture(inner, &session_id).ok();
     let record = &mut inner.sessions[index];
     // A repeated start cannot replace the same trace, and an unfinished
     // predecessor remains owned by its terminal/recovery path rather than
@@ -65,6 +66,7 @@ fn start_ordinary_runtime_observation(inner: &mut StateInner, index: usize) {
         prompt.prompt_id.clone(), record.active_turn_generation,
     ));
     record.engram.unadmitted_active_turn.as_mut().expect("installed trace").opening_root = opening_root;
+    record.engram.unadmitted_active_turn.as_mut().expect("installed trace").opening_scope = opening_scope;
     if record.claude_outstanding.any() {
         mark_runtime_observation_source_uncertain(record);
     }
@@ -273,7 +275,33 @@ impl AppState {
         // ordinary checkpoint; an existing ordinary comparison keeps priority.
         let baseline = inner.sessions[index].engram.runtime_checkpoint.take();
         let evaluation = inner.sessions[index].engram.evaluation_checkpoint.take();
-        let scope = EngramRuntimeClosingScope::capture(inner, &session_id);
+        let scope = EngramRuntimeClosingScope::capture(inner, &session_id).map(|terminal| {
+            // Only this exact acknowledged name-B transition retains A's
+            // opening image. Ordinary closes and explicit constructor callers
+            // keep their terminal scope, including same-claim root changes.
+            let record = &inner.sessions[index];
+            let opening = trace.opening_scope.as_ref();
+            let pending = record.engram.pending_naming_selection.as_ref();
+            match (opening, pending) {
+                (Some(opening), Some(selection))
+                    if selection.applied_in_generation.is_none()
+                        && selection.previous.is_some()
+                        && selection.named_turn_ref.as_deref() == Some(trace.host_turn_ref.as_str())
+                        && selection.previous.as_ref() == opening.binding.as_ref()
+                        && selection.previous.as_ref() != Some(&selection.binding)
+                        && terminal.binding == opening.binding
+                        && terminal.store == opening.store
+                        && terminal.connection == opening.connection
+                        && terminal.workdir == opening.workdir
+                        && selection.store == opening.store
+                        && selection.connection == opening.connection
+                        && record.engram.named_root == selection.previous_root =>
+                {
+                    opening.clone()
+                }
+                _ => terminal,
+            }
+        });
         let baseline = baseline.or_else(|| scope.as_ref().ok()
             .and_then(|scope| evaluation_closing_checkpoint(evaluation.as_ref(), &trace, scope)));
         let check_baselines = scope.as_ref().ok().map(|scope|

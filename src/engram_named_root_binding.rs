@@ -1814,7 +1814,7 @@ impl AppState {
         }
         let (owner, proof) = if live_naming {
             let (inner, owner, proof) =
-                self.learn_engram_naming_authority_until(naming_target, target, &owner, &proof, None, deadline)?;
+                self.learn_engram_naming_authority_until(naming_target, target, &binding, &owner, &proof, None, deadline)?;
             drop(inner);
             (owner, proof)
         } else {

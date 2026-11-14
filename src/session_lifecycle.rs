@@ -1443,6 +1443,9 @@ impl AppState {
             match self.commit_session_locked(&mut inner, session_id) {
                 Ok(revision) => Ok((
                     {
+                        if matches!(&queued_turn_result, Ok(Some(_))) {
+                            finish_engram_named_root_selection_locked(&mut inner, index);
+                        }
                         self.publish_test_run_waits_consumed(
                             &inner,
                             revision,
