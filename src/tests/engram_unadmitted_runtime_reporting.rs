@@ -8,6 +8,9 @@ use super::*;
 #[path = "engram_adopted_turn_attribution.rs"]
 mod adopted_turn_attribution;
 
+#[path = "engram_claude_observed_outcomes.rs"]
+mod claude_observed_outcomes;
+
 #[path = "engram_all_harness_ordinary_turns.rs"]
 mod all_harness_ordinary_turns;
 
@@ -359,6 +362,26 @@ impl ReportingTurn {
         historical_baseline: bool,
         historical_grant: Option<&str>,
     ) -> Self {
+        Self::start_with_history_and_runtime(
+            label,
+            claimed,
+            mode,
+            blocked,
+            historical_baseline,
+            historical_grant,
+            None,
+        )
+    }
+
+    fn start_with_history_and_runtime(
+        label: &str,
+        claimed: bool,
+        mode: ReplyMode,
+        blocked: bool,
+        historical_baseline: bool,
+        historical_grant: Option<&str>,
+        claude_runtime: Option<ClaudeRuntimeHandle>,
+    ) -> Self {
         let turn = EOCheckedTurn::start(label, claimed);
         if claimed {
             turn.finish();
@@ -386,6 +409,12 @@ impl ReportingTurn {
             }
             settled.wait("setup turn reporting settles");
         };
+        if let Some(runtime) = claude_runtime {
+            turn.record_mut(|record| {
+                record.session.agent = Agent::Claude;
+                record.runtime = SessionRuntime::Claude(runtime);
+            });
+        }
         if let Some(grant) = historical_grant {
             turn.record_mut(|record| {
                 record

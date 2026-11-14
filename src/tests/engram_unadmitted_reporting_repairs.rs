@@ -1085,7 +1085,7 @@ fn unadmitted_review_capture_absence_retains_exact_job_without_reporting() {
         "an open trace has no outcome yet"
     );
     let mut closed = original.clone();
-    closed.observed_outcome = Some(EngramObservedTurnOutcome::Unknown);
+    closed.observed_outcome = Some(EngramObservedTurnOutcome::Succeeded);
     assert_eq!(job.trace, closed, "closing records only the turn's outcome");
     assert!(job.policy.is_some());
     assert_eq!(job.attempts, 1);
@@ -1410,6 +1410,7 @@ fn unadmitted_review_invisible_closing_bookkeeping_keeps_public_revision() {
             &fixture.turn.session_id,
             &fixture.reader.context.token,
             generation,
+            EngramObservedTurnOutcome::Unknown,
         )
         .unwrap();
     barrier.entered.recv_timeout(DEADLOCK_GUARD).unwrap();
@@ -2270,7 +2271,7 @@ fn assert_runtime_custody_reader_refusal(binary: Option<&FsPath>, migrate_outbox
     fixture.turn.state.trigger_shutdown_signal();
     fixture.turn.state.shutdown_persist_blocking();
 
-    for (home, path, raw) in [active, closing, pending] {
+    for (_home, path, raw) in [active, closing, pending] {
         if migrate_outbox {
             // Construct the exact landed format from actual runtime custody,
             // then exercise the production joint migration without a worker.
@@ -2379,7 +2380,7 @@ fn assert_runtime_custody_reader_refusal(binary: Option<&FsPath>, migrate_outbox
             let output = crate::tests::federation_executor_store::run_pinned_schema_opener(
                 binary,
                 root.path(),
-                &home,
+                &_home,
             );
             assert!(
                 !output.status.success(),

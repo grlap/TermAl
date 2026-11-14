@@ -303,7 +303,7 @@ fn closing_gitlink_reports_declared_verdict_without_source_or_credit() {
     assert!(sent.durable_before_send);
     let body = occurrence(&sent);
     assert_eq!(body["kind"], "unadmitted_turn");
-    assert_eq!(body["outcome"], "unknown");
+    assert_eq!(body["outcome"], "succeeded");
     assert!(
         body["source_change"].is_null(),
         "unreported source is never assumed changed or unchanged"

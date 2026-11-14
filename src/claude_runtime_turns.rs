@@ -446,6 +446,11 @@ impl AppState {
         owner: ClaudeResultOwner,
         error_detail: Option<&str>,
     ) -> Result<()> {
+        let observed_outcome = if error_detail.is_some() {
+            EngramObservedTurnOutcome::Failed
+        } else {
+            EngramObservedTurnOutcome::Succeeded
+        };
         match owner {
             // A late duplicate ends nothing (the router never passes one).
             ClaudeResultOwner::Stale => Ok(()),
@@ -470,7 +475,9 @@ impl AppState {
                 ),
             },
             ClaudeResultOwner::Runtime(owner) => {
-                self.close_runtime_observation_logged(session_id, token, owner.adopted_generation);
+                self.close_runtime_observation_logged(
+                    session_id, token, owner.adopted_generation, observed_outcome,
+                );
                 let turn = self.open_unmediated_claude_turn_of(session_id, token);
                 // The adopted turn is finished first, while it is still
                 // marked, so the finish path's Engram checkpoint sees it and
@@ -564,7 +571,9 @@ impl AppState {
                         self.claude_adopted_generation_is_current(session_id, token, *generation)
                     })
                 {
-                    self.close_runtime_observation_logged(session_id, token, Some(generation));
+                    self.close_runtime_observation_logged(
+                        session_id, token, Some(generation), observed_outcome,
+                    );
                     let turn = self.open_unmediated_claude_turn_of(session_id, token);
                     let result = match error_detail {
                         Some(detail) => self.mark_turn_error_if_runtime_and_generation_match(

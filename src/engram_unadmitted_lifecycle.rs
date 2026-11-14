@@ -351,8 +351,9 @@ impl AppState {
         session_id: &str,
         token: &RuntimeToken,
         adopted_generation: Option<u64>,
+        outcome: EngramObservedTurnOutcome,
     ) {
-        if let Err(error) = self.close_runtime_observation(session_id, token, adopted_generation) {
+        if let Err(error) = self.close_runtime_observation(session_id, token, adopted_generation, outcome) {
             eprintln!(
                 "engram> runtime observation for {session_id} could not be queued: {error:#}"
             );
@@ -364,6 +365,7 @@ impl AppState {
         session_id: &str,
         token: &RuntimeToken,
         adopted_generation: Option<u64>,
+        outcome: EngramObservedTurnOutcome,
     ) -> Result<()> {
         let Some(_install) = self.runtime_observation_lifetime.enter("close") else {
             return Ok(());
@@ -383,7 +385,7 @@ impl AppState {
         }
         let messages_before = session_message_count(&inner.sessions[index]);
         self.queue_runtime_observation_close_with_notices_locked(
-            &mut inner, index, EngramObservedTurnOutcome::Unknown, &registered,
+            &mut inner, index, outcome, &registered,
         );
         inner.stamp_session_at_index(index);
         if session_message_count(&inner.sessions[index]) != messages_before {
