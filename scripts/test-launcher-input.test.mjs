@@ -21,6 +21,73 @@ const envelope = (sourceId) => ({ version: 1, status: sourceId.changes.length ? 
   entries: sourceId.changes.map(({ path, status }) => ({ path, status })), refusal: null, source_id: sourceId });
 const reply = (value, status = 0) => ({ status, stdout: Buffer.from(JSON.stringify(value)), stderr: Buffer.alloc(0) });
 
+const sourceSlowWarning = "warning: source observation is still running after 10 seconds; attempt=41/0; elapsed_ms=10000\n";
+const gitSlowWarning = "warning: local Git query is still running after 10 seconds; attempt=41/7; elapsed_ms=11023\n";
+const slowWarningStderrBound = 256 * 1024;
+function warningStderrAtBound() {
+  const lines = sourceSlowWarning.repeat(Math.floor(slowWarningStderrBound / Buffer.byteLength(sourceSlowWarning)));
+  return lines.replace("attempt=41/", `attempt=${"0".repeat(slowWarningStderrBound - Buffer.byteLength(lines))}41/`);
+}
+
+test("source capture accepts only bounded Engram slow warnings and preserves their diagnostic", async (t) => {
+  const diagnostics = [];
+  t.mock.method(console, "error", (message) => diagnostics.push(String(message)));
+  const atBound = warningStderrAtBound();
+  assert.equal(Buffer.byteLength(atBound), slowWarningStderrBound);
+  for (const source of [clean(), dirty()]) {
+    for (const warning of [sourceSlowWarning, sourceSlowWarning + gitSlowWarning,
+      gitSlowWarning.replace(/\n/gu, "\r\n"), sourceSlowWarning.repeat(878),
+      sourceSlowWarning.replace("41/0; elapsed_ms=10000", "0/000; elapsed_ms=0"), atBound]) {
+      diagnostics.length = 0;
+      let calls = 0;
+      const observed = await captureCommitInputStatus(root, { ENGRAM_SOURCE_BINARY: process.execPath }, {
+        run: () => { calls += 1; return { ...reply(envelope(source)), stderr: Buffer.from(warning) }; },
+      });
+      assert.deepEqual(observed.sourceId, source);
+      assert.equal(calls, 1, "a diagnostic cannot cause a repeated source measurement");
+      assert.equal(diagnostics.join("\n").replace(/\r\n/gu, "\n").trimEnd(),
+        warning.replace(/\r\n/gu, "\n").trimEnd());
+    }
+  }
+});
+
+test("source capture refuses mixed malformed non-UTF-8 and oversized warning stderr", async () => {
+  const overBound = warningStderrAtBound().replace("attempt=", "attempt=0");
+  assert.equal(Buffer.byteLength(overBound), slowWarningStderrBound + 1);
+  const invalid = [
+    "private diagnostic\n", sourceSlowWarning + "private diagnostic\n",
+    "private diagnostic\n" + sourceSlowWarning, sourceSlowWarning + "\n",
+    sourceSlowWarning.replace("warning:", "warning"),
+    sourceSlowWarning.replace("source observation", "untrusted operation"),
+    sourceSlowWarning.replace("10 seconds", "9 seconds"),
+    sourceSlowWarning.replace("41/0", "41/-1"),
+    sourceSlowWarning.replace("elapsed_ms=10000", "elapsed_ms=1e4"),
+    sourceSlowWarning.trimEnd(), `\ufeff${sourceSlowWarning}`,
+    sourceSlowWarning.replace("41/0", "41/٠"),
+    sourceSlowWarning.replace("41/0", "41/0\0"),
+    sourceSlowWarning.replace("\n", "\u001b[0m\n"),
+    Buffer.from([0xff]), overBound,
+  ];
+  for (const stderr of invalid) {
+    await assert.rejects(() => captureCommitInputStatus(root, { ENGRAM_SOURCE_BINARY: process.execPath }, {
+      run: () => ({ ...reply(envelope(clean())), stderr: Buffer.from(stderr) }),
+    }), (error) => error.code === "ENGRAM_SOURCE_UNAVAILABLE");
+  }
+});
+
+test("an accepted warning cannot validate a malformed or inconsistent source envelope", async () => {
+  for (const kind of ["json", "version", "identity", "root", "exit"]) {
+    const value = envelope(clean());
+    if (kind === "version") value.version = 2;
+    if (kind === "identity") value.source_id.tree = commit;
+    if (kind === "root") value.root = join(root, "missing-source-root");
+    await assert.rejects(() => captureCommitInputStatus(root, { ENGRAM_SOURCE_BINARY: process.execPath }, {
+      run: () => ({ ...reply(value, kind === "exit" ? 1 : 0), ...(kind === "json" ? { stdout: Buffer.from("not JSON") } : {}),
+        stderr: Buffer.from(sourceSlowWarning) }),
+    }), (error) => error.code === "ENGRAM_SOURCE_UNAVAILABLE");
+  }
+});
+
 test("ordinary records admit exact UTF-8 byte fit and refuse one byte over, including the newline", () => {
   const value = { text: "é😀" };
   const overhead = Buffer.byteLength(`${JSON.stringify(value)}\n`);

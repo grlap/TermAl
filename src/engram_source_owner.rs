@@ -3,6 +3,48 @@
 static ENGRAM_SOURCE_OWNER_PERMITS: LazyLock<Arc<tokio::sync::Semaphore>> =
     LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(2)));
 
+const ENGRAM_SOURCE_WARNING_LIMIT: usize = 256 * 1024;
+
+// Only the source command's producer-owned, complete slow-warning lines are
+// diagnostics. They never replace its exit status, envelope or executable pin.
+fn engram_source_warning_diagnostic(output: &std::process::Output) -> Result<&str> {
+    if output.stderr.is_empty() {
+        return Ok("");
+    }
+    if !output.status.success() || output.stderr.len() > ENGRAM_SOURCE_WARNING_LIMIT {
+        bail!("Engram source stderr is unsupported or oversized");
+    }
+    let text = std::str::from_utf8(&output.stderr).context("Engram source stderr is not UTF-8")?;
+    let lines = text
+        .strip_suffix('\n')
+        .context("Engram source stderr has an incomplete warning")?;
+    for line in lines.split('\n') {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        let rest = [
+            "warning: source observation is still running after 10 seconds; attempt=",
+            "warning: local Git query is still running after 10 seconds; attempt=",
+        ]
+        .into_iter()
+        .find_map(|prefix| line.strip_prefix(prefix));
+        let valid = rest
+            .and_then(|rest| rest.split_once("; elapsed_ms="))
+            .and_then(|(attempt, elapsed)| {
+                attempt
+                    .split_once('/')
+                    .map(|(pid, counter)| [pid, counter, elapsed])
+            })
+            .is_some_and(|numbers| {
+                numbers.iter().all(|value| {
+                    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+                })
+            });
+        if !valid {
+            bail!("Engram source stderr contains an unsupported warning");
+        }
+    }
+    Ok(text)
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct EngramSourceOwnerPin {
@@ -187,9 +229,7 @@ fn engram_source_owner_observe_with_clock(
     let deadline = plan.source_deadline_at(now())?;
     let args = engram_source_command_args(&root, deadline)?;
     let output = run(&binary, cwd, &args, deadline, ENGRAM_SOURCE_JSON_LIMIT + 1)?;
-    if !output.stderr.is_empty() {
-        bail!("Engram source owner schema probe emitted stderr");
-    }
+    let diagnostic = engram_source_warning_diagnostic(&output)?;
     // --version reports the durable-store schema, not the source schema.
     // Only an actual validated source envelope establishes sourceVersion.
     // A well-formed unavailable result establishes the schema too, but cannot
@@ -208,6 +248,9 @@ fn engram_source_owner_observe_with_clock(
     };
     pin.validate()?;
     engram_source_before_deadline(deadline)?;
+    if !diagnostic.is_empty() {
+        eprint!("{diagnostic}");
+    }
     Ok((pin, observed))
 }
 
@@ -244,11 +287,12 @@ fn engram_source_observation_with(
     let args = engram_source_command_args(&root, deadline)?;
     let output = run(&binary, &root, &args, deadline, ENGRAM_SOURCE_JSON_LIMIT + 1)?;
     engram_source_before_deadline(deadline)?;
-    if !output.stderr.is_empty() {
-        bail!("Engram source measurement emitted stderr");
-    }
+    let diagnostic = engram_source_warning_diagnostic(&output)?;
     let observed = parse_engram_source_observation(&output.stdout, output.status.code(), &root, deadline)?;
     engram_source_owner_verify_bytes(pin, deadline)?;
+    if !diagnostic.is_empty() {
+        eprint!("{diagnostic}");
+    }
     Ok(observed)
 }
 
