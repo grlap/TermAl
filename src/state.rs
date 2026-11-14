@@ -2384,6 +2384,9 @@ struct SessionRecord {
 /// where it was instead of leaving a half-started turn in memory: head gone,
 /// latch cleared, status Active, and nothing delivered to the runtime.
 struct QueuePromotionSnapshot {
+    work_binding: Option<EngramControlWorkBinding>,
+    named_root: Option<EngramNamedRootState>,
+    pending_naming_selection: Option<EngramPendingNamingSelection>,
     restart_recovery: Option<SessionRestartRecovery>,
     unadmitted_active_turn: Option<EngramRuntimeObservedTurn>,
     queue_order: Vec<String>,
@@ -2458,6 +2461,9 @@ impl SessionRecord {
 
     fn capture_queue_promotion_snapshot(&self) -> QueuePromotionSnapshot {
         QueuePromotionSnapshot {
+            work_binding: self.engram.work_binding.clone(),
+            named_root: self.engram.named_root.clone(),
+            pending_naming_selection: self.engram.pending_naming_selection.clone(),
             restart_recovery: self.restart_recovery.clone(),
             unadmitted_active_turn: self.engram.unadmitted_active_turn.clone(),
             queue_order: self.queued_prompts.iter().map(|queued| queued.pending_prompt.id.clone()).collect(),
@@ -2534,6 +2540,9 @@ impl SessionRecord {
         self.restart_recovery = snapshot.restart_recovery;
         self.active_turn_generation = snapshot.active_turn_generation;
         self.engram.unadmitted_active_turn = snapshot.unadmitted_active_turn;
+        self.engram.work_binding = snapshot.work_binding;
+        self.engram.named_root = snapshot.named_root;
+        self.engram.pending_naming_selection = snapshot.pending_naming_selection;
         self.human_prompt_turn = snapshot.human_prompt_turn;
         self.file_change_tracking = None;
         self.session.preview = snapshot.preview;
