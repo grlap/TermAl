@@ -441,7 +441,7 @@ impl AppState {
 
         let (response, response_lease): (CreateProjectResponse, RemoteRequestLease) = self
             .remote_registry
-            .request_json_with_lease(
+            .request_project_with_lease(
                 &remote,
                 Method::POST,
                 "/api/projects",
@@ -1500,7 +1500,7 @@ impl AppState {
         action: &str,
     ) -> Result<StateResponse, ApiError> {
         let (remote_state, response_lease): (StateResponse, RemoteRequestLease) =
-            self.remote_registry.request_json_with_lease(
+            self.remote_registry.request_state_with_lease(
                 &target.remote,
                 Method::POST,
                 &format!(

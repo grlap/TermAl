@@ -662,6 +662,72 @@ impl RemoteRegistry {
         )
     }
 
+    fn request_state_with_lease(
+        &self,
+        remote: &RemoteConfig,
+        method: Method,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<Value>,
+    ) -> Result<(StateResponse, RemoteRequestLease), ApiError> {
+        self.request_state_with_timeout_and_lease(
+            remote,
+            method,
+            path,
+            query,
+            body,
+            REMOTE_REQUEST_TIMEOUT,
+        )
+    }
+
+    fn request_state_with_timeout_and_lease(
+        &self,
+        remote: &RemoteConfig,
+        method: Method,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<Value>,
+        timeout: Duration,
+    ) -> Result<(StateResponse, RemoteRequestLease), ApiError> {
+        let (response, lease) = self
+            .request_json_with_timeout_and_lease::<remote_summary_compat::RemoteStateResponse>(
+                remote, method, path, query, body, timeout,
+            )?;
+        Ok((response.0, lease))
+    }
+
+    fn request_project_with_lease(
+        &self,
+        remote: &RemoteConfig,
+        method: Method,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<Value>,
+    ) -> Result<(CreateProjectResponse, RemoteRequestLease), ApiError> {
+        let (response, lease) = self
+            .request_json_with_lease::<remote_summary_compat::RemoteCreateProjectResponse>(
+                remote, method, path, query, body,
+            )?;
+        Ok((response.0, lease))
+    }
+
+    fn request_orchestrator_with_lease(
+        &self,
+        remote: &RemoteConfig,
+        method: Method,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<Value>,
+    ) -> Result<(CreateOrchestratorInstanceResponse, RemoteRequestLease), ApiError> {
+        use remote_summary_compat::RemoteCreateOrchestratorInstanceResponse;
+
+        let (response, lease) = self
+            .request_json_with_lease::<RemoteCreateOrchestratorInstanceResponse>(
+                remote, method, path, query, body,
+            )?;
+        Ok((response.0, lease))
+    }
+
     fn request_json_with_timeout<T: DeserializeOwned>(
         &self,
         remote: &RemoteConfig,

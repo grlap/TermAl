@@ -10,6 +10,9 @@ use super::remote::{
 use super::remote_delta_replay::local_replay_test_remote;
 use super::*;
 
+#[path = "remote_summary_compatibility.rs"]
+mod summary_compatibility;
+
 #[test]
 fn terminal_remote_output_limit_keeps_the_mirror_stale_and_requires_connection_replacement() {
     let state = test_app_state();

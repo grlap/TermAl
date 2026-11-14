@@ -156,7 +156,7 @@ impl AppState {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
         let (remote_state, response_lease): (StateResponse, RemoteRequestLease) =
-            self.remote_registry.request_json_with_lease(
+            self.remote_registry.request_state_with_lease(
                 &target.remote,
                 Method::POST,
                 &format!(
@@ -178,7 +178,7 @@ impl AppState {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
         let (remote_state, response_lease): (StateResponse, RemoteRequestLease) =
-            self.remote_registry.request_json_with_lease(
+            self.remote_registry.request_state_with_lease(
                 &target.remote,
                 Method::POST,
                 &format!(
@@ -200,7 +200,7 @@ impl AppState {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
         let (remote_state, response_lease): (StateResponse, RemoteRequestLease) =
-            self.remote_registry.request_json_with_lease(
+            self.remote_registry.request_state_with_lease(
                 &target.remote,
                 Method::POST,
                 &format!(
@@ -223,7 +223,7 @@ impl AppState {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
         let (remote_state, response_lease): (StateResponse, RemoteRequestLease) =
-            self.remote_registry.request_json_with_lease(
+            self.remote_registry.request_state_with_lease(
                 &target.remote,
                 Method::POST,
                 &format!(

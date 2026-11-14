@@ -2505,6 +2505,12 @@ pub(super) fn spawn_remote_state_response_server(
 ) -> (u16, Arc<Mutex<Vec<String>>>, std::thread::JoinHandle<()>) {
     let response_body =
         serde_json::to_string(&response.into()).expect("state response should encode");
+    spawn_remote_state_json_response_server(response_body)
+}
+
+pub(super) fn spawn_remote_state_json_response_server(
+    response_body: String,
+) -> (u16, Arc<Mutex<Vec<String>>>, std::thread::JoinHandle<()>) {
     let requests = Arc::new(Mutex::new(Vec::<String>::new()));
     let requests_for_server = requests.clone();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");

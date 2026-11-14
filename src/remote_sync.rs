@@ -19,6 +19,8 @@
 // Extracted from remote.rs into its own `include!()` fragment so remote.rs
 // stays focused on SSH + HTTP transport and terminal stream forwarding.
 
+mod remote_summary_compat;
+
 /// Returns the originating remote revision for a delta event.
 fn delta_event_revision(event: &DeltaEvent) -> u64 {
     match event {
@@ -1518,7 +1520,7 @@ fn dispatch_remote_event_with_recovery_and_authority(
                 return Ok(());
             }
             let payload = data_lines.join("\n");
-            let remote_payload: StateEventPayload = serde_json::from_str(&payload)
+            let remote_payload = remote_summary_compat::decode_state_event(&payload)
                 .with_context(|| format!("failed to decode remote state event `{remote_id}`"))?;
             if remote_payload.sse_fallback {
                 let should_skip = if let Some((remote, connection)) = bridge_authority {
@@ -1590,7 +1592,7 @@ fn dispatch_remote_event_with_recovery_and_authority(
                 return Ok(());
             }
             let payload = data_lines.join("\n");
-            let delta: DeltaEvent = serde_json::from_str(&payload)
+            let delta = remote_summary_compat::decode_delta_event(&payload)
                 .with_context(|| format!("failed to decode remote delta event `{remote_id}`"))?;
             let apply_result = if let Some((remote, connection)) = bridge_authority {
                 state.apply_remote_delta_event_for_bridge(remote, connection, delta.clone())
@@ -1702,9 +1704,9 @@ fn resync_remote_state_snapshot_with_authority(
             .lookup_remote_config(remote_id)
             .map_err(|err| anyhow!(err.message))?
     };
-    let (full_state, response_lease): (StateResponse, RemoteRequestLease) = state
+    let (full_state, response_lease) = state
         .remote_registry
-        .request_json_with_lease(&remote, Method::GET, "/api/state", &[], None)
+        .request_state_with_lease(&remote, Method::GET, "/api/state", &[], None)
         .map_err(|err| anyhow!(err.message))?;
     if let Some((expected_remote, connection)) = bridge_authority {
         state

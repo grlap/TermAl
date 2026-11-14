@@ -126,7 +126,7 @@ impl AppState {
 
         let (remote_response, response_lease): (CreateProjectResponse, RemoteRequestLease) = self
             .remote_registry
-            .request_json_with_lease(
+            .request_project_with_lease(
                 &remote,
                 Method::POST,
                 "/api/projects",
@@ -399,7 +399,7 @@ impl AppState {
         })?;
         let (remote_response, response_lease): (CreateOrchestratorInstanceResponse, _) = self
             .remote_registry
-            .request_json_with_lease(
+            .request_orchestrator_with_lease(
                 &binding.remote,
                 Method::POST,
                 "/api/orchestrators",
