@@ -221,8 +221,10 @@ impl AppState {
                 native: vec![target.clone()],
                 home: None,
             };
-            let guard = authority.lock().map_err(mailbox_api_error)?;
-            observe(&guard._inner)
+            let (_admission, observation) = authority
+                .lock_with(|inner| Ok(observe(inner)))
+                .map_err(mailbox_api_error)?;
+            observation
         } else {
             let inner = self.inner.lock().expect("state mutex poisoned");
             observe(&inner)

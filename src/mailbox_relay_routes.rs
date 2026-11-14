@@ -527,12 +527,14 @@ impl AppState {
         let native_sender = session.to_owned();
         run_blocking_api(move || {
             let authorize = || {
-                let guard = authority.lock()?;
-                if let Some(captured) = &captured {
-                    captured
-                        .validate_locked(&guard._inner, &native_sender)
-                        .map_err(|error| relay_store_error(&error.message))?;
-                }
+                let (guard, ()) = authority.lock_with(|inner| {
+                    if let Some(captured) = &captured {
+                        captured
+                            .validate_locked(inner, &native_sender)
+                            .map_err(|error| relay_store_error(&error.message))?;
+                    }
+                    Ok(())
+                })?;
                 Ok(guard)
             };
             let result = if let Some(scope) = captured

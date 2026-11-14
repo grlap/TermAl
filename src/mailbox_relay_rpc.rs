@@ -10,8 +10,31 @@ struct MailboxRelayAuthority {
     home: Option<MailboxRelayHome>,
 }
 
+struct MailboxRelayAdmission<'a> {
+    _link: std::sync::MutexGuard<'a, FederationLinkState>,
+    new_send_refusal: Option<String>,
+}
+
+impl MailboxRelayAdmission<'_> {
+    fn authorize_new_send(&self) -> Result<()> {
+        match &self.new_send_refusal {
+            Some(reason) => Err(relay_store_error(reason)),
+            None => Ok(()),
+        }
+    }
+}
+
 impl MailboxRelayAuthority {
-    fn lock(&self) -> Result<FederationMailboxAdmission<'_>> {
+    fn lock(&self) -> Result<MailboxRelayAdmission<'_>> {
+        self.lock_with(|_| Ok(())).map(|(admission, ())| admission)
+    }
+
+    // The callback may inspect in-memory state only. Its result is captured at
+    // the same admission cut; the returned token owns no StateInner guard.
+    fn lock_with<T>(
+        &self,
+        inspect: impl FnOnce(&StateInner) -> Result<T>,
+    ) -> Result<(MailboxRelayAdmission<'_>, T)> {
         let link = self
             .lease
             .channel
@@ -46,10 +69,28 @@ impl MailboxRelayAuthority {
                 return Err(relay_store_error("native mailbox session was replaced"));
             }
         }
-        Ok(FederationMailboxAdmission {
-            _inner: inner,
-            _link: Some(link),
-        })
+        let new_send_refusal = federation_participation_qualified(
+            &inner.federation,
+            &inner.preferences.federation,
+            &peer,
+            &self.lease.incarnation,
+        )
+        .err()
+        .map(|error| error.message);
+        let captured = inspect(&inner)?;
+        // Native relay admission linearizes at this short link -> StateInner
+        // cut. An admitted operation may finish with its captured inputs after
+        // a state-only change; later operations validate again. Keep only the
+        // link fence through COMMIT, never StateInner across store work. New
+        // sends consume the captured participation result; exact retries don't.
+        drop(inner);
+        Ok((
+            MailboxRelayAdmission {
+                _link: link,
+                new_send_refusal,
+            },
+            captured,
+        ))
     }
 }
 
@@ -230,21 +271,7 @@ impl AppState {
                         &append,
                         &lease.with_current(self, |_, peer| Ok(peer.clone()))?,
                         || authority.lock(),
-                        |guard| {
-                            let peer = federation_snapshot_locked(
-                                &guard._inner,
-                                &lease.channel.snapshot.peer.host_id,
-                            )
-                            .map_err(|error| relay_store_error(&error.message))?;
-                            federation_participation_qualified(
-                                &guard._inner.federation,
-                                &guard._inner.preferences.federation,
-                                &peer,
-                                &lease.incarnation,
-                            )
-                            .map_err(|error| relay_store_error(&error.message))?;
-                            Ok(())
-                        },
+                        |guard| guard.authorize_new_send(),
                     )
                     .map_err(mailbox_api_error)?;
                 self.federation_executor_wake_signal.kick();
