@@ -2069,6 +2069,9 @@ struct EngramSessionState {
     observation_delete_requested: bool,
     /// The ordinary work-session association, refreshed independently of turns.
     work_binding: Option<EngramControlWorkBinding>,
+    /// An acknowledged explicit name selects only a later opening. Like
+    /// work_binding, this selection is runtime-only and is not restored.
+    pending_naming_selection: Option<EngramPendingNamingSelection>,
     /// Command facts observed under the exact ordinary trace owner.
     active_turn_checks: Vec<EngramTurnCheck>,
     // Pre-prompt native evidence is process-local. Restart never adopts it.
@@ -2253,6 +2256,7 @@ impl Default for EngramSessionState {
             historical_control: BTreeMap::new(),
             observation_delete_requested: false,
             work_binding: None,
+            pending_naming_selection: None,
             active_turn_checks: Vec::new(),
             declared_run_turn: None,
             carried_checks: Vec::new(),
