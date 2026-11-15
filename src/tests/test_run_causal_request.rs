@@ -2,6 +2,9 @@
 // Registration owns custody; editing launcher artifacts cannot create it.
 use super::*;
 
+#[path = "test_run_selected_provider.rs"]
+mod selected_provider;
+
 fn causal_fixture(label: &str, mode: MailboxTestMode) -> (RunFixture, String, String) {
     let mut fixture = RunFixture::new(label);
     fixture.state.mailbox_store = Arc::new(
