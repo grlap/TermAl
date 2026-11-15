@@ -357,6 +357,8 @@ struct MailboxStore {
     relay_home_wake_refusals: MailboxRelayHomeWakeRefusals,
     /// Bounded home-side 5xx metadata; cleared on restart, never persisted.
     relay_home_rpc_failures: MailboxRelayHomeRpcFailures,
+    /// Bounded process-local row skips; never a durable settlement disposition.
+    causal_completion_scan_skips: CausalTestCompletionScanSkips,
     #[cfg(test)]
     before_native_wake: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     #[cfg(test)]
@@ -2125,6 +2127,7 @@ impl MailboxStore {
             relay_live_queued: Mutex::new(HashMap::new()),
             relay_home_wake_refusals: MailboxRelayHomeWakeRefusals::default(),
             relay_home_rpc_failures: MailboxRelayHomeRpcFailures::default(),
+            causal_completion_scan_skips: CausalTestCompletionScanSkips::default(),
             #[cfg(test)]
             before_native_wake: Mutex::new(None),
             #[cfg(test)]
@@ -2152,6 +2155,7 @@ impl MailboxStore {
             relay_live_queued: Mutex::new(HashMap::new()),
             relay_home_wake_refusals: MailboxRelayHomeWakeRefusals::default(),
             relay_home_rpc_failures: MailboxRelayHomeRpcFailures::default(),
+            causal_completion_scan_skips: CausalTestCompletionScanSkips::default(),
             before_native_wake: Mutex::new(None),
             before_relay_association_authorize: Mutex::new(None),
             internal_writer_waiters: Mutex::new(0),
