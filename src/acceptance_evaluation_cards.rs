@@ -61,9 +61,21 @@ fn refresh_recorded_acceptance_result_locked(
 
 fn acceptance_evaluator_unavailable_result(
     delegation: &DelegationRecord,
-) -> Option<(&'static str, &'static str)> {
+) -> Option<(String, String)> {
     if delegation.mode != DelegationMode::Evaluator || delegation_submission_recorded(delegation) {
         return None;
+    }
+    if let Some(evaluation) = delegation.acceptance_evaluation.as_ref()
+        && let Some(read) = acceptance_evidence_unfinished(evaluation)
+        && !acceptance_evaluation_has_unknown_write(evaluation)
+    {
+        return Some((
+            acceptance_evaluation_outcome_line(evaluation),
+            format!(
+                "Evaluator infrastructure failure; no criterion verdict: {}",
+                acceptance_brief_text(&read.reason, 1024)
+            ),
+        ));
     }
     Some(
         if delegation
@@ -72,13 +84,13 @@ fn acceptance_evaluator_unavailable_result(
             .is_some_and(acceptance_evaluation_has_unknown_write)
         {
             (
-                ACCEPTANCE_UNCONFIRMED_RESULT_SUMMARY,
-                ACCEPTANCE_UNCONFIRMED_RESULT_FINDING,
+                ACCEPTANCE_UNCONFIRMED_RESULT_SUMMARY.to_owned(),
+                ACCEPTANCE_UNCONFIRMED_RESULT_FINDING.to_owned(),
             )
         } else {
             (
-                "Evaluator finished: no submission recorded. The child's output is diagnostic text, not an acceptance verdict.",
-                "No submission recorded; acceptance verdict is unavailable.",
+                "Evaluator finished: no submission recorded. The child's output is diagnostic text, not an acceptance verdict.".to_owned(),
+                "No submission recorded; acceptance verdict is unavailable.".to_owned(),
             )
         },
     )
@@ -100,6 +112,19 @@ fn acceptance_evaluator_terminal_outcome(
     {
         *refresh_deferred |= !matches!(&outcome, DelegationChildOutcome::Running);
         return DelegationChildOutcome::Running;
+    }
+    if let DelegationChildOutcome::Failed { summary } = &outcome
+        && let Some(evaluation) = delegation.acceptance_evaluation.as_ref()
+        && acceptance_evidence_unfinished(evaluation).is_some()
+        && !acceptance_evaluation_has_unknown_write(evaluation)
+    {
+        return DelegationChildOutcome::Failed {
+            summary: format!(
+                "{} Child runtime: {}",
+                acceptance_evaluation_outcome_line(evaluation),
+                acceptance_brief_text(summary, MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS)
+            ),
+        };
     }
     // A result packet describes the run, never the tracker's judgment. Keep
     // actual transport failures separate and preserve the paged child output.

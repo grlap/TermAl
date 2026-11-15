@@ -2774,6 +2774,9 @@ host-issued `attemptKey` and a `readKey` for one logical read. `action: catalog`
 continues the original captured catalog (no cursor on the first call, then only
 the opaque cursor returned by this route). `action: records` takes `locators`
 already named by the brief or recovered catalog and returns whole records.
+Locators merely quoted inside a record body are not issued. A refusal names
+the requested unissued locators, examples of issued forms, and the remedy:
+recover their catalog rows or have the parent select them in a new evaluation.
 The caller cannot supply a store, work, run, project cut or raw tracker cursor.
 The authenticated evaluator and its saved attempt determine those values.
 
@@ -2794,6 +2797,15 @@ reason in the delegation's attempt history. No verdict or fake Engram evaluation
 row is created. Its old child cannot submit a judgment; the parent can request
 a fresh evaluation, whose brief also names the unfinished predecessor. Wrong
 caller keys and invented cursor/record handles refuse only that call.
+
+Read failures identify the opening inspect, notes continuation, exact-record
+read or closing inspect phase, with the observed transport kind, bounded code
+and safe diagnostic text. Credential-shaped, structured, control-bearing or
+path-bearing diagnostics are withheld explicitly. These failures are reported
+as evaluator infrastructure failures, distinct from criterion verdicts. A
+per-item notes window may be invalidated when that item's selected records
+change; unrelated project-cut advances alone do not invalidate it. Recovery
+does not silently restart across changed evidence or reset the attempt budget.
 
 All recovery calls of one attempt share the existing acceptance evidence
 allowance (two minimum operation windows) of actual tracker I/O. Before every

@@ -40,6 +40,67 @@ fn acceptance_evidence_loaded_durable() -> bool {
     true
 }
 
+// Recovery errors reach the evaluator, parent cards and durable attempt history.
+// Keep readable CLI refusals, but never copy credential-shaped, structured or
+// path-bearing producer output into those surfaces. Classification survives
+// even when the free-form detail cannot safely be shown.
+fn acceptance_evidence_error_detail(message: &str) -> String {
+    let lower = message.to_ascii_lowercase();
+    let private = [
+        "token",
+        "password",
+        "passwd",
+        "secret",
+        "authorization",
+        "bearer",
+        "credential",
+        "api_key",
+        "apikey",
+        "private key",
+    ]
+    .iter()
+    .any(|word| lower.contains(word));
+    if private
+        || message.chars().any(|ch| {
+            !ch.is_ascii()
+                || ch.is_control()
+                || matches!(
+                    ch,
+                    '/' | '\\' | '=' | '@' | '{' | '}' | '[' | ']' | '"' | '`'
+                )
+        })
+    {
+        return "Engram diagnostic withheld because it may contain private data".to_owned();
+    }
+    let detail = message.split_whitespace().collect::<Vec<_>>().join(" ");
+    acceptance_brief_text(&detail, 512)
+}
+
+fn acceptance_evidence_transport_refusal(phase: &str, error: EngramTransportError) -> ApiError {
+    let kind = match error.kind {
+        EngramTransportErrorKind::LocalState => "local state",
+        EngramTransportErrorKind::Deadline => "deadline",
+        EngramTransportErrorKind::Transport => "transport",
+        EngramTransportErrorKind::Protocol => "protocol",
+        EngramTransportErrorKind::Remote => "remote refusal",
+        #[cfg(test)]
+        EngramTransportErrorKind::Backoff => "backoff",
+    };
+    let code = error.code.as_deref().filter(|code| {
+        !code.is_empty()
+            && code.len() <= 64
+            && code
+                .bytes()
+                .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == b'_')
+    });
+    ApiError::bad_gateway(format!(
+        "evaluator infrastructure failure during {phase} ({kind}; code={}): {}; \
+         discovery stopped without a verdict. Finish this attempt and ask the parent for a fresh evaluation after resolving this cause",
+        code.unwrap_or("unavailable"),
+        acceptance_evidence_error_detail(&error.message)
+    ))
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ReadAcceptanceEvidenceRequest {
@@ -187,6 +248,7 @@ impl AcceptanceEvidenceRecovery {
     fn call(
         &mut self,
         connection: &EngramConnectionConfig,
+        phase: &str,
         args: &[String],
         read: &impl Fn(
             &EngramConnectionConfig,
@@ -196,23 +258,25 @@ impl AcceptanceEvidenceRecovery {
         now: &impl Fn() -> std::time::Instant,
     ) -> Result<Value, ApiError> {
         if self.remaining < ENGRAM_MIN_CALL_TIMEOUT {
-            return Err(ApiError::conflict(
-                "the attempt's evidence read allowance is spent",
-            ));
+            return Err(ApiError::conflict(format!(
+                "evaluator infrastructure failure during {phase}: the attempt's evidence read allowance is spent \
+                 ({} ms remaining, {} ms required); no verdict was sent. Ask the parent for a fresh evaluation",
+                self.remaining.as_millis(),
+                ENGRAM_MIN_CALL_TIMEOUT.as_millis()
+            )));
         }
         let started = now();
         let result = read(connection, args, ENGRAM_MIN_CALL_TIMEOUT);
         self.remaining = self
             .remaining
             .saturating_sub(now().saturating_duration_since(started));
-        result.map_err(|_| {
-            ApiError::bad_gateway("the captured evidence read is unavailable or its cursor expired")
-        })
+        result.map_err(|error| acceptance_evidence_transport_refusal(phase, error))
     }
 
     fn inspect(
         &mut self,
         connection: &EngramConnectionConfig,
+        phase: &str,
         read: &impl Fn(
             &EngramConnectionConfig,
             &[String],
@@ -227,7 +291,7 @@ impl AcceptanceEvidenceRecovery {
             self.manifest.identity.work_id.clone(),
             "--json".to_owned(),
         ];
-        let result = self.call(connection, &args, read, now)?;
+        let result = self.call(connection, phase, &args, read, now)?;
         if acceptance_core_identity(&result)?.as_ref() != Some(&self.manifest.identity) {
             return Err(ApiError::conflict(
                 "the captured work/run identity changed during evidence recovery",
@@ -247,7 +311,7 @@ impl AcceptanceEvidenceRecovery {
         ) -> Result<Value, EngramTransportError>,
         now: &impl Fn() -> std::time::Instant,
     ) -> Result<Value, ApiError> {
-        self.inspect(connection, read, now)?;
+        self.inspect(connection, "opening inspect", read, now)?;
         let mut result = match request.action.as_str() {
             "catalog" => {
                 let handle = request
@@ -275,7 +339,7 @@ impl AcceptanceEvidenceRecovery {
                             token.clone(),
                             "--json".to_owned(),
                         ];
-                        let page = self.call(connection, &args, read, now)?;
+                        let page = self.call(connection, "notes continuation", &args, read, now)?;
                         let window = acceptance_compact_notes_carrier(
                             &page,
                             &self.manifest.identity,
@@ -335,7 +399,7 @@ impl AcceptanceEvidenceRecovery {
                         locator.clone(),
                         "--json".to_owned(),
                     ];
-                    let record = self.call(connection, &args, read, now)?;
+                    let record = self.call(connection, "exact record", &args, read, now)?;
                     validate_acceptance_selected_record(
                         &record,
                         &self.manifest.identity.work_ref,
@@ -367,7 +431,7 @@ impl AcceptanceEvidenceRecovery {
             }
             _ => unreachable!("validated read action"),
         };
-        self.inspect(connection, read, now)?;
+        self.inspect(connection, "closing inspect", read, now)?;
         result["state"] = json!("complete");
         result["recorded"] = json!(false);
         result["attemptKey"] = json!(request.attempt_key);
@@ -729,15 +793,45 @@ impl AppState {
                     .cursor
                     .as_ref()
                     .is_some_and(|key| !recovery.cursors.contains_key(key))
-                || request.action == "records"
-                    && request
-                        .locators
-                        .iter()
-                        .any(|id| !recovery.known.contains_key(id))
             {
                 return Err(ApiError::conflict(
-                    "the cursor or record was not issued to this evaluator attempt",
+                    "the catalog cursor was not issued to this evaluator attempt; use the cursor returned by this attempt's catalog action, or omit it for the original boundary",
                 ));
+            }
+            let unissued = request
+                .locators
+                .iter()
+                .filter(|id| !recovery.known.contains_key(*id))
+                .collect::<Vec<_>>();
+            if request.action == "records" && !unissued.is_empty() {
+                let requested = unissued
+                    .iter()
+                    .take(4)
+                    .map(|id| id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let mut issued = recovery.manifest.indexed.iter().take(4).collect::<Vec<_>>();
+                for id in recovery.known.keys() {
+                    if issued.len() == 4 {
+                        break;
+                    }
+                    if !issued.contains(&id) {
+                        issued.push(id);
+                    }
+                }
+                let examples = issued
+                    .iter()
+                    .map(|id| id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(ApiError::conflict(format!(
+                    "{} requested record(s) were not issued to this evaluator attempt (first {}: {requested}). \
+                     Issued examples ({} known): [{examples}]. Use exact locators from criterionEvidence or the recovered catalog. \
+                     IDs mentioned inside a record body are not issued; recover their catalog rows first, or ask the parent to select them in a fresh evaluation",
+                    unissued.len(),
+                    unissued.len().min(4),
+                    recovery.known.len()
+                )));
             }
             let target = self.acceptance_evidence_read_target_locked(&inner, child, &authority);
             let guard = AcceptanceEvaluationSubmissionInFlight::admit_locked(
