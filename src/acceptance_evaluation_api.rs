@@ -787,26 +787,43 @@ fn run_acceptance_evaluation_read(
     timeout: Duration,
     host_workdir: &FsPath,
 ) -> std::result::Result<Value, EngramTransportError> {
+    run_acceptance_evaluation_read_with_cli(
+        connection,
+        args,
+        timeout,
+        host_workdir,
+        run_engram_cli_command_with_lock_retry,
+    )
+}
+
+// Keep deterministic process observations at the same boundary as native reads.
+fn run_acceptance_evaluation_read_with_cli(
+    connection: &EngramConnectionConfig,
+    args: &[String],
+    timeout: Duration,
+    host_workdir: &FsPath,
+    run: impl FnOnce(
+        &EngramConnectionConfig,
+        &[&str],
+        Duration,
+        &str,
+        &FsPath,
+    ) -> std::result::Result<EngramCliOutput, EngramTransportError>,
+) -> std::result::Result<Value, EngramTransportError> {
     let args = args.iter().map(String::as_str).collect::<Vec<_>>();
-    if is_acceptance_selected_note_read(&args) {
-        // Exact selected-record refusals carry a structured code on stderr.
-        // Retain the exit observation before the generic JSON reader erases it.
-        let output = run_engram_cli_command_with_lock_retry(
-            connection,
-            &args,
-            timeout,
-            ACCEPTANCE_EVALUATION_READER_LABEL,
-            host_workdir,
-        )?;
-        return decode_acceptance_selected_cli_output(output);
-    }
-    run_engram_json_command_with_lock_retry(
+    let output = run(
         connection,
         &args,
         timeout,
         ACCEPTANCE_EVALUATION_READER_LABEL,
         host_workdir,
-    )
+    )?;
+    if is_acceptance_selected_note_read(&args) {
+        // Exact selected-record refusals carry a structured code on stderr.
+        // Retain the exit observation before the generic JSON reader erases it.
+        return decode_acceptance_selected_cli_output(output);
+    }
+    decode_engram_cli_json(output, ACCEPTANCE_EVALUATION_READER_LABEL)
 }
 
 // A locked store is retried once: the attempt key makes a resend a replay.
