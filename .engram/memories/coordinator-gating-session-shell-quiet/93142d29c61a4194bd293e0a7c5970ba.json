@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-gating-session-shell-quiet",
+    "revision_id": "93142d29c61a4194bd293e0a7c5970ba",
+    "previous": null,
+    "body_sha256": "b8f5653d3d68c9eb5214277be332fabfedf1e6cb2c196c96ccc15099ceb00924",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-20T04:26:00.579004400Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-20 04:27Z, my own miss). While a session's full gate runs, give that session NO task that runs shell commands: no Mac or SSH checks, no remote-proxy dispatch, no diagnostics, even when the cwd is MAIN or another host. Darwin's gate test-fc235f30 was refused credit (\"this session ran a pwsh command there\") after I asked Sol-1cee to check its Mac channel and dispatch S3 step 1 mid-gate. That cost a 20-minute gate. Give side work to a different session, or wait for the settled record."
+}

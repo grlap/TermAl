@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-main-checkout-dirty-2026-11-13",
+    "revision_id": "4b0d1e00bf264d36b1df3989a4b9f18c",
+    "previous": "94839a6bce4741db8fbf11c9f214720e",
+    "body_sha256": "c4c8b6a1a9cba1d19df2d0c9da75e614ca05901ab5c78c8559ae3d9687aa676f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T03:50:12.038075400Z"
+    }
+  },
+  "body": "REV 3 (Opus2, 2026-11-14 at about 03:50Z). The main checkout C:\\github\\Personal\\TermAl is DIRTY by Greg's direct word, in Opus3's session.\nSTAGED: the 17 ui/src paths of the P0 scroll fix w-84132b835175. These are byte-identical to the frozen candidate 274aa3e5 (tree fb4810cc, parent eb78d349); `git diff --cached --quiet 274aa3e5` is empty.\nUNSTAGED (Opus3 #797, 03:49Z): 3 ui/src paths for the Response Board change w-8e291dcbe597, which lets cards move and drop at negative positions. They are in main for Greg's live check: ui/src/panels/ResponseBoardPanel.tsx, response-board-camera.ts and ResponseBoardPanel.test.tsx. They do not overlap the 17 staged paths.\nMain HEAD is eb78d349 (combo99c landed 02:44:54Z).\nRULES:\n- Opus2 never stashes, resets or checks out these paths.\n- Integration checks for the scroll fix compare the STAGED index against 274aa3e5 only; the 3 unstaged paths are separate and must stay untouched.\n- Landings may fast-forward main only when the landing diff overlaps neither the 17 staged nor the 3 unstaged paths.\n- OPUS3 (not Opus2) fast-forwards and pushes the scroll fix, after Opus2's GO with the gated commit id (memory opus2-scroll-fix-landing-ruling-2026-11-14).\n- Before any RESET NOW, ask Opus3 to clean main first.\nRemove this memory once main is clean again."
+}

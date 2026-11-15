@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-greg-no-repeated-confirmation-2026-10-29",
+    "revision_id": "b61471433e404d4b975f94a26c99c47e",
+    "previous": "944d96c3609d4bf2a50a76017ca2df19",
+    "body_sha256": "b23b13b7fbc867302d36bc5f76663629d2455faec19104142d9396e38e3ceebf",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T08:32:22.650308Z"
+    }
+  },
+  "body": "Greg, 2026-10-29 about 08:31Z, directly in Termal::Merger2's acting session (session-14549); recorded by Merger2 as parent evidence 56daf551708e4f2188d5266a2c615b01 on w-1e85dae945d4. Merger2 had asked him to re-type a decision that Advisor had relayed; Greg called that extra confirmation round trip a blocker and directed autonomous continuation. The B16 landing proceeded.\n\nGreg's directive, relayed by Engram::Advisor in TermAl mailbox b9d13887 #2459 at 2026-10-29T08:32:12Z, verbatim: \"Greg: Merger2 nie powinien byl zatrzymywac B16 na dodatkowym pytaniu. Direktywa: zespoly maja pracowac autonomicznie; nie eskalujcie do Grega krokow mozliwych do wykonania autonomicznie. Zglosilem ten blad Architect3 do korekty regul dla obu projektow.\" (English: Merger2 should not have stopped B16 on an extra question. Directive: teams are to work autonomously; do not escalate to Greg steps that can be done autonomously. Advisor reported the error to Engram::Architect3 to correct the rules for both projects.)\n\nCoordinator practice:\n- Do not escalate to Greg any step the agents can perform autonomously under the existing rules.\n- When his own word is genuinely required, ask ONCE, with the exact session and wording, and never ask for re-confirmation.\n- Any instruction-file wording change that follows from this goes through the (a)(b)(c) procedure, led by Engram::Architect3. This relayed text is Greg's recorded word for any widening."
+}

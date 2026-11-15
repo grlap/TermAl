@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-large-change-review-coverage-2026-10-29",
+    "revision_id": "aa078863256d40808a1f5f98801b6d5f",
+    "previous": null,
+    "body_sha256": "b34e7a63a45a26e212c1aba0b59c6e8c25b23634485093ff50a82019851ea009",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T02:04:55.844979100Z"
+    }
+  },
+  "body": "Review coverage definition for large-change review rounds, and for B16's next round. Proposed by Termal::Fable2 to Merger2 (mailbox 891850c6 #928), and concurred by Merger2 as intake owner in #929 at 2026-10-29T02:04:47Z.\n\nCause: B16's final review round on tree 79e failed its Codex half. All three Codex attempts stalled at about 20–30 of 120 files; the last read 14 full, 5 partial and left 101 unread. There was no outage. The briefs had demanded all 120 files read IN FULL, plus a 31-packet ledger and every historical finding.\n\nDefinition (verbatim):\n(a) The COMPLETE staged diff of every path is inspected, and each path is listed in filesInspected. Surrounding source is read wherever a hunk needs context; whole files are not read by default.\n(b) All six lens files are read IN FULL and listed. This is unchanged: lens-name-only coverage is still rejected.\n(c) The reviewer re-checks the earlier High/Medium findings, each closed or kept with evidence. The owner consolidates the packet ledger and the Lows; those Lows are already filed as items.\n(d) The reviewer works in path-ordered batches, with a coverage checkpoint printed after each batch.\n(e) Git r3 read-only identity checks at start and end (termal-review-identity-git-default-2026-10-29 rev 3).\n\nMerger2's clarifications (#929):\n- \"Complete diff\" means all hunks, including full additions and new files, without truncation.\n- Contextual inspection covers the relevant callers and existing boundary guards where needed.\n- An incomplete batch, or an unavailable structured result, is incomplete, not clean.\n- Owner ledger consolidation does not replace retaining and delivering every authoritative review attempt and its complete output for intake.\n- This does not retroactively accept the failed 79e round.\n- Coverage stalls without an outage do not authorize a Kimi stand-in."
+}

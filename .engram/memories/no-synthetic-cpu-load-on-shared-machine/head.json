@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "no-synthetic-cpu-load-on-shared-machine",
+  "head": {
+    "state": "active",
+    "chain": [
+      "3d038c36db494db8a53c534394c2323f",
+      "ffff91b5915e4cde8faa566a1d35fd22"
+    ]
+  }
+}

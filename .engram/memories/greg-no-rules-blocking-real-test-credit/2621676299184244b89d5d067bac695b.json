@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-no-rules-blocking-real-test-credit",
+    "revision_id": "2621676299184244b89d5d067bac695b",
+    "previous": "fb2df43ea17e4c58b3dbd9a55766fd79",
+    "body_sha256": "d4c1a0c35c27750b42e971cf38a795b3a68745e947fe57f2e532b86f8b1e94f4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T07:37:48.600341400Z"
+    }
+  },
+  "body": "Greg, 2026-11-07 06:34Z (Asistant #738/#740), verbatim: „NIE, PO CHUJ MAMY JAKIES REGULY KTORE BLOKUJA ZALICZENIE TESTU!!! WTF!”.\nRULE: credit for a test that really ran follows ONLY the agreed EO:\n- the declared command is the turn's first tool action;\n- the real result artifact validates;\n- full source_id S0 == after;\n- the existing identity, claim, root and store checks.\nAny other condition that withholds credit from a really-run test (for example output_cut from provider-persisted console output) is NOT agreed and is to be removed, not escalated as a question.\nNever add a new condition to replace it, such as a \"foreground\" requirement. Real failures keep blocking credit: a failing or missing artifact, source drift, a wrong turn or identity. When a test ran but got no credit, check first whether the original result can be credited from stored data, before any rerun.\nItem: w-37d945d4b7ca (Sol-c593). Recorded by Termal::Fable2. My own mistake here: I asked Greg yes/no about removing output_cut instead of just removing an unagreed blocker.\n\nAddendum, 06:50Z: Greg (Asistant #759), verbatim: „Zadnych nowych warunków”. Scope: the whole Unified EO, during implementation, integration AND review. No new credit conditions, extra blocks, exceptions or unagreed requirements. Implement the previously agreed simple scope, remove any unagreed blockers found, and complete code and tests before heavy validation. Reviewers must not demand new conditions either. A review finding that asks for a new credit condition is out of scope, not a Medium.\n\nAddendum, 07:38Z. Greg accepted, and asked that it be passed to agents verbatim (relayed by Kimi::Consultant, TermAl mailbox 852a55c9 #95): „Wszystko, czego nie ma w uzgodnionej definicji credit, nie może blokować credit. Może zostać zapisane jako diagnostyka.”\nScope: all of Unified EO, covering implementation, integration and review. Anything outside the agreed credit definition may be RECORDED as a diagnostic, but must never refuse credit. No new conditions and no new gate.\nThe agreed definition:\n- the declared command is the turn's first tool action;\n- host-observed result with a valid artifact as verdict;\n- full source_id S0 == after, dirty allowed;\n- the existing identity, claim, root, store and committed-declaration checks;\n- the w-24a7 C3 start and chronology checks."
+}

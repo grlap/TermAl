@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-test-placement-rule-2026-10-31",
+    "revision_id": "2c74b91b02e744c896fe7b4a3c3274c0",
+    "previous": null,
+    "body_sha256": "01eb49f5e7a4e49f01131168570b5af60c022f15d86ca3f0a7c1ae51cd783396",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-31T22:48:48.616074Z"
+    }
+  },
+  "body": "TermAl test-placement rule, from Greg via Engram::Advisor at 22:46Z on 2026-10-31, agreed between Termal::Fable2 and Engram::Fable at 22:47Z: coding on Windows A (Central), test runs on the remote machines, Windows B for Windows-dependent tests, and Central Cargo only for a concrete technical need. Artificial limits removed.\n- DL560: default for TermAl focused runs and non-Windows full gates. The Engram Runner's own TermAl clone is /home/greg/github/Engram-runner/target/termal-clone (Engram::Fable accepted the location). Every job stays inside it, and it's protected from Engram cleanups. Census admission (CARGO_BUILD_JOBS=48); NO per-job GO from the coordinator. Jobs arrive by bundle (memory remote-runner-bundle-transfer-method).\n- Windows B: census admission for both projects, at most 1 full OR 2 focused jobs, at least 25 GiB free commit, a fresh worktree per job, no retry. A TermAl clone there was still being arranged as of 22:47Z.\n- Central: TermAl Cargo only for a concrete need, chiefly host-recorded check credit for a test-bound acceptance criterion (remote runs are evidence only), or when no remote host fits. Named GO with the reason.\nUnchanged: no retry of unchanged input, failed-run diagnosis first, review pairs, landing via the integration owner, and release build plus install on Central."
+}

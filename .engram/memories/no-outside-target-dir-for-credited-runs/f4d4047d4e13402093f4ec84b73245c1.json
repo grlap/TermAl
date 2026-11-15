@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "no-outside-target-dir-for-credited-runs",
+    "revision_id": "f4d4047d4e13402093f4ec84b73245c1",
+    "previous": null,
+    "body_sha256": "698d3e92a15910fd8f3499c59102e2158f28edc210b466ad47f66b78b96dcb10",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-14T23:54:13.345489500Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-14 23:54Z, learned from my own wrong advice). A credited test command must not contain any argument naming a path outside the measured (named) worktree: not `--target-dir <sibling or shared dir>`, not `--manifest-path ../..`, and so on. The running host (cec32aee and later) refuses credit for such commands under engram_check_paths.rs::engram_check_worktree_in, which allows only --engram-binary to point outside. Before w-c538 lands, the refusal is SILENT: no Test record and no notice. Proof D's R_d run test-1956535a (Sol-a7bb) lost its credit this way. For warm builds, use the root's own target (the default, or `--target-dir target`). Accept a cold build in a no-gate slot rather than an outside path, and never use env-var or symlink tricks to hide the path."
+}

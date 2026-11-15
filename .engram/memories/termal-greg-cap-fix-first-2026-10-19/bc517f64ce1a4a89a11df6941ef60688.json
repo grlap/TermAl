@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-greg-cap-fix-first-2026-10-19",
+    "revision_id": "bc517f64ce1a4a89a11df6941ef60688",
+    "previous": null,
+    "body_sha256": "4e51f2a52834f60c7b1b073c39bec22b35c874e52163e4b85e83f83c2b08b2bb",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T06:57:21.459344400Z"
+    }
+  },
+  "body": "Greg's direction (Engram::Advisor #1254, 06:56Z on 10-19): the 64/64 named-root blocker has recurred too often and must stop being reported as a passive dependency. Treat BarA1 / w-4d6283a1f1f5 as the immediate throughput unblocker: RED/proof, implement, gate, review and land it BEFORE starting further root-dependent documentation or remote-credit work. Keep unrelated active coding lanes running, but the cap fix must not lose the next available root or gate slot. Report its first concrete execution result, not another queue summary.\nApplied at 06:58Z: the RED was reported (15F/2P, exact); BarA1's GREEN warm goes first in every window; its gate is the next TermAl gate, ahead of the w5405 regate and S1."
+}

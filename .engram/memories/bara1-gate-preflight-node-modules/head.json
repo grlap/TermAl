@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "bara1-gate-preflight-node-modules",
+  "head": {
+    "state": "active",
+    "chain": [
+      "87d47c34a07444d29a9dbdd8e6b1dc38",
+      "06a03a304b624cfe965f515937e2ed0c"
+    ]
+  }
+}

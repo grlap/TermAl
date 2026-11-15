@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-06-abandon-local-continuation",
+    "revision_id": "ac49cee4c5114eb39f07389f36d37b46",
+    "previous": null,
+    "body_sha256": "50cbb952b212459fbb3804332df9f48aa9dda5812d3ddca3829f125e7db471d5",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-06T03:37:45.165733600Z"
+    }
+  },
+  "body": "Greg's decision, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #340, 2026-10-06 03:37Z; recorded by Termal::Fable2): \"Greg approves: implement the separate visible operator action 'abandon local continuation' exactly as described. It may release only the local held continuation for lost/unverifiable recovery data, record the operator acknowledgement, and must not claim the remote Engram grant is closed or invent/replay message contents.\"\n\nContext: TermAl's question #330-#331, with the addendum #332. It covers two record classes: historical orphan uncertainty (an uncertain grant with no retained head), and modern recovery records whose cancellation tuple, text or audit cannot be verified. The design source is Architect2's be64898e §5 on w-f79e3484ac46.\n\nOperative: one separate, visible, narrowly scoped operator action.\n- It shows the recorded facts and states what is unknown.\n- It invents no text or key and replays nothing.\n- It permanently disables the old local delivery capability.\n- It durably records the operator's acknowledgement and an audit entry.\n- It releases ONLY that local hold, after an exact ACK.\n- It claims no remote grant closure, and later admission still needs real authority.\nIt is its own item, outside the w-f79e foundation's cap, and it lands after the foundation's Stage B."
+}

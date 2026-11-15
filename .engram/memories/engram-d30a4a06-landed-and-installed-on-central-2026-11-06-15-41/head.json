@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "engram-d30a4a06-landed-and-installed-on-central-2026-11-06-15-41",
+  "head": {
+    "state": "tombstone",
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "retire attributed project memory",
+      "remembered_at": "2026-11-09T05:16:31.629614800Z"
+    }
+  }
+}

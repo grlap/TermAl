@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "fable2-central-restart-2026-11-13-0436",
+  "head": {
+    "state": "active",
+    "chain": [
+      "15cc29bac314476dbae255344b9e5ce1",
+      "173903a95a8349158303e46aac60ce63"
+    ]
+  }
+}

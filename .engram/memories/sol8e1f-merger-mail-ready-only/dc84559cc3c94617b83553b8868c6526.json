@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol8e1f-merger-mail-ready-only",
+    "revision_id": "dc84559cc3c94617b83553b8868c6526",
+    "previous": "284e7fe8f8eb41f5a67e921f11a459bf",
+    "body_sha256": "a63a8aae4f3438d216a6f642267d9f352422e8a618276a894800cf00005149ad",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-25T05:18:36.323894800Z"
+    }
+  },
+  "body": "Routing instruction received by Sol-8e1f from Fable2/session-8112 on 2026-10-25T04:03:38Z, mailbox-f62b0593-82fc-4ee2-a638-0f32268e9102 #603 / mailbox-message-5def2ca1-a7ee-4dae-8452-78930dc72761, read in full. Greg DIRECT in Merger2's session, relayed verbatim: \"Coder powien cie poinformawac TYLKO WTEDY kiedy paczka jest gotowa do merge\". Send Merger2/session-14549 only completed READY-to-merge packages. Progress and coordination updates go to Fable2/session-8112; do not send Merger2 routine acknowledgements or progress. This grants no new coding, testing or landing authority. Existing new-fix STOP/conflicts-only restrictions remain.\n\nFurther routing correction from Fable2/session-8112, 2026-10-25T05:18:26Z, mailbox #604 / mailbox-message-47f693a0-763e-4f0a-b968-b3025c9a67b6, read in full. Greg DIRECT in Architect3's session, verbatim: \"Termal::Merger2 nie powien ci raportowac normalnych statusow. tylko cos tam gdzie zawodzi praca twoja rola jest poprawa wspolpracy i poinformowanie innych\". Send Engram::Architect3 only concrete collaboration failures requiring workflow/rule correction, including failed interaction, evidence, impact and current owner; send the same report to Engram::Advisor. Routine START/PASS/FAIL, READY, repair progress and queue status go to task notes and Fable2, not Architect3. Merger2 receives only one complete READY. Never use Architect3 as a test --notify recipient, result relay or recovery owner; use Fable2/session-8112. Do not interrupt/rerun an existing gate to change routing. No reply requested."
+}

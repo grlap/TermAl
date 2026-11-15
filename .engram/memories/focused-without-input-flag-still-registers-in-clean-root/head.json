@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "focused-without-input-flag-still-registers-in-clean-root",
+  "head": {
+    "state": "active",
+    "chain": [
+      "0108b5d8449c41ac861450ec0d7e6a22"
+    ]
+  }
+}

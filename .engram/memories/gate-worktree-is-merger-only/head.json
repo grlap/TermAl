@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "gate-worktree-is-merger-only",
+  "head": {
+    "state": "active",
+    "chain": [
+      "09c67f7f52034affb373e5ee4e09289c",
+      "7f5ab5fbe8934836b8fcb740542393c5"
+    ]
+  }
+}

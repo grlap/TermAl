@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus3-cargo-multi-filter-after-dashdash",
+  "head": {
+    "state": "active",
+    "chain": [
+      "e8d3afb80cb84ff4ae9b7fbac3959d70"
+    ]
+  }
+}

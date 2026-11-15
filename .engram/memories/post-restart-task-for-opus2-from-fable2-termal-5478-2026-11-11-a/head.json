@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "post-restart-task-for-opus2-from-fable2-termal-5478-2026-11-11-a",
+  "head": {
+    "state": "active",
+    "chain": [
+      "ca21ab27e0594740b12017117de52498"
+    ]
+  }
+}

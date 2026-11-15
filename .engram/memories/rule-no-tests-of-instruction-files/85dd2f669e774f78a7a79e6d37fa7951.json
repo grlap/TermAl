@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rule-no-tests-of-instruction-files",
+    "revision_id": "85dd2f669e774f78a7a79e6d37fa7951",
+    "previous": "c324915c6f8c42a4a07ac7b49634d73b",
+    "body_sha256": "8989ef8f6517faf8a7645e42726fdcb7a2c5c2ffceea2363eb1bc6071fa4d9c4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T00:58:14.678775800Z"
+    }
+  },
+  "body": "Greg's standing rules (2026-11-07, relayed by Engram::Asistant, TermAl mailbox 588693a8):\n(1) #652, 00:54Z, verbatim: „USUNAC TESTY sprawdzajace claud.md czy agents.md Natychmiast!! Nigdy ich niedodawac”. Never add tests that read, check or pin the content of AGENTS.md, CLAUDE.md or other agent instruction files (.claude/commands, .claude/reviewers, skills), in any of the team's projects. The files themselves stay.\n(2) #654, 00:57Z, verbatim: „Zero tautologi. Tak marnujemy cykle. Te testy nic nie wnosza. Teraz kazda zmiana wymusza zmiane testow. Czyli edycja 2 razy. O ile zlapiemy to odrazu. Absurd! Nigdy wiecej.” More broadly: no tautological tests, meaning tests that only pin text or mirror the implementation and force a double edit without verifying behaviour. Test observable behaviour where it is needed.\nDo not create automated checks of the rule's wording. Product tests that build temp AGENTS.md fixtures to exercise TermAl features are fine. TermAl deletion plus rule text: w-7dafeeae3cfe (owner Opus3); Engram: w-a577d36eba5c (Merger)."
+}

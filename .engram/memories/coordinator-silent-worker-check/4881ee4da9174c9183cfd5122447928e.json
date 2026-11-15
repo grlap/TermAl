@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-silent-worker-check",
+    "revision_id": "4881ee4da9174c9183cfd5122447928e",
+    "previous": "b633f80b48f948bd9ad5dde7fb6b1be2",
+    "body_sha256": "b0ef90c5cffb16acfae33a650a21fd4970024d932993275af11ad1007c4a6b6f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T05:22:19.761858300Z"
+    }
+  },
+  "body": "Coordinator continuation-wake and hold-ownership lessons, from Fable2's Oct9–18 missed-wake incidents (full chronology remains in revisions1–10). When a worker ends a turn waiting for the coordinator, its final answer may exist only in its transcript. For a multi-turn instruction, name the actual next event and who supplies its continuation; require the worker's one-line report when it ends waiting. A promise to act 'next turn' alone does not create that turn. Process completion notifications and settled task evidence promptly; where the current host already supplies a continuation, account for that before adding another wake. Use supported session/task/mail reads to resolve an overdue report, within current authority, rather than assuming work continued or reading another owner's worktree.\n\nA durableButNotWoken send receipt does not establish a missed wake, a dead worker or failed execution. Read the original exact message's current status and relevant reply before reassigning or duplicating work; preserve original message/key/route for unresolved retries. Do not treat historical five-minute watchdog examples as a new timer or automatic launch/resume rule.\n\nHold-ownership lesson preserved from termal-window16 r12 (Oct18 03:06Z; Advisor #1120/#1121): every coordinator hold names its blocker and explicit release condition on the owning work item, and names who supplies the continuation. State a self-release condition only when it is already explicitly authorized; otherwise retain coordinator ownership. Never leave a worker waiting on an unnamed release event. Current host/backend completion-wake, receipt-ACK and task authority govern. This keeper grants no new dispatch, session resume/cancel, process control, peer-root access or resource window."
+}

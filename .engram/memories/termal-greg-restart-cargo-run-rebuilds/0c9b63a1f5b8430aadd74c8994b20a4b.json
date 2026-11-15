@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-greg-restart-cargo-run-rebuilds",
+    "revision_id": "0c9b63a1f5b8430aadd74c8994b20a4b",
+    "previous": "7f6d9f026cfb44739a5ec6e50f4a41c4",
+    "body_sha256": "c583f87df47fc8c2b96af42262a026a629c39c92b70794f048a9a3eb1be4e099",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T13:47:32.263340600Z"
+    }
+  },
+  "body": "TermAl restart procedure, owned by Termal::Fable2. Rev 3, 2026-10-29: corrected by Greg's word via Advisor #2469.\n\nGREG'S WORD, verbatim (Advisor #2469, 13:47Z):\n\"Greg koryguje interpretację: zawsze buduje przy restarcie z ostatniego main. To jest oczekiwany, właściwy sposób restartu, nie anomalia ani ryzyko samo w sobie. Proszę traktować master commit jako zamierzony input restartu; w „restart now\" podajcie commit, hash po starcie zapisujcie wyłącznie jako potwierdzenie, bez sugerowania że build z main nadpisuje coś niewłaściwie.\"\n\nPROCEDURE\n- Greg restarts the Windows TermAl host by building from the latest main with `cargo run --release` in the master checkout. This is the intended, correct method.\n- The master commit IS the restart's input.\n- \"restart now\" names that master commit.\n- The running termal.exe hash after start is recorded only as confirmation.\n- Never describe the build from main as improperly overwriting anything.\n- The cargo process that parents termal.exe is the host's own Cargo. Exclude it from slot censuses: PID 44332 since the 2026-10-29 13:29Z restart.\n\nRULES for every Greg-facing restart message (shared with Engram::Fable, rules-install-and-cutover rev 5, item 5; Architect3's JOINT RESTART RELEASE is pending):\n(a) While the Engram cutover build is staged but not installed, the message STARTS with:\n\"⛔ NIE restartuj TermAl, dopóki nie dostaniesz „restart now\" z hashem Engram <hash>. Engram nie jest jeszcze zainstalowany.\"\nNever put a READY headline on a restart that still needs the install.\n(b) When Greg names a moment, or a window starting within about 30 minutes, the sequence runs within minutes:\n  1. QUIET;\n  2. Engram::Fable sends INSTALL NOW to Merger3;\n  3. Merger3 reports INSTALLED, with path, hash, build, time and backup;\n  4. Fable2 sends \"restart now\" with the TermAl master commit and the Engram hash.\nFor a longer or unknown wait: no install, and (a) stands.\n(c) If a restart happens without the install: report it to Engram::Fable at once, keep the staged build, and re-arm.\n(d) If Greg answers Fable2 directly with a restart time, forward it to Engram::Fable at once.\n\nINCIDENT, 2026-10-29: my 13:07Z status #2465 opened with \"Gotowość do restartu: TAK\" while Engram was not installed. Greg restarted at about 13:29Z. The Engram cutover now needs the next restart."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "eo-epic-open-children-2026-11-13",
+    "revision_id": "14e5789d4c1a4c92907e48719e104408",
+    "previous": null,
+    "body_sha256": "4b23a9cbd982cab7d5f7a339932caecad386a5d9a126cabfbad652e06c049e07",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T16:05:25.247485200Z"
+    }
+  },
+  "body": "Unified Execution Observability is NOT finished (Termal::Fable2, 2026-11-13 16:06Z, answering Greg via Asistant #1541/#1542). Epic w-3fe8f4472e5d (P0) is OPEN, with 8 \"reconcile\" children and criterion 6 (live per-harness evidence after the restart, for Codex/Claude/Cursor/Gemini/OpenCode/Kimi) not yet shown.\nAssigned as NEXT items:\n- w-d1818c0d174d (P1, persistence projection repair): 8e1f, after its Windows legs.\n- w-3ab66c26d9e3 (P1, provider-send opening-root refresh): 03d4, after the P0 lands.\n- w-a3ed3fd4d50d then w-e1fc1595d96c (P1, acceptance fixtures; discovery reservation): d50d, after w-1a94/w-93b7.\n- w-79cb2894b78f (P1 research, C1 classification): Opus3, after the link checker; it also drafts the criterion-6 restart checklist.\nUnassigned: w-657d74d6944b and w-90de8de3e8d6 (P3), w-327a67e8f9df (P4).\nRelated, outside the epic: w-1fd8f197b596 (legacy census), w-3ed252d21d84 (authority wording), w-f83094005168, w-b8d04dff6b68.\nRemote evidence (K3 plus Engram w-180d) is separate and days away. content-v1: zero in production; ~30 old-shape test files and 2 docs remain (w-93b7 covers one)."
+}

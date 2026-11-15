@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "dl560-termal-runner-session3",
+    "revision_id": "27b3c00ddc6040b3afab7b09d3879a3b",
+    "previous": null,
+    "body_sha256": "38910987208baab6e16186f184f1cf03c4cfd574c9ec6dee0a03a4e7c820372b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-01T01:07:00.126436100Z"
+    }
+  },
+  "body": "The DL560 TermAl runner (since 2026-11-01 01:05Z) is session-3 \"Codex 3\", address host:e83d08f4-22ac-4655-a84d-941fc0eeb4f1::session-3 (relay principal b1711aa7…). It runs TermAl jobs ONLY. Engram's DL560 runner is session-1 \"Codex Live\", which still had a model-setting error (gpt-5.4 unsupported). session-4 \"Engram Runner\" is Claude and is in weekly-limit error until Nov 5; its old prepared jobs are frozen and won't run. Layout, brief v2: everything inside its TermAl checkout R=/home/greg/github/TermAl (master 637616e6). Each job is a detached worktree at R/.tmp/r/<8>, scratch at R/.tmp/r/<8>-s/, bundles fetched to FETCH_HEAD only, R's own tree, index, HEAD and branches never touched, never pushed. TermAl AGENTS.md scope forbids writing to Engram-runner, so the earlier tc/ clone plan was refused correctly. Greg made session-3 work by setting sandbox=danger-full-access (approval never); under workspace-write the mailbox MCP tool needed approval and the CLI got \"connection denied\". Protocol: shared census CARGO_BUILD_JOBS=48, full gates in quiet windows, standalone UNTRACKED, local fingerprint, commit + tree identity, START/END to the requester and Fable2. The old DL560 clone /home/greg/github/Engram-runner/target/termal-clone is frozen until Fable2 releases it."
+}

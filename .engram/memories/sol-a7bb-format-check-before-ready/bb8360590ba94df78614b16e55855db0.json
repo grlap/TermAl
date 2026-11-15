@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol-a7bb-format-check-before-ready",
+    "revision_id": "bb8360590ba94df78614b16e55855db0",
+    "previous": null,
+    "body_sha256": "b3f0b278b2d42452622ccc235acc2499cdb2d5fc5519c8ec4ce8ef3b11934f32",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T00:35:50.878427500Z"
+    }
+  },
+  "body": "Worker reminder for Sol-a7bb, from Termal::Fable2 #2987 (mailbox-message-40e4413e-6f1b-4c2a-8fac-c4641b654532), 2026-11-11T00:34:58.1664278Z: 'Run cargo fmt --check before declaring any candidate READY.' A focused launcher does not run the full gate's rustfmt stage; combo45's FULL failed because a test file was not rustfmt-clean. Run the project's formatter before freezing, and confirm check-only formatting on the final candidate before a new READY handoff. This is a formatting validation requirement, not authority to start Cargo tests, clippy, duplicate FULL runs, edit frozen input during checks, or bypass resource windows. It does not require rerunning a check on an already landed input whose exact full gate already passed fmt. The w-87a2 restart-observation plan is unchanged; do not turn this process note into a capture trigger."
+}

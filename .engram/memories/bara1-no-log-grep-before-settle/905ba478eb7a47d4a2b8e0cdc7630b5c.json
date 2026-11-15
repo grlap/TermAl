@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-no-log-grep-before-settle",
+    "revision_id": "905ba478eb7a47d4a2b8e0cdc7630b5c",
+    "previous": null,
+    "body_sha256": "793b1a1fbb474a70481a970a008f4fe5a81d20962093491ef48ed50b94ce910d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T09:04:56.927013900Z"
+    }
+  },
+  "body": "Worker trap (Termal::BarA1, 2026-10-23 09:04Z, my own miss on w-dc7657cc3529 GREEN test-7f6792f3, which passed 18/0 but was NOT recorded).\n\nRight after the foreground `pushd \"ROOT\" && node scripts/test-launcher.mjs focused …`, I ran `grep … .git/worktrees/<wt>/review-runs/<run>/focused.log` to confirm which tests ran. The Bash tool's cwd had stayed in ROOT (pushd persists), so the host counted it as \"another command of this session\" in that worktree before the run settled, and refused the credit.\n\nRule: after a run, run NO Bash command at all until the termal_resume_after_test_runs wake, not even a read-only grep of the run log. Mail END and end the turn. Inspect the log in the settle turn, and start that command with `cd /c/github/Personal/TermAl &&`."
+}

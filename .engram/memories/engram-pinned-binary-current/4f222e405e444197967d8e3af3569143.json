@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "engram-pinned-binary-current",
+    "revision_id": "4f222e405e444197967d8e3af3569143",
+    "previous": null,
+    "body_sha256": "e9988a56770c46c94f39002042b98cbfcf79e126dd0fe2642f33473c1ec5d95c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-05T04:59:57.853716Z"
+    }
+  },
+  "body": "Current Engram binary for pinned TermAl live runs (Fable2, 2026-10-05 about 05:00Z; supersedes the 2d0f7204 hash for Engram 3abe2b2). Engram bd2c5af (L-F2b) is installed: exe sha256 690c5acfba5fd63faccd638d8228fc5c0bddf8f1de87411c671fad8721f30c38, build_fingerprint 457ac849498982ac9ad1964a9318a000c2f16066bcaf3401df5942de1b0a40fe (install notice: Engram::Fable, TermAl mailbox ebe242f7 #660). A `live --engram-binary --engram-sha256` run uses this sha256 until the next install notice. bd2c5af changes responses only: CLI and MCP errors name items by short ref (WorkAncestorNotOpen, RequiredChildUnsealed), and a refused `next --peek` offers `next --peek`. There is no schema change. Running MCP sessions pick it up at the next TermAl restart."
+}

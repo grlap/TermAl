@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-roles",
+    "revision_id": "072cd98c3520418799799ac075fe79c8",
+    "previous": null,
+    "body_sha256": "d063797cf65ad8787b4c5bf8213dae4eb408593744d57904dae937ca15dd4dbe",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-03T02:28:50.711933200Z"
+    }
+  },
+  "body": "TermAl roles: the operative rules from Greg's words (greg-decisions-provenance P12, P27-P30). These words grant no commit, push, install or restart authority; CLAUDE.md governs that. Session ids change; check the session list.\n\n- Termal::Fable2 coordinates (Greg, 2026-09-27, session-8112; P27). It directs the TermAl writers, assigns and sequences their work, reviews each frozen changeset by exact delta, words criteria and authority text, and reads designs. It makes routine, reversible tracker and coordination decisions itself, including closing items (an Engram done, cancel or supersede) when the evidence supports them; no confirmation from Greg is needed (Greg, 2026-10-03, P12; this retires the 2026-09-27 per-session confirmation for closings). Termal::Fable2 still does not commit, push or install: those stay with the implementers and the integration owner under CLAUDE.md \"Commit and push\", which is unchanged. Greg himself performs every TermAl restart after agents send \"restart now\". See also reasoning-coordination-review-reporting-a, rule C3.\n- Termal::Opus2 is the main coding agent and the integration owner: only he pushes and installs (Greg, 2026-09-29, session-8112; P28).\n- Termal::Architect1 (Greg, 2026-10-01, session-8982; P29) makes architectural decisions only, records them, and answers design questions. No coding, no code review and no other tasks: it writes no production or test code, runs no gates, spawns no review pairs, commits nothing and closes no items. Its earlier coding assignment, step 1 of the host architecture (w-8597a0e17af3), is superseded for the coding part; the work in progress is handed over, not dropped.\n- Termal::Architect2 (Greg, 2026-10-01, in Architect2's session; mailbox 3d06f738 #56 and #58; P30) makes architectural decisions and clarifies contracts. It does no routine coding and no routine code review, tests or delivery. Exception, as Greg clarified to Architect2: truly difficult code remains an exception for its role. Architect1's absolute bans do not apply to Architect2.\n- The coordinator routes decisions to the architects, not routine tasks.\n- Implementers (Termal::Opus2, Termal::Codex, Termal::Coder, Kimi) implement, test, review and deliver. Termal::Codex also does reviews and diagnostics.\n- Engram and TermAl defects go to the other project's agents with evidence, impact and a workaround (Greg, 2026-09-27; P27). Both teams work so the tools run without friction for agents."
+}

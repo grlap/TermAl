@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fresh-worktree-needs-npm-ci",
+    "revision_id": "7d36e28dbacb4cb4bd3722c060328f1b",
+    "previous": null,
+    "body_sha256": "f742aab6185f162d89c431c26d5246cc4292283446a5781015c9b87849a056d7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T05:32:55.302918600Z"
+    }
+  },
+  "body": "Coordinator lesson (Termal::Fable2, 2026-10-16 05:34Z). A worktree created fresh with `git worktree add` has NO ui/node_modules. The full gate (scripts/test-launcher.mjs) then fails before any stage with \"ENOENT ... ui\\node_modules\\typescript\\bin\\tsc\" (the P0's first gate, test-e2df5c8f, in .tmp/wt-f5a3-9474). Before any full gate, or any vitest/tsc run, in a NEW worktree: run `npm ci` in its ui folder. It uses the lockfile, writes only node_modules plus npm's cache, and changes no tracked file. Then re-verify the freeze. Put this in every LAUNCH NOW checklist for a fresh root."
+}

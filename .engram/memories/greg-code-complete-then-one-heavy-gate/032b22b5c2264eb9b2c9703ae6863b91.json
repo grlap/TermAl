@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-code-complete-then-one-heavy-gate",
+    "revision_id": "032b22b5c2264eb9b2c9703ae6863b91",
+    "previous": "e1bbbfb31181437f98a68ff204203432",
+    "body_sha256": "2394112b18addc81b1ec91b64c859751f85d135db3f87277b45649dd23d8411a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T07:53:16.992661300Z"
+    }
+  },
+  "body": "Greg, 2026-11-07 06:47Z (Asistant #757), verbatim: „NIE, testy Questiki na koniec zrobmy to calosc, pozniej zacznijmy testowac, chce miec wstepnie zakodowany feature i wtedy go odpalac na ciezkich testach A NIE troche kodu, ciezkie testy, troche kodu ,ciezkie testy i wtopa BO KAZDA TURA TO OPCJA DLA AGENTOW ABY SPIERDOLILI REGULY”.\nRULE for multi-part features such as EO:\n1. Every part is CODED to completion first, with sensible author tests: focused checks only, no separate review pair or FULL per piece.\n2. The integration owner then composes ONE combined candidate on master, with ONE review pair over the whole input and ONE FULL per required host, then lands and installs.\n3. Restart.\n4. Live consumer proofs (Questly, Phoenix) come LAST.\nDon't stop runs that are already going. Each extra turn or gate cycle is another chance for an agent to break the rules, so minimise the cycles.\nApplied to EO restart 2: TermAl w-8f4c + w-7ebf + w-37d9 as one candidate; Engram E2 increment 1 + w-a43b likewise. Recorded by Termal::Fable2.\n\nAddendum, 07:53Z. Greg (Asistant #794), verbatim: „NIE robic cięzkich testow Zmien wartosc i tyle”. It was about the 30 s source_id fix (M1).\nLesson: a value or limit change is just the value change, through the one named constant. No redesign riding along (the registration no-rescan was dropped), no new tests written for it, and no separate author or real-time runs. The combined candidate's normal gate covers it. Don't escalate a small fix into extra rounds."
+}

@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "central-p0-overlap-rule-2026-11-01",
+  "head": {
+    "state": "active",
+    "chain": [
+      "856c7cad0062445da1e65710f2e80dab",
+      "383441983d694de7b237aa7b402ca3e5"
+    ]
+  }
+}

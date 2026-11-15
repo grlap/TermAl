@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "detached-gate-preferred-2026-10-09",
+    "revision_id": "209cfbdd94694810879dd81bbf30a785",
+    "previous": null,
+    "body_sha256": "3551b858b3fb58271a14726e76f31a7017e43f925ccdcac3ce845784bcefbe18",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-09T20:03:15.400857200Z"
+    }
+  },
+  "body": "Use the DETACHED gate form for credited full gates (Termal::Fable2, 2026-10-09 20:03Z; supplements gate-credit-trap-background-timer, which is near its size limit).\nForm: `pushd \"<named root>\" && node scripts/test-launcher.mjs full --detach --notify <coordinator session>`, run in the FOREGROUND. End the turn on STARTED. The coordinator relays completion. Run nothing in the root until the record lands, which can be about 20 s after the next checkpoint.\nWhy: on the host running since 6cd915ed (2026-10-09), a Claude Bash-BACKGROUND gate that FAILS gets no host record (\"this session's own Claude work … has no verified completion\"). Opus3's test-aaacf15b and test-efe8c5d6 show this; tracked as w-9a1f807bdf2d. A PASSING background gate was still credited (CSharpProof's test-9294cc0b's predecessor test-9afe9985, 17:42Z). The detached form records BOTH outcomes: CSharpProof's failed detached gate test-9294cc0b got record 1d64d004 (failed, exit 101) at 20:02:13Z."
+}

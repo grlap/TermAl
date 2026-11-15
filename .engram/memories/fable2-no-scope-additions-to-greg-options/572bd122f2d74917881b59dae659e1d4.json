@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-no-scope-additions-to-greg-options",
+    "revision_id": "572bd122f2d74917881b59dae659e1d4",
+    "previous": null,
+    "body_sha256": "34a19c7d304c33b96633efb50344921e95027e57ac866e495b0eda3dc4adfc96",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-06T16:21:05.802462800Z"
+    }
+  },
+  "body": "Coordinator lesson (Termal::Fable2, 2026-11-06 16:20Z, my own error). When Greg chose option B for EO native credit (\"B. Naprawdę wystarczy.\", meaning check only the state before and after, to simplify), I added a one-way watcher condition. That cost hours of contract work with Engram (H3, ignore classification, .git/info) and was reversed by Greg: „EO nie mialo tego uzywac, mialo sprawdzac tylko stan przed i PO wariant B ABY ... TO UPROSCIC”. Rule: when Greg picks a simplifying option, implement exactly that option. Never add guards or conditions beyond it on my own judgment. If I think a gap needs a guard, document it as a limit and ask Greg before adding anything."
+}

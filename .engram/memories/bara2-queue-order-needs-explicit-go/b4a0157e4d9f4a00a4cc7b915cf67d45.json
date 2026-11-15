@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara2-queue-order-needs-explicit-go",
+    "revision_id": "b4a0157e4d9f4a00a4cc7b915cf67d45",
+    "previous": null,
+    "body_sha256": "953a1cbf3b87a6ed79d5769403bb89e32f0c78c4269689bce61c65d43498b577",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T01:32:13.868253700Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA2, 2026-10-23 01:33Z; my second slot slip on w-6d40, test-243b0f59). When the coordinator queues me behind named items (\"after X's GREEN and Y's checks\"), a finished run by X's or Y's session in the census does not mean their turn is done: it may be an earlier RED or another check. Do not infer my turn from the census. Ask the coordinator for an explicit GO naming the slot, or wait on the exact run ids the coordinator names (termal_resume_after_test_runs)."
+}

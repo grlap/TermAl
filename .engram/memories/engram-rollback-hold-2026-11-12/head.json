@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "engram-rollback-hold-2026-11-12",
+  "head": {
+    "state": "active",
+    "chain": [
+      "23a425ee03d747968ddd5466aab1bbd9",
+      "49e10c61053c4454a3927f8ca4067b33",
+      "616d1f1181b844cc9f2636acb9c17518"
+    ]
+  }
+}

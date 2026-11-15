@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-auto-approve-new-coding-sessions",
+    "revision_id": "c06b09dfb7d14f69ba0be7740f79b6c2",
+    "previous": "ac2e1c91c8e84b47b0c308df01a065b0",
+    "body_sha256": "d29534eba9b2ee255ac67b4482e2ec07faa05826fadea9f035a5b3f45ed2b38b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T22:23:59.750623500Z"
+    }
+  },
+  "body": "SUPERSEDED, now \"never\" (Termal::Fable2, 2026-10-16 22:08Z). Greg REVOKED the auto-approve direction (Engram::Advisor, TermAl mailbox b9d13887 #922, 22:07:38Z), verbatim: \"Greg revokes the prior auto-approve direction. Immediately set approvalPolicy `never` through the supported settings route for all eight sessions previously changed: 7899, 9860, 11312, 11323, 11330, 11334, 8581, 7305. For future coding/implementation sessions, use `never`, not auto-approve. Read back and report effective policy per session. Do not answer any pending elicitation or ordinary approval automatically; Greg handles prompts explicitly. This supersedes the earlier auto-approve messages.\" APPLIED 22:08Z: all 8 now read back \"never\".\n\nRULE: new coding sessions use approvalPolicy \"never\" (POST /api/sessions {\"agent\": \"Codex\", \"approvalPolicy\": \"never\"}). NEVER use \"auto-approve\" for MCP-using agents. TermAl's AutoApprove maps to Codex \"on-request\" (src/wire.rs:865), which makes Codex ask before every MCP tool call, as an elicitation that auto-approve doesn't answer, so the session PARKS on its first mailbox or tracker call. My 21:56Z switch caused 7899 and 8581 to park at 22:06Z. The lesson: check the mapping to the runtime's actual flag before applying any approval-policy change.\n\nHistory: Advisor #916 asked for auto-approve on new sessions; #918 authorized switching 8 existing sessions, which I applied at 21:56Z; #922 revoked both.\n\n22:13Z, Greg's clarified architecture (Advisor #930; #928's option 3 withdrawn). Codex \"never\" is the Codex-side setting; TermAl auto-approve is a HOST policy and must not be passed to Codex as on-request. P0 w-fa936228028f fixes the mapping (owner Termal::Coder); its criteria are in the 22:13Z note on the item. Until it lands, \"never\" stays as containment everywhere, and no session goes back to auto-approve without Greg's word.\n\n22:18Z. A settings change reaches Codex only at turn/start (src/codex.rs:2105-2121), so turns begun under on-request keep prompting after a switch to never. On Greg's direction (Advisor #935 and #937: \"do not ask him to click approve … Stop/cancel … Do not accept their pending MCP calls\"), Termal::Fable2 stopped all six pre-22:08Z turns (7899, 8581, 11312, 11330, 11334, 7305) with POST /api/sessions/{id}/stop. Their pending prompts were canceled, not accepted. All read back idle, never, 0 pending. Controlled verification: re-wake 11312 alone first and confirm its fresh turn raises no elicitation.\n\n22:24Z, FINAL P0 architecture (Greg via Advisor #942, superseding #930's \"retain Codex never\"): Codex \"never\" can block or deny actions and must NOT be how host auto-approve works. Under host auto-approve, Codex keeps requesting approval (on-request), and TermAl approves permitted routine MCP tool calls itself (elicitations tagged mcp_tool_call), keeping the read-only, write and external guards. \"never\" is containment only. The criteria on w-fa936228028f are in the 22:24Z note."
+}

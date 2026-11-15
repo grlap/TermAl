@@ -1,0 +1,27 @@
+{
+  "id": "01a1e0e7-6d68-7d51-8025-6cae72956389",
+  "external_ref": null,
+  "title": "A Cold non-terminal test-run card for an unchanged indexed run is never revisited and blocks its run's compaction indefinitely",
+  "outcome": "A test-run card that is not terminal, whose run is still indexed and unchanged (for example a card that was Cold, outside the session's in-memory window, when its run turned terminal), is eventually revisited and corrected, so it no longer keeps its run out of compaction forever.",
+  "acceptance": [
+    "A focused test shows that a card left non-terminal while Cold during the pass that made its indexed run terminal is corrected on a later rescan once it is resident again, and that the run then becomes compaction-eligible, without any change to the run's artifacts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "pre-existing",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

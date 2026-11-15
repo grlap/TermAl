@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-standing-ui-dist-rebuild",
+  "head": {
+    "state": "active",
+    "chain": [
+      "c2f78205498640be8f01f84ebe3ce369",
+      "426b2fe4ae5847768744875258b364d6"
+    ]
+  }
+}

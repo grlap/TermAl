@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-greg-merger-role-rule-2026-10-19",
+    "revision_id": "fde39ab929b4420399869b5d6196f615",
+    "previous": null,
+    "body_sha256": "0f47d4c5a367a64d7895901e34ceaedce71f3ff17cdb1ecb25951ee4f0340e0f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T00:28:15.401473600Z"
+    }
+  },
+  "body": "Greg's merger-role rule (relayed verbatim by Engram::Advisor, TermAl mailbox b9d13887 #1193, 2026-10-19T00:27:37Z): \"Greg's merger-role rule: Merger integrates/freeze/gate/review/landing only; every defect, including one-line test/fixture/doc fix, returns to an owning coder in its own worktree. Record this in TermAl's durable coordination memory, inform TermAl Merger and active workers, and enforce it for all future batches.\"\n\nTermAl application (Fable2):\n- Merger and integration owner (Opus2) do integration, freeze, gate, review and landing only. Neither writes fixes.\n- A defect found at any of those stages — including a one-line test, fixture or doc fix, a carry conflict or a compile miss — goes back to the owning coder, who fixes it in its own worktree and re-hands the tree.\n- The coordinator enforces this in every batch and landing message; a landing whose final tree contains a merger-authored fix is refused and returned to the owner."
+}

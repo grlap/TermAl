@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "k3-s2b-landing-release-2026-11-13",
+    "revision_id": "32cc9a066f884b3da08ecf92a08acf67",
+    "previous": null,
+    "body_sha256": "1c43db5d1bd667acbbffe9d1004eec93b211808fe7cbedc05b1c63a9d7a4734d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T07:07:30.670191100Z"
+    }
+  },
+  "body": "K3 S2b landing release (Fable2 #5851, 2026-11-13 07:07Z, quoting Engram::Fable's written concurrence ebe242f7 #7784), for TermAl item w-48c4a207f226 (K3, P0; c593 carries a fresh candidate onto current master because 3 preimages changed, so it needs a fresh review pair): (1) K3 S2b may LAND on master and its termal.exe may be INSTALLED once its gate (DL560 FULL via test ref, plus a Windows leg if it touches Windows-only code) and review pair are green, but ONLY AFTER both coordinators send \"rollback hold ended\" (review about 09:00Z). Installing is not deploying (no restart). (2) The reader-floor raise goes live only at the coordinated all-host restart, as its Greg-act window; before anyone resumes after that restart, every host's running engram must be checked against the floor (c593 sends Engram::Fable the exact floor check). No further release from Fable2 is needed for the landing itself beyond the \"rollback hold ended\" messages. Placement: K3 goes in the Codex 6 FULL lane right after combo87, ahead of combo88 (03d4's 277b). The Engram B-landing prerequisite is met (Engram aacb1370 landed 11-12 15:43:34Z; cutover complete 21:15Z). S2b is only a slice of K3: actually sending remote_verification_record is later work, so closure items (e105, aa7b, w-70ed) stay parked."
+}

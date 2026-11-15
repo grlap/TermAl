@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-claude-gate-launch-rule",
+  "head": {
+    "state": "active",
+    "chain": [
+      "6a5c5bfaed074f8c9b9db3e369259885",
+      "03883320b9574d70a98b425bcec89528",
+      "4a04053710804608abdacacfc1253f84",
+      "14d341ed0b604df88d17fff4c19783e6",
+      "d8c666b5609845ff8e36465f73ccc0e5"
+    ]
+  }
+}

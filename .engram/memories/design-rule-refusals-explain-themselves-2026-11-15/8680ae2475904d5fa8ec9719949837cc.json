@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "design-rule-refusals-explain-themselves-2026-11-15",
+    "revision_id": "8680ae2475904d5fa8ec9719949837cc",
+    "previous": "3e5fe802fa3d4fa78f5f10bf370c2bae",
+    "body_sha256": "a3d16990eca7c702886b23c319c6f00bc64b81536c1c0e2cf9acbd8fc478f279",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-15T06:49:05.956881900Z"
+    }
+  },
+  "body": "DESIGN RULE for TermAl and Engram product behaviour, from Greg's direction via Engram::Asistant 588693a8 #1780, 2026-11-15. PROPOSED by Fable2; concurrence is being sought from Engram::Fable and Kimi::Consultant.\n\nREFUSALS EXPLAIN THEMSELVES. Whenever the product refuses, rejects, skips, ignores or holds an action, input or result, it reports:\n(1) which check decided;\n(2) the concrete reason, using the observed values;\n(3) when one exists, the action that would make it succeed.\n\nThree outcomes are kept distinct and reported as such:\n- REFUSED: final, with the reason and the next step.\n- PENDING: will be retried; it names what it waits on and what would end the wait.\n- UNKNOWN: not observed; it says what is missing and where it could be read.\nNo outcome is invented to fill a gap.\n\nDefects under this rule: silent skips, waits that can never end without saying so, error messages computed and then discarded, and a parse failure that turns into \"not recognized\" with no trace. When a refusal happens on a remote host, its reason travels back to the requester.\n\nThe rule adds no new gates. It applies to new code and to every fix touching a refusal path.\n\nCurrent instances, 2026-11-15:\n- Central's observer wait for a remote run whose runner project has no Engram scope (enabled:false) returns 409 and stays \"pending\" forever. It should refuse with the reason (runner project has no Engram scope) and the remedy (enable Engram for the runner project). Recorded on w-0be4b129ba88.\n- engram_focused_launcher_words computes \"unsupported focused launcher option --request-message-id\", and the caller discards it as None. The command then silently isn't a test, and no completion or credit forms. Recorded on w-fc7c6f8daab0.\n- The causal completion sweep skips silently at every check, with no readable settlement stage. Recorded on w-0be4b129ba88.\n\nCONCURRED, 2026-11-15 06:48Z: Engram::Fable concurred with the exact wording, without amendment (ebe242f7 #8036). Engram records it as memory rules-greg-refusals-state-reason-2026-11-15 rev 2; its docs item is Engram w-c85ae376c244. TermAl's docs item is w-0c01c0463037. A further instance is tracked: evaluator admission of a Markdown-only item refusing with \"inner command is not a recognized test runner\" and no next step (w-3a4a5d31f4f2)."
+}

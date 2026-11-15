@@ -1,0 +1,29 @@
+{
+  "id": "01a1e102-c0ae-7ad1-bc46-576744e0c4cb",
+  "external_ref": null,
+  "title": "Launcher docs: --notify for a coordinator on another host must use host:<host UUID>::<session id> (bare ids select a local root)",
+  "outcome": "Launcher docs: --notify for a coordinator on another host must use host:<host UUID>::<session id> (bare ids select a local root)",
+  "acceptance": [
+    "docs/test.md (and any launcher usage text that shows --notify COORDINATOR_SESSION_ID) states that a coordinator on another host is addressed as host:<host UUID>::<native session id>, that a bare session id selects a local root, and what the refusal says when the form is wrong.",
+    "Lands under the standing rule with the review pair clean and the full gate green; no test pins the doc text."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "federation",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

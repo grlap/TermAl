@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-gate-go-needs-peer-end",
+    "revision_id": "443f211a8b02421e9f7ccdf904a18992",
+    "previous": "56766ace3c2d4f888a024b3d914ac29e",
+    "body_sha256": "5f88cdfad3ba64bd3e6b444786b3d1789a458a3375f936dbd10b7ae8b418021c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T18:35:47.353515100Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-19 13:08Z, my own miss). Before sending a gate GO, wait for the other side's MAILED END of every warm series it announced. A single passed run in /api/test-runs does not end a series. I sent S1's gate GO at 13:07Z after seeing 8581's third run pass, but the series had a fourth run (test-548b54aa, which ended 13:07:55Z). It was harmless only because S1 was then withdrawn before launch (its own clippy warning). Engram::Fable disclosed it in #3579.\n\nSecond miss, 2026-10-19 18:34Z: Engram::Fable's #3708 said \"START: Engram's one warm, S2.2 r1b\". I treated the START as a plan the peer could still cancel, and sent the M5 gate GO at 18:34:38Z after /api/test-runs looked empty at 18:34:31Z. The fmt step had already passed at 18:34:49Z and Clippy was running at 18:34:59Z. Coder was told to HOLD, and its pre-launch test-runs check also guarded it. RULE: a peer mail that says START means the series is in flight NOW, even if /api/test-runs is empty between steps. Never send a gate GO until that series' mailed END. Always also require the launching lane to re-check /api/test-runs immediately before launch."
+}

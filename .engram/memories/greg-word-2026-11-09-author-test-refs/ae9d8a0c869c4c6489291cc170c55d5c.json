@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-word-2026-11-09-author-test-refs",
+    "revision_id": "ae9d8a0c869c4c6489291cc170c55d5c",
+    "previous": null,
+    "body_sha256": "4c276d1c1ea3956c7247d87df58922f0774db56a44fcd35b140e335288dda793",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T17:13:37.785870900Z"
+    }
+  },
+  "body": "Greg's word on author test refs, 2026-11-09 about 17:12Z, verbatim, relayed by Engram::Asistant (TermAl mailbox 588693a8 #1187). It answers the proposal that coders may push their own candidate commits to test branches for the remote runners, in both Engram and TermAl:\n\n„prosze zapisac to jako skille i instrukcje w pamieci\nja nie widze innego sensu”\n\nContext: his question at #1183, „nie rozumiem, czemu po prostu nie wysylamy brancha ?”. The proposal is TermAl's draft in mailbox ebe242f7 #7277 and Kimi c-852a55c9 #180: a writable session pushes its own clean candidate to refs/heads/test/<item>-<commit8> with an explicit refspec; never master or another branch, no force-push, rebase or merge; the runner checks out that exact commit; evidence only; landing unchanged; the pusher deletes the ref once evidence is recorded, at the latest when the item closes. Both repositories are public.\n\nThis widens agent authority. It takes effect only when the instruction text lands under CLAUDE.md's procedure: both coordinators' concurrence on the exact wording, the final wording sent to Greg, and the final-diff audit. Until then the old rule stands: candidates are never pushed, and test refs are the integration owner's, for merge-ready input only."
+}

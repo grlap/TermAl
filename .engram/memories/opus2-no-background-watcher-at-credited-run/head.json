@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-no-background-watcher-at-credited-run",
+  "head": {
+    "state": "active",
+    "chain": [
+      "a5cc0fb476b74427b1edc8efe33bca60"
+    ]
+  }
+}

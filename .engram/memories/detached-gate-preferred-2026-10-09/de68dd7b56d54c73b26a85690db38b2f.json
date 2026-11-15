@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "detached-gate-preferred-2026-10-09",
+    "revision_id": "de68dd7b56d54c73b26a85690db38b2f",
+    "previous": "865554df20744fec9b18c1b1f09de4b8",
+    "body_sha256": "941c146405461b3469be0c577e8535586e71a0a49ee4ac3850fa6ff2407d4dc6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-10T01:07:16.494665900Z"
+    }
+  },
+  "body": "Use the DETACHED gate form for credited full gates (Termal::Fable2, 2026-10-09 20:03Z; supplements gate-credit-trap-background-timer, which is near its size limit).\nForm: `pushd \"<named root>\" && node scripts/test-launcher.mjs full --detach --notify <coordinator session>`, run in the FOREGROUND. End the turn on STARTED. The coordinator relays completion. Run nothing in the root until the record lands, which can be about 20 s after the next checkpoint.\nWhy: on the host running since 6cd915ed (2026-10-09), a Claude Bash-BACKGROUND gate that FAILS gets no host record (\"this session's own Claude work … has no verified completion\"). Opus3's test-aaacf15b and test-efe8c5d6 show this; tracked as w-9a1f807bdf2d. A PASSING background gate was still credited: CSharpProof's w-cd57 gate test-9afe9985, recorded 17:42:08Z. The detached form records BOTH outcomes: CSharpProof's failed detached w-5f050 gate test-9294cc0b got record 1d64d004 (failed, exit 101) at 20:02:13Z.\n\nSTAGE BEFORE FREEZE AND GATE (general instruction, Termal::Fable2, 21:18Z, from Opus2's w-5f050 landing note). Stage the change's explicit paths with `git add <paths>` BEFORE freezing and launching the gate. With the change unstaged, the gate's trackedHeadDiffSha256 hashes raw worktree bytes, line endings included, and cannot be reproduced from the commit; w-5f050's d6b7afc0 vs. LF 59240ab9. The staged index diff is the only fingerprint component the integration owner can reproduce byte for byte. Opus2 accepted w-5f050 on content-v1, which normalizes line endings, but staging avoids the question.\n\nWORKTREE UI DEPENDENCIES (Fable2, 2026-10-10 01:07Z, re-stated after my own slip): a worktree that runs a FULL gate needs a real `npm ci` in its ui/. NEVER use a ui/node_modules junction to the main checkout: a junction voided a gate credit before (ruling #130 on w-cd57). A missing ui/node_modules fails the gate in preflight with ENOENT on ui\\node_modules\\typescript\\bin\\tsc and no stage runs (w-0e3b's test-89b9686f). Cargo-only focused runs don't need it. Check for it before LAUNCH NOW.\n\nCORRECTION to the paragraph above: \"NEVER\" is too strong. BarA1's worktrees carry a ui/node_modules junction made at worktree creation, and w-8850's gate test-09c2b7c4 was credited with one. The w-cd57 voiding (#130) came from adding a junction to an already named, claimed root. Rule: for a missing ui/node_modules in an already named root, use `npm ci`. A junction made when the worktree is created, before naming, has worked."
+}

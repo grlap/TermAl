@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "source-identity-contract-2026-11-03",
+    "revision_id": "4fb53d4e60bb43e295e669a8aa001700",
+    "previous": null,
+    "body_sha256": "efdef3e7d0be547162f35323a55a052a25afa65044cb0f2bed7e13d00c7ef357",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-03T22:10:53.353761800Z"
+    }
+  },
+  "body": "Source identity decision (agreed 2026-11-03 by Fable2, Engram::Fable and Kimi on exact bytes; Greg's words: „maja sie zgadzac commity dla glownego i dla submodules”, „Model ogólny … wymusic te samą wielkosc liter. To nie jest konieczne.”). Frozen text: docs/features/source-identity.md sha256 69b37e9eda1e5c8c1191fb6783a0080a9838c2c394125032f0b6b37b0657e983 (candidate 75bfd811, landing pending).\n\n- One general lane for every Git repository: git-commit:<full root commit id>, tree recorded. \"commit-input v1\" versions only its eligibility rules, not the prefix. Engram's Commit lane is SHA-1 only; a SHA-256 root is refused by name.\n- Clean is Git's verdict with the repo's own core.ignoreCase and core.fileMode. Gitlinks add one clause: every child initialized at its pin and clean apart from the committed exclusion profile; nested, dirty, uninitialized or wrong-pin children are ineligible. Hidden-state guards stay in root and children (skip-worktree, assume-unchanged, sparse, filters/LFS, weak stat, replacement objects).\n- Scope: exact commit and tree judged clean, NOT a byte- or case-faithful checkout. The committed lane has no filesystem case or collision check. Native Windows proof: different-blob A.txt/a.txt shows dirty at child and root; identical blobs show clean and are eligible.\n- content-v1 stays for repos without gitlinks, hash unchanged: admits on-disk directory spelling differences; its ONE new refusal is two distinct tracked paths differing only by case and/or NFC/NFD that resolve to one file. Hard links and terminal symlinks unchanged. Today's code admits that collision, so never describe the change as refusing nothing new.\n- ORDINARY_COMMIT_INPUT_DEFAULT is still false, so content-v1 remains the default basis. Phoenix is blocked by the gitlink refusal, not by case: its root has no case mismatches.\n- Deferred wording for the next revision: replace \"as a false match\" with \"although such a checkout cannot faithfully hold both committed paths\"."
+}

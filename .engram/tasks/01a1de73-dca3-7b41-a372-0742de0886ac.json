@@ -1,0 +1,37 @@
+{
+  "id": "01a1de73-dca3-7b41-a372-0742de0886ac",
+  "external_ref": null,
+  "title": "One undecodable historical row stalls the causal test completion sweep forever, because its cursor only advances on a fully successful page",
+  "outcome": "One undecodable historical row stalls the causal test completion sweep forever, because its cursor only advances on a fully successful page",
+  "acceptance": [
+    "A page of mailbox_messages or mailbox_relay_intents rows that contains a row whose test-request custody, scope, receipt, peer or settlement fails to decode or validate does not stop the sweep: the cursor advances past it, later qualifying requests on later pages still settle, and the skipped row's identity and reason are recorded in a readable, bounded diagnostic; shown by a test with such a row ahead of a valid request.",
+    "Valid rows on the same page as an undecodable row are still planned, and settled history is unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-machine",
+    "design-rule",
+    "eo",
+    "k3"
+  ],
+  "assigned_to": "Termal::Sol-c593",
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered fail-closed row-local causal sweep recovery and bounded readable skip diagnostics. Malformed historical custody no longer stalls later pages; healthy same-page plans and settled history remain intact. Landed521085f7/tree997a, independentWHOLE8 Codex+Claude pair has noMedium+, exactcarryproof, ownerFULL2all6PASS, combinedrestartconfirmed, Windows8/0 exact521 withactualEngramTest225ff. Fresh independent acceptance00a6c24c379d4bd28e6f17e9fcabe800 (Claude18298/delegationeeef7b4b) readWHOLE: bothcriteriaPASS, revision4, exact521/tree997a. FinalnativeGitHEAD/tree/statusallpassclean; no interveningsourcechange.",
+    "completed_at": "2026-11-15T19:09:34.541134700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

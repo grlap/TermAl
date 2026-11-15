@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "integration-prepush-line-ending-check",
+  "head": {
+    "state": "active",
+    "chain": [
+      "c232897d9fba49aa87b98dea9ffb167c",
+      "eefb0e13fa094c2d953e18b10ebf4230",
+      "86bbe1c8080441e6a464e9ad849a4e50",
+      "02ca0522e54149b8b7c8b132ba4a237f",
+      "2d112108a1a64e3597a4ce323f19be5d"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "dl560-termal-runner-session6",
+    "revision_id": "a9a164a026314b35bf2b528b0aa6e175",
+    "previous": null,
+    "body_sha256": "d0bfa8bd63a6542a63c999185c46b0026942cb86a936d9f8da8aaf17e17667b6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T02:34:50.994872800Z"
+    }
+  },
+  "body": "The second DL560 TermAl runner is session-6 \"Codex 6\", address host:e83d08f4-22ac-4655-a84d-941fc0eeb4f1::session-6, created 2026-11-04 about 02:36Z by Fable2 through POST /api/sessions on DL560's loopback API (127.0.0.1:8787 over ssh dl560), on Greg's word „Utwórz poprawnie nową sesję”, relayed by Engram::Asistant, who added: settings like Codex 3 and leave session-5 alone. Settings as returned: Codex, gpt-6.1-terra, high, approval never, danger-full-access, workdir /home/greg/github/TermAl, project-b7327333-6e78-4e54-9196-fc63ab99937b. session-5 stays held at the termal_read_mailbox MCP approval (on-request, workspace-write); nobody answered it. Brief sent in its mailbox #1 follows dl560-termal-runner-session3 and adds: run long jobs detached and end the turn, because a pending wake only runs when the active turn ends (Architect2's w-c752 finding about Codex 3's three-hour turn)."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "post-restart-task-for-opus2-from-fable2-termal-5478-2026-11-11-a",
+    "revision_id": "ca21ab27e0594740b12017117de52498",
+    "previous": null,
+    "body_sha256": "50529a5512f2c895d7f698625256817514f242f9f1fe8da362eb9210e4dcccdb",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T05:19:09.657018400Z"
+    }
+  },
+  "body": "POST-RESTART TASK for Opus2, from Fable2 TermAl #5478, 2026-11-11. After the restart that carries combo49 (journal limit 1024, plus combo50 if it has landed):\n- Record stateInnerHoldMs from the first few naming calls, both successes and refusals, together with the census J (journal entry count).\n- If any hold exceeds about 100 ms, flag it to Fable2 and raise w-d9c949e8a44e (the production pre-index of journal retention scans) to P1.\nBaseline: 12329's 409 at J=256 before the restart reported stateInnerHoldMs=1 in phase read_current_claim."
+}

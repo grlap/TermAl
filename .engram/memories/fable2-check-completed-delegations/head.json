@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "fable2-check-completed-delegations",
+  "head": {
+    "state": "active",
+    "chain": [
+      "eb9256b1d31b456a8848151ae5199444"
+    ]
+  }
+}

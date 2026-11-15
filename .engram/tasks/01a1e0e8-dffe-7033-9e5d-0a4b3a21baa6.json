@@ -1,0 +1,32 @@
+{
+  "id": "01a1e0e8-dffe-7033-9e5d-0a4b3a21baa6",
+  "external_ref": "engram:w-41c10bfdcb07",
+  "title": "Queue independent acceptance automatically once evidence settles (no manual next-turn request or evaluator-slot mail)",
+  "outcome": "Queue independent acceptance automatically once evidence settles (no manual next-turn request or evaluator-slot mail)",
+  "acceptance": [
+    "When an item's required evidence has settled, TermAl queues its independent acceptance evaluation itself. The author doesn't request it in a later turn, and nobody mails for an evaluator slot or manually recovers the spawn.",
+    "Independence, the evidence basis and the capacity limits are unchanged. A queued evaluation waiting for capacity reports PENDING with its release condition, and every refusal names its check, the observed values and a remedy.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed tree that lands."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "greg-directed",
+    "process-simplification",
+    "refusal-reasons",
+    "remote-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e0b1-c86c-79c3-bb16-6831e8936a44",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

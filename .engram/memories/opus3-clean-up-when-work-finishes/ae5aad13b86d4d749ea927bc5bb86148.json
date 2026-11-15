@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-clean-up-when-work-finishes",
+    "revision_id": "ae5aad13b86d4d749ea927bc5bb86148",
+    "previous": null,
+    "body_sha256": "1461dd6ca612467f7ddaf3595a533fcb3c92871acba133c6865d654bd2e2aafb",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T18:06:06.224737300Z"
+    }
+  },
+  "body": "Greg's rule, relayed by Fable2 #5168 on 2026-11-04: „trzeba robic po skończonej pracy a nie czekac az braknie miejsca na dysku”. When an item closes or a candidate is superseded and its evidence recorded, remove its worktrees, target/ and temporary files, after a path check, and say in the closing note what was removed. If something stays, name the reason and when it goes. Never remove what an open item or a running job needs. Nothing on Windows B.\n\nTraps:\n- `git worktree remove` also deletes `.git/worktrees/<name>/review-runs`, the run's original artifacts (cost on w-d428: test-409026dd). Before removing, check nobody has been asked to read those; copy what an open item needs to .evidence/ and record when it goes.\n- A dirty worktree may hold unlanded work: check before removing. Removing target/ alone is safe, since it only costs a rebuild (2026-11-04: 18 target dirs, 159 GB)."
+}

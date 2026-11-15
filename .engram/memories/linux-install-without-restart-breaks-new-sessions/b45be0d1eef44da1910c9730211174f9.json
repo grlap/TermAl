@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "linux-install-without-restart-breaks-new-sessions",
+    "revision_id": "b45be0d1eef44da1910c9730211174f9",
+    "previous": null,
+    "body_sha256": "d27bd5ea4b2a7946f4e53a549d0b35440e365c4113cb9b59d348d4026d16d3e2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T15:21:51.853769600Z"
+    }
+  },
+  "body": "Operational fact (Termal::Fable2, 2026-11-07 15:22Z, TermAl w-f5b824b8e5d6). On a LINUX host (DL560), installing a new TermAl build over target/release/termal while the host keeps running (allowed by the landing rule) makes current_exe() read \"<path> (deleted)\". Every session started AFTER that install then has no TermAl MCP tools, a broken TERMAL_CLI and no Engram MCP binding. Its claims aren't session-bound, so it can't name a source root and cannot earn EO native credit until the next restart. Sessions started before the install keep working. Windows is not affected the same way (Central's running binary is renamed aside). Until w-f5b8 is fixed: on DL560, either restart soon after an install, or create any new sessions BEFORE the install. Don't plan EO proofs in DL560 sessions created between an install and a restart."
+}

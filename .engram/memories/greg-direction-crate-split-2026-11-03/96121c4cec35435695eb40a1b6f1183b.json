@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-direction-crate-split-2026-11-03",
+    "revision_id": "96121c4cec35435695eb40a1b6f1183b",
+    "previous": null,
+    "body_sha256": "6f8c8ec14c898f69da6bb5c205f74edb1c6eac24112a9cf0bd89efff417c7257",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-03T06:36:53.539917200Z"
+    }
+  },
+  "body": "Greg's direction (2026-11-03 06:35Z, relayed verbatim by Engram::Asistant in TermAl mailbox 588693a8 #121): „Ok. To bedzie następna rzecz po poprawkach.”\n\nMeaning: splitting the TermAl backend into smaller Rust crates, with evaluation (acceptance_*) and test-run registration (test_run*) first, is the NEXT work stream once the fixes currently queued have landed.\n- Plan: spike w-ae109290885c (Termal::Architect2) prepares a phased plan now.\n- Implementation starts after the current fix queue lands (see central-queue-2026-11-03).\n- The team proceeds autonomously, with no further approval round trip needed for the plan.\n- Likely first phase: convert the 384 include! fragments into real modules, as pure moves."
+}

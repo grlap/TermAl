@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "integration-prefreeze-fmt-diff-check-2026-11-15",
+  "head": {
+    "state": "active",
+    "chain": [
+      "1db316f15095489d814cbbda579475a0"
+    ]
+  }
+}

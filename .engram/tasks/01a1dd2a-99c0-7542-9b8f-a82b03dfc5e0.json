@@ -18,12 +18,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed on master as 5b3ca013 (11:41Z). The unexpected termal-unadmitted-observation panic was a host-shutdown race: retirement cancels the capture before joining the observation worker, and EngramSourceId::validate honoured that cancellation, so a complete source identity read as malformed and the reporting fixture unwrapped the refusal. Reproduced deterministically by RED checks (exact seq4 text; exact :115:81 panic). Fix: the in-memory identity check runs outside the capture's cancellation through without_capture_cancellation; shape rules and budget deadline unchanged; a sighting met by shutdown stays Pending for replay (coordinator conditions met). Review pairs R2 and R3 clean; landing FULL test-efdaab04 green; registered run a517f8ba at the landed commit; post-landing evaluation 7599a39b passed both criteria. Follow-ups filed: w-742a654d4cf5 (P3 test coverage), w-53edd04720de (P3 pre-existing pattern).",
+    "completed_at": "2026-11-15T17:38:32.179082600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

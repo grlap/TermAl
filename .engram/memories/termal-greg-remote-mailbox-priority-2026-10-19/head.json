@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-greg-remote-mailbox-priority-2026-10-19",
+  "head": {
+    "state": "active",
+    "chain": [
+      "65aa8e9ffd584cf0af9877d044cda03e"
+    ]
+  }
+}

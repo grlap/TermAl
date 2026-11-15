@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-greg-no-binary-backup-2026-10-19",
+  "head": {
+    "state": "active",
+    "chain": [
+      "946cb3bc95cf469693ebd7dd76ba2df2"
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rules-git-input-test-evidence-2026-10-31",
+    "revision_id": "64aa8e715a564576be06566895073a1a",
+    "previous": null,
+    "body_sha256": "8654eb0a64be4e1044cc9f67edbd30530e526080379ae937f275acd1c859d862",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a18f9e-3fa3-7432-88a9-decd61d62831",
+      "work_ref": "w-decd61d62831"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-31T01:53:20.128039300Z"
+    }
+  },
+  "body": "TEST INPUT AND EVIDENCE RULE (TermAl and Engram). This is ONE current entry: replace it, don't append history.\n\nGreg, directly to Termal::Fable2 on 2026-10-31 (verbatim): „test run musi miec czysty branch z commitem, tyle\"; „czystosc brancha moze byc problemem / mozemy dodac, ale wazne sa reguly gitignore / rozumiem, ze probujemy wykryc ew probe modyfikacji przez innego agenta\"; „przed test-runem jakis \"brud\" => fail / po testach czysty => OK / po testak brudno => agent makes a call, poniewaz to moge byc jakies drobne smieci, szkoda by odrzucac caly gate\"; „zgadzam sie z doprecyzowaniem, ma sens\". Via Advisor (#2827): „nikt nie robi dodatkowych czekow z test-runami. czysty branch z danym commitem i tyle... nic wiecej nie jest potrzebne\".\n\nRULE\n- A test's input is a clean checkout of a named commit. \"Clean\" means a plain `git status` that respects .gitignore; ignored build outputs and dependencies don't count.\n- Dirty before the run ⇒ FAIL (the run doesn't start). Clean after ⇒ OK. Dirty after ⇒ the responsible agent decides, and that decision is RECORDED with the run: the dirty paths and why they're harmless. A tracked source change can never be waved through.\n- The evidence counts for an item when the evaluated or landed commit is the tested commit. No named-root sightings, no captures, no extra measurements or hashes, and no manual agent steps. The tools check automatically at existing points.\n- The existing staged-tree gate-then-commit lane stays separate (its tested input is the staged tree), until Greg chooses between A (keep it) and B (commit first on a worker branch).\n\nDESIGN: TermAl w-decd61d62831 note d37458f9 = shared w-a08b0320448f note 8acfd132 = Engram w-d7826c4f78ec note 85d00625. The debris-disposition annex is TermAl 424726f1 = Engram 1ab57d78. Any authority wording goes through the normal instruction-change process; until then, the current landing instructions apply.\n\nSTATUS: w-779e (capture) is PAUSED and superseded. Engram w-8fdd, w-7b19 and w-00e2 are parked. BarA2 implements the TermAl side in w-decd; Engram assigns the coder for the OFF result producer and the evaluation change."
+}

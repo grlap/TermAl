@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-reread-mailbox-between-every-slot-launch",
+    "revision_id": "9df71031a670473594d22b65a13b12c6",
+    "previous": null,
+    "body_sha256": "6c1ac01e083626e9caff4d2953a31c941d02174bc65f55aa534cba0529b815e2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-28T01:29:34.546642300Z"
+    }
+  },
+  "body": "Worker trap (Termal::Opus3, 2026-10-28 01:27Z; my own slip on w-1342015d1040). A slot GO covers a run sequence only while it lasts. When a run FAILS, the coordinator may pass the slot on at once: Fable2 #3790 moved it to Sol-8e1f 3 s after my tsc FAIL. I kept fixing and relaunching without re-reading the mailbox, and six runs landed in another lane's slot. They also ran on changing inputs, so none of them counted. RULE:\n(1) Re-read the coordinator mailbox before EVERY launcher run in a slot, not only the first.\n(2) After any FAIL, stop: preserve the run, diagnose read-only, and mail the coordinator before any relaunch.\n(3) Never edit and rerun inside a slot. A changed input needs a re-freeze and a new GO, and then all planned checks run on that ONE frozen input."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "restart-plan-joint-sync-2026-11-11-0914",
+    "revision_id": "3ab0ea61c07048698ac6420d122a951e",
+    "previous": null,
+    "body_sha256": "3fc88e267385d6cfad2139ebcfa2c2b6fc0bd64ca219f3aa2649564948480918",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T09:16:21.110591500Z"
+    }
+  },
+  "body": "RESTART PLAN, revised by Fable2 TermAl #5536/#5537/#5539 (agreed with Engram::Fable #7555), 2026-11-11 09:14Z. This SUPERSEDES restart-plan-revised-by-fable2-termal-5496-5498-on-2026-11-11-07 (the w-18a1-or-10:00Z rule is cancelled).\n- combo50 has been live since the 08:34Z Central OS reboot (host d63df9e6, built from c6516440). combo51 (cfc4516f) LANDED at 09:14:25Z. There is NO separate restart for combo51 alone.\n- ONE joint restart, estimated ~15:00-17:00Z (Greg has the estimate), carrying combo51 + w-18a1 + the Engram sync install (with w-6ecc3eec6f85, which raises the Engram source --timeout-ms cap from 30000 to >= 60000), plus any TermAl candidates landed and installed by then (d9c9, the 03d4 closing-job route, 71e9).\n- Every installed Engram (Central f96cd91d, DL560 8fc84451, Mac) caps source --timeout-ms at 30000. w-18a1's candidate passes 60000, so its source-owner step fails before cargo on any host until w-6ecc is installed there.\n- Sequence: (1) the sync lands (~13:00-15:00Z); (2) the Engram sync build is installed on DL560 and Central, which Engram::Fable allows AHEAD of the TermAl restart under 4 conditions on Engram w-4eabb205c7b2: readiness with the new build, 0 task_sync_binding rows, no task-sync operations until restart, old binary kept and the install recorded; (3) the w-18a1 FULL on DL560 plus its Windows gate on Central; (4) w-18a1 lands and installs; (5) the joint restart.\n- Until then, other TermAl work (combo51 installs, d9c9, 03d4, 71e9) proceeds normally.\n- DL560 now has a SECOND, Engram-only author lane through Engram Runner session-4 at -j 8 (Fable2 #5534): at most 3 concurrent jobs, FULL priority, report-only, and every FULL result records which jobs ran concurrently.\n- After the joint restart, do the post-restart census task again (named-root journal, 2-3 calls)."
+}

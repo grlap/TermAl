@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "claude-reviewer-model-sonnet-2026-10-12",
+  "head": {
+    "state": "active",
+    "chain": [
+      "1a2c011400e34812b226d11655d8e679",
+      "646ac653213f43e9b742bcbb2d6559b0"
+    ]
+  }
+}

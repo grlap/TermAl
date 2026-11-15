@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "batch-landing-default-2026-10-18",
+    "revision_id": "e587fec59c1b4fe0878528d445f57a45",
+    "previous": null,
+    "body_sha256": "b6d1726c6a7dff4b7e7d5d5ca55624d3c546a208ef90982579ec69f70afdf1a5",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-18T21:27:37.183576100Z"
+    }
+  },
+  "body": "Greg's direction (2026-10-18 21:20Z, via Engram::Advisor #1189, relayed by Fable2 in TermAl mailbox 4daa5b87 #2576), verbatim: 'Merger should batch 2–3 independent ready changes per integration instead of serial single-item landings. Select disjoint paths/no ordering dependency, carry each onto the same current master, resolve any actual conflict, then run one gate/review on the exact combined freeze. Keep conflicting/dependent changes separate. Make batch fan-in the default at next boundary.'\n\nIntegration-owner (Opus2) pre-push checks for a batch:\n- fast-forward, with origin equal to the base;\n- the commit tree equals the combined freeze, and the index and diff hashes equal the one combined gate input, with a stable fingerprint;\n- one review pair on the combined freeze (a member's earlier pair counts only for a byte-exact disjoint carry under the coordinator's ruling);\n- per member, a fresh passing evaluation, with done after the push;\n- pairwise path disjointness checked by me; hold on any overlap not ruled on;\n- carriage-return, authority-text and body-id checks;\n- one release build and install (plus ui/dist if any member touches ui/)."
+}

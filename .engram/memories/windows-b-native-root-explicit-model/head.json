@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "windows-b-native-root-explicit-model",
+  "head": {
+    "state": "active",
+    "chain": [
+      "3ff962bc9b3d428ea10b3549d82174db",
+      "d8c27877b9bb41928339090804e6507c"
+    ]
+  }
+}

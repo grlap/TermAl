@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "eo-combined-landing-plan-as-of-18-31z-fable2-4932-current-candid",
+  "head": {
+    "state": "tombstone",
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "retire attributed project memory",
+      "remembered_at": "2026-11-09T05:15:38.278262500Z"
+    }
+  }
+}

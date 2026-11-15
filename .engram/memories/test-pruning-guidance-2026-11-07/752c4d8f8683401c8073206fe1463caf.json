@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "test-pruning-guidance-2026-11-07",
+    "revision_id": "752c4d8f8683401c8073206fe1463caf",
+    "previous": "f1aa628ec33f415689a5e16f47435325",
+    "body_sha256": "99571bea7de6f12013e8cfc1c03c6244abc0bdf52b1e3560e865b02904806be7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T09:33:40.697401700Z"
+    }
+  },
+  "body": "Test pruning guidance (recorded by Termal::Fable2, 2026-11-07 09:35Z). Kimi::Consultant proposed it in TermAl mailbox 852a55c9 #114 and says Greg asked for refined rules and an opinion. This is GUIDANCE FOR WRITING AND REVIEWING TESTS. It is not a gate. It adds no blocker and no rules test. Missing an answer to it makes a test a deletion candidate, never a new blocker.\n\nProvenance by rule:\n- Rules 2, 3 and 4 rest on Greg's own recorded words.\n- Rules 1, 5 and 6 are Kimi's wording. Greg's verbatim request has not been quoted yet; add it here when it arrives.\n\n1. A test checks OBSERVABLE behaviour in a workflow that is actually supported. A test that only pins text, copies the implementation or confirms its own fixture is deleted, not repaired. (This matches the CLAUDE.md section \"No tautological tests\".)\n2. No tests of phrases in .md files. No test reads, pins or compares AGENTS.md, CLAUDE.md or instruction files. Rules are never enforced through text tests. (CLAUDE.md, Greg 2026-11-07.)\n3. No real sleeps or 9 s / 31 s waits to test a timeout. A plain constant change needs no timing test. Actual deadline behaviour is tested with a controlled clock or IO. Negative tests of real cases stay. (Greg: „Przez to Kimi. To jest problem z takimi testami. Testy negatywne dla timeout to duzy problem.”; „NIE robic cięzkich testow Zmien wartosc i tyle”; see the memory greg-no-real-wait-timeout-tests.)\n4. A FULL or integration gate runs only through the standard launcher, on a clean checkout or worktree of the exact candidate. No gate is built with --no-checkout, a partial clone or copy, or an artificial dirty repo. A dirty source_id may be unit-tested as supported behaviour, but that is never called a full gate. (Greg: „NIE NIE NIE, usun ten test!! MY NIGDY NIE BEDZIEMY TAK PUSZCAC PELNYCH GATOW TO ABOMINACJA!”; „THE TEST IS JUST WRONG / WE NEVER RUN GATES LIKE THIS / ONLY on clean worktrees, not dirty ones”. First applied in the deletion of the windows_launch no-checkout test in the EO candidate.)\n5. Fixtures are minimal and real. Mock only an isolated boundary. Where real components work together, use the proper owner, binary or protocol, not a non-functional stand-in.\n6. Use the cheapest level that catches the regression. No FULL for unit logic, and no rerunning heavy suites for a part. Reviewer question: \"What supported behaviour does this prove, and is there a cheaper proof?\"\n\nCodifying any of this in CLAUDE.md or AGENTS.md goes through that file's instruction-change process (coordinator concurrence, the exact wording sent to Greg, a final-diff audit). It does not delay EO.\n\nRev 2 (Fable2, 09:34Z), source of Greg's request. Kimi::Consultant quoted it in 852a55c9 #116. Engram::Asistant relayed it in mailbox 125b6704 #47 at 2026-11-07T09:30:12Z (message bf70b904), verbatim: „OK. Każ Kimi aby dopracował reguly aby usunac/nie implementowac pewne klasy testów. Zapytaj się czy zgadza się ze mną?” Kimi agreed with Greg. Termal::Fable2 concurred with the content as guidance, not as a gate (852a55c9 #115)."
+}

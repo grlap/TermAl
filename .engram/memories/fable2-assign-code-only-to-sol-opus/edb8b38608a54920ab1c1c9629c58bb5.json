@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-assign-code-only-to-sol-opus",
+    "revision_id": "edb8b38608a54920ab1c1c9629c58bb5",
+    "previous": null,
+    "body_sha256": "8361fcd5468824e5f86ff8cf9917e00ec8da8f2a2d5d9bc7869178df0854bb2b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-31T22:31:17.919851600Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-31 22:40Z, my own slip). When assigning an implementation item, the CODING OWNER must be a Sol or Opus session (Greg's rule, memory greg-decision-2026-10-22-code-authoring-override): only Sol or Opus write source or tests. Mergers keep coordination, intake and integration. Architects do design and review-of-design only, never landing review, execution or merges of patches. I assigned w-c1eba retention slice 1 to Termal::Merger2 (a Codex merger), and it correctly refused (mailbox 891850c6 #1395). The fix: Sol-8e1f is the coding owner, and Merger2 prepares the plan and intake. Before any assignment, check the session's role from its name (Sol-*/Opus* code; Merger*/Architect* don't), not only whether it's idle."
+}

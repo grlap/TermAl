@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rules-greg-minimal-checks-2026-10-26",
+    "revision_id": "099e4717518d44ff813afdb9307beee8",
+    "previous": null,
+    "body_sha256": "e863834199a10244c490db9ce729572d304634e804ebd498be06550560dc565f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-26T18:26:33.322363600Z"
+    }
+  },
+  "body": "TermAl rule from GREG DIRECT, 2026-10-26 18:25Z (Advisor b9d13887 #2039; the same rule is recorded by Engram under this key), verbatim: \"jestem zmeczony dodawaniem tych dodatkowych czekow, ktore doslownie betonuja jakikolwiek postep. zmiana builda nie plywa na security, dodany host jest rownoznaczny z local. juz 3 dzien poprawiamy jakies dodatkowe checki.\"\nOperating rule for all TermAl lanes and coordinators:\n(1) An enrolled, trusted remote host counts as LOCAL for ordinary routing. A build, version or process restart is NOT a security event: no verification, qualification or acceptance gate, extra proof run, or new blocking check because of it.\n(2) Only real security boundaries refuse: enrollment/re-enrollment, a pinned key or credential change, explicit revocation/quarantine, and an actual identity or authority failure. Use the existing transport and process proof; never invent a new layer.\n(3) Each defect gets the minimal fix, tested once, with the repository's standard review pair and gate only. No auxiliary checks, extra proof runs or growing check sequences. Scope additions that only add checks are refused by default.\nFirst application: TermAl P0 w-df99c1bb4e3a."
+}

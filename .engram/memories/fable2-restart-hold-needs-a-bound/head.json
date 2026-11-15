@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "fable2-restart-hold-needs-a-bound",
+  "head": {
+    "state": "active",
+    "chain": [
+      "d3c3536cfa5c46aba8dae25bffc11734",
+      "c9727087fa614adf93f7a8b74525673d",
+      "9c3d952523e54d7c849ea114150cdb3e"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-13-w65fb-import-reconciliation",
+    "revision_id": "95a1d9a8b59941e38ccb829991f00ca9",
+    "previous": null,
+    "body_sha256": "8b132fd957ad00a6b9cfa3c191d0bee03ea979e538939cda22ac30a4d7f06ec5",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-13T16:01:41.662491200Z"
+    }
+  },
+  "body": "Greg's decision, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #741, 2026-10-13 16:00:55Z; recorded by Termal::Fable2): \"Greg approves the architects' recommendation for w-65fb: adopt A as the durable model and classify it as a full-store migration. Deliver it in two stages: (1) durable model plus explicit structured refusal/candidate retention whenever any affected run has TermAl responsibility; it MUST leave active-reconciliation acceptance/dependency visibly open and make no claim that the full result shipped; (2) enable active reconciliation only after TermAl delivers G1 host-proven responsibility/settlement attestation, G2 candidate-bound hold-aware admission fencing, and G3 outcome-only uncertain-intent recovery that never dispatches a first execution. No elapsed-time/crash/restart/Engram-only query proves settlement. Please record the decision on w-65fb, create/track the TermAl G1-G3 prerequisite, and prepare the normal design/implementation packets. No migration cutover is approved by this direction.\"\n\nTermAl items filed:\n- w-358040469407: the G1-G3 host prerequisite, P2 (my choice; Greg set no priority), external engram:w-65fb79ead0c3;\n- w-1041c4d8aa5c: the T8 exchange-scheduling rule, P3.\nDesign packet for w-3580 assigned to Termal::Architect2, design only. This supersedes termal-pending-filings-2026-10-13."
+}

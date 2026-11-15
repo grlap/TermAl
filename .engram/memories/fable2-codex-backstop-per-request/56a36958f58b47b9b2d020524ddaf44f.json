@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-codex-backstop-per-request",
+    "revision_id": "56a36958f58b47b9b2d020524ddaf44f",
+    "previous": null,
+    "body_sha256": "2246e2f31f2aa8eeaf728473ac5fdb6904a8992df50857151a3d06887b70f027",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T08:00:31.411233300Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-30 08:00Z, my own slip). A Codex foreground SSH or exec run gives its operator no completion wake. When such an operator's START asks for a backstop at time T, create a DEDICATED one-shot cron at T right away and echo back \"SET for T (job id)\". Never answer \"the existing backstop covers it\" unless that backstop fires at or after T. Incident: Engram Coder 11334's DL560 run test-6c60bff3 ended at 07:18Z, and I had promised a check at 07:28Z without setting it. The next backstop fired at 07:57Z, leaving the Engram DL560 lane idle for about 40 min. Engram::Fable's matching workaround: Codex operators start the next run only after the echo."
+}

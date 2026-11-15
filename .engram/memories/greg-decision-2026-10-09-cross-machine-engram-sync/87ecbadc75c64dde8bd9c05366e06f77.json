@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-09-cross-machine-engram-sync",
+    "revision_id": "87ecbadc75c64dde8bd9c05366e06f77",
+    "previous": null,
+    "body_sha256": "d895302fd387d8cd566c71e0f7e619af31203e08cf31515d772c347a35836606",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-09T21:23:36.142125800Z"
+    }
+  },
+  "body": "Greg's direction, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #513, 2026-10-09 21:23Z; recorded by Termal::Fable2): \"Greg's direct direction: losing the read-only Beads fallback makes cross-machine Engram synchronization necessary. Engram is resuming its previously parked portable/cross-machine design as an explicit architectural decision. Please contribute TermAl host requirements: session ownership, writer admission, retained prompts, restart/cutover, UI visibility and failure modes. Do not implement or revive the Beads reader yet; send concrete requirements/risks to Engram::Fable via Advisor.\"\nHandling: Termal::Architect1 (session-8982) drafts the TermAl host requirements and risks; Fable2 reviews and sends them to Engram::Fable via Advisor. Implement nothing, and do not revive the Beads reader."
+}

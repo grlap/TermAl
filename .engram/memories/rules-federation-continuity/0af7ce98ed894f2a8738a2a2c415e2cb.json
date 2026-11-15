@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rules-federation-continuity",
+    "revision_id": "0af7ce98ed894f2a8738a2a2c415e2cb",
+    "previous": null,
+    "body_sha256": "f7689a036af58b73c6dbdaae00ff6f1f777e5d02b4c83eabdc2c960edecc2f58",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T14:06:45.971729400Z"
+    }
+  },
+  "body": "CANONICAL: federation continuity across build/restart and network-address changes. This is required behavior and operating guidance, not a claim that an open incident is fixed.\n\nSource: Greg via Engram::Advisor, messages 0b43c1f4-585a-4a9b-bd1f-030441bb0302 and 69c9b135-094c-44b5-845f-475dc4682a44, 2026-10-29. Also Greg's directive in TermAl Advisor #2485 (14:03:58Z): \"trwałe endpointy federacji mają używać nazw komputerów/DNS (np. .local), nie literalnych IP DHCP. IP może się zmienić i federacja nie może przez to przestać działać.\"\n\nReuse the existing enrolled federation transport, credential ownership, reconnect and mailbox-routing mechanisms. Before changing them, compare with the prior working fix and current contract; do not add a parallel reconnect, pairing or routing implementation.\n\nA compatible binary/build-hash or toolchain change and an ordinary process restart must preserve the enrolled peer relationship and recover the authenticated mailbox link autonomously. A new connection gets fresh authentication and a new fenced link incarnation. Existing host/enrollment identities, credentials, mailbox/session identities and original-operation deduplication survive; an old channel or uncertain operation is never silently promoted or re-executed. Do not require Greg to re-pair hosts merely because a build changed. Ordinary mailbox transport must not inherit executor placement or diagnostic onboarding/requalification prerequisites.\n\nA network address is a locator, not peer identity. Persistent endpoints use the host's stable name (DNS or .local), resolved through the existing SSH transport on each connection, not a literal DHCP IP (Greg, 2026-10-29). A literal IP is used only where no stable name exists, and is then treated as a fragile locator. DNS/DHCP movement must not replace the enrolled host identity, pinned SSH key or pair capability. Preserve strict host-key checking and current pair authentication. Changing a stored numeric locator needs an authorized, fenced update and fresh link authentication; do not use re-enrollment, revoke/reset, raw-store edits or relaxed authentication as a disguised address update. If the current API cannot preserve the enrolled relationship for that update, the implementation owner fixes that seam under the existing tracked item rather than asking for routine manual re-pairing.\n\nClassify failures by observed stage: endpoint/name resolution and reachability, credential-read settlement, basis validation, SSH/attestation, current authenticated link and application outcome. A 503, a generic 409 or occurrence after restart alone does not prove a build regression or an address fault. Preserve pending read/OS-operation ownership and the original unknown outcome; reconnect/reconcile through existing recovery rather than starting duplicate work. Real identity/key/protocol incompatibility, revocation and quarantine remain enforced.\n\nThe existing implementation owner records comparison with earlier fixes and tests the affected restart/build and changed-address recovery paths, including unchanged trust and stale-link rejection. The coordinator owns live recovery and any exact configuration request reserved to Greg. Architect3 handles the rule/design correction and adoption evidence, not implementation, tests, scheduling or routine status. Keep incident chronology and discarded hypotheses in the tracked item, not in this current rule."
+}

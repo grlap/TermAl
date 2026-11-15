@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "eo-epic-open-children-2026-11-13",
+    "revision_id": "8f8d66a9680d4ba2aedafa9b1ac9c007",
+    "previous": "14e5789d4c1a4c92907e48719e104408",
+    "body_sha256": "88c2971e0928c03da826de9e350bce1b0817ba5702c1945a72c58dd5310a34fd",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T16:06:25.035010200Z"
+    }
+  },
+  "body": "GREG P0 (verbatim via Asistant #1543, 2026-11-13 16:05Z): closing unified Execution Observability „to jest nasze P0”. Both projects sync, no unassigned work left deferred, and restarts go to Greg through Asistant as a clear RESET NOW.\nEpic w-3fe8f4472e5d: 8 reconcile children, ALL assigned at 16:07Z ahead of closures and lower work:\n- w-d1818c0d174d (P1): 8e1f, now.\n- w-a3ed3fd4d50d, then w-e1fc1595d96c (P1): d50d, now.\n- w-79cb2894b78f (P1 research), then w-90de8de3e8d6 (P3 docs): Opus3, now. Opus3 also drafts the criterion-6 per-harness restart checklist on the epic.\n- w-3ab66c26d9e3 (P1): 03d4, after P0 w-492e lands.\n- w-657d74d6944b (P3): edfd, after the 0419 re-cut.\n- w-327a67e8f9df (P4): a7bb, after the w-a6f5 measurement and slice 1's pair.\nCriterion 6: live evidence after the cutover restart, through Engram's ordinary writer, for Codex/Claude/Cursor/Gemini/OpenCode/Kimi. Needs live sessions per harness. Plan ONE coordinated restart with Engram::Fable (asked in ebe242f7 #7812).\nRelated, outside the epic: w-1fd8f197b596 (legacy census), w-3ed252d21d84 (authority wording; instruction-file process), w-f83094005168, w-b8d04dff6b68.\ncontent-v1: zero in production; ~30 old-shape test files and 2 docs remain.\nThe in-flight landings K3 S2b and then P0 w-492e finish as planned."
+}

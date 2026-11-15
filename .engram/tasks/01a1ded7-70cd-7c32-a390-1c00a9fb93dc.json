@@ -1,0 +1,31 @@
+{
+  "id": "01a1ded7-70cd-7c32-a390-1c00a9fb93dc",
+  "external_ref": null,
+  "title": "Document causal completion scan skips in the mailbox diagnostics endpoint references",
+  "outcome": "Operators find the bounded causal completion scan skip diagnostics and custody-diagnosis guidance from the endpoint's owning architecture and native-mailbox documentation.",
+  "acceptance": [
+    "The architecture endpoint table and native mailbox relay diagnostics documentation describe or link the causalCompletionScanSkips fields and their bounded process-local reset/eviction behavior, cross-linking the test-runs documentation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-rule",
+    "documentation",
+    "eo",
+    "k3",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1de73-dca3-7b41-a372-0742de0886ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

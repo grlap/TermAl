@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-batch-gate-per-member-credit",
+    "revision_id": "1aa200c9222e4200a37e13a7182c47bc",
+    "previous": null,
+    "body_sha256": "d75809a959987b9fe83ac22bbd73b668ac2113fc3a4b9c925b0c1bd73f2dd7cf",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-20T20:08:07.409216800Z"
+    }
+  },
+  "body": "Batch gate per-member credit (Termal::Fable2, 2026-10-20 20:09Z, from Merger #1653 with sources).\n\nA carried full gate settles on its launch claim only (w-f057e4c3a0b6). For a batched gate, use the host-native bind path of w-540531f46f53 (landed 7b8c085f): ONE carried gate launched on claim A binds to claim B when the SAME session holds both live claims and both name the SAME registered root and tree at launch AND at settlement. Each member then gets its own host-minted passed test record.\n- Proof: verification note 6485678107bf4d95a279eaa1cc299fac and the gate note 4e8ca577b2804979b2618e193571be7e on w-540531f46f53, evaluation ee696458488241e589e0f1c1d4155fbb.\n- Member-specific test criteria still need each member's own focused credited checks.\n- Batches whose members are held by DIFFERENT sessions cannot use this. Hand a claim over first (with care, see coordinator-no-handoff-of-root-bound-evidence), or gate them separately.\n- Legacy precedent (w-67d2 + w-030c + w-aec at 23e77889) used Greg's one-time exception instead; don't reuse it without his word."
+}

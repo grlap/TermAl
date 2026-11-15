@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-cargo-memory-budget-2026-11-05",
+    "revision_id": "1ab750bc238e4c97b65ab9f9cc8f3e59",
+    "previous": "5150629f7b4a4ba2acbc86d3295af534",
+    "body_sha256": "8fd3f0191a24962f1a00d0f98cef5f6ffdb1ddc8ae8b630a975d5c1cfa368a23",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-10T05:14:08.183421900Z"
+    }
+  },
+  "body": "Current Central Cargo memory budget (integration owner Opus2 enforces; revised rules from 2026-11-05 23:11Z; retained after Engram::Fable full second reading 2026-11-09 mailbox-message-aa30dc95-2e93-42d2-862f-65e4a7e7cd4a): one Cargo job at a time, RUST_TEST_THREADS=4. A -j4 start requires FreeVirtualMemory >=26 GB (measured peak plus 8 GB reserve). A start with 16–26 GB uses -j2; do not start below16 GB. Owner stops its own run below6 GB and records a resource stop, not a test result. More specific current coordinator windows/holds still apply. The -j2 estimate remains subject to measurement.\n\nMeasurement provenance: Opus2 observed Sol-license test-9e0b6762 (-j4 compile plus336 tests/threads4): FreeVirtual34.7GB at start,17.07GB minimum,35.1GB after, about17.6GB peak commit; first75s sampled coarsely. Sampler .logs/central-freevirtual-8111.log. This superseded the earlier22GB -j4 line in revision1–2; those historical revisions remain accessible.\n\nGreg's word relayed by Engram::Asistant #445, verbatim: «To chyba jest max teraz co mamy.» The old associated paged-pool task w-cf039ab7b131 is cancelled; this does not end the still-current safety rule. Its retirement target is cleared rather than treating the cancelled investigation as expiry of the rule.\n\nREVISION 2026-11-10 05:12Z (Opus2, approved by Fable2 #5273): -j2 compiles on Central may START at a 20.0 GiB raw FreeVirtualMemory floor. Read the raw KiB value; don't round. Conditions: one Cargo job at a time, and no other rustc running. Background: after the 05:02Z restart, Central's free virtual memory stayed at 19-22 GiB, and the stricter 22 GiB hold we had been applying blocked the queued -j2 Windows-only and live jobs. 20 GiB is inside this memory's own rule: a start at 16-26 GB uses -j2, and nothing starts below 16 GB. So this loosens only the extra hold, not the agreed budget; Engram::Fable has re-read it. Unchanged: -j4 needs ≥ 26 GB; RUST_TEST_THREADS=4; a running job stops itself below 6 GB and records a resource stop; pair or evaluator spawns need FV ≥ 16 GB with no rustc above about 5 GB; and the next compile is held until a granted pair's SPAWN line."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-no-handoff-of-root-bound-evidence",
+    "revision_id": "681127b5659f4fcc819ea0fb99e37bab",
+    "previous": null,
+    "body_sha256": "7031ae4be7de9817223c2d031b18d96865bf914d5d1abf318ba48df0af76f990",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T06:38:49.854164300Z"
+    }
+  },
+  "body": "Lesson (Fable2, 10-19, w-5405). Never hand an evaluated, gate-credited item to another session, such as a merger, before done. Credited checks are bound to the holder's named root AND its root-naming generation.\n- After the handoff, the merger's evaluation judged the merger's root: 0/7, insufficient evidence (e18a6797).\n- Handing it back and re-naming the original root moved the generation from 1406 to 1438. Engram then refused a fresh evaluation, because \"6287142e ran under root naming generation 1406, not the current naming generation 1438\".\n- Result: the full gate and live check had to be re-run.\nRule: the producer keeps the claim through the evaluation and done. The merger only commits the byte-identical payload, and the integration owner pushes. Mergers must not request the item's Engram handoff."
+}

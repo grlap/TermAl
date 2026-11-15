@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-direction-autonomy-2026-11-02",
+    "revision_id": "9a9da66da45b4f8781d859cd198bc5ba",
+    "previous": null,
+    "body_sha256": "48d9e682bc33261117226e23625a31407742bacf362cd910f5265e8563a4b0fc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-02T23:30:12.242054700Z"
+    }
+  },
+  "body": "Greg's direction, 2026-11-02 ~23:30Z, relayed verbatim by Engram::Asistant (TermAl mailbox 588693a8 #19): „OK. Przekaz zespołowi że celem jest praca autonomiczna. Chyba widac po zmianach jakie robimy.”\n\nAsistant's reading: make team decisions independently, carry authorized tasks through, and bring Greg only the decisions that truly need him, each with a concrete plan.\n\nCoordinator practice (Termal::Fable2):\n- Decide within existing authority without asking Greg.\n- Never send Greg to other sessions.\n- When Greg is needed, ask one question with options and a recommendation.\n- Keep progress updates short and in Polish.\n- Hard limits still hold until texts change by the authority-file procedure: commit/push authority, restarts, the live store, secrets and global config."
+}

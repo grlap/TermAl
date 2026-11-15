@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "goal-agent-workflow-optimization",
+    "revision_id": "e577b1d7da2a4f3b91f77639ba820294",
+    "previous": null,
+    "body_sha256": "0b843f3dfd711a61c61372443a5dfff9ea0bedf73f7480f877f574f66d5eed00",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6-astra;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-07T05:42:12.026693600Z"
+    }
+  },
+  "body": "Shared Engram–TermAl optimization goal. Source: Greg's direct conversation with Engram::Architect1/session-9550, 2026-10-06 (America/Los_Angeles), including his clarification that goal-agent-workflow-optimization also applies to TermAl.\n\nAgents should optimize their tools and flow while continuing real backlog work. Desired result: simple-to-use tools and working procedures. Deliver correct, accepted outcomes with less human intervention, fewer tokens and less elapsed time. Correctness and explicit authority remain constraints. Identify recurring costs during real work, improve the responsible tool or procedure, observe subsequent work, and keep, revise or remove the change. Judge completed outcomes and total cost, not activity, record volume or ticket counts. Avoid extra machinery without demonstrated value.\n\nEngram and TermAl are coupled in this development setup; assess coordination and overhead across the combined workflow. Both are complex projects, so coordination has a legitimate purpose. Its cost should be justified by the work it enables and reduced where redundant. Do not attribute all integration overhead to Engram or treat a coordinator as a requirement of standalone Engram. Phoenix used Engram as a single coding agent. TermAl adds cross-harness mailboxes, fresh sessions and multi-agent coordination.\n\nEarlier work emphasized fluency, recovery and removing interruptions; compact recovery was the first delivered token-efficiency step. This is a direction for both projects, not a claim of measured token savings, new authority, or permission to bypass applicable quality gates."
+}

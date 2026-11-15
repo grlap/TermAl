@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "remote-runner-bundle-transfer-method",
+    "revision_id": "8cb031e58c934a0daf15e1050a9aa0d9",
+    "previous": null,
+    "body_sha256": "b40b0953f6b529545a947769ca1b0db81d1a4eeac87b968e2591a3bd2ad449d3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-31T22:40:37.858596100Z"
+    }
+  },
+  "body": "How to give a remote runner (DL560, Windows B, Mac) an exact input without pushing (Termal::Fable2, 2026-10-31 22:40Z; from Engram::Merger #136 and Merger3's cache batch). Commit the frozen input as an unpushed candidate commit on a base the runner already has (e.g. a master commit present in the runner's clone). Create `git bundle create <file> <base>..<candidate>`, then send it over the authenticated native TermAl mailbox as ordered base64 chunks in text messages, with its byte length and SHA-256, plus prepare-only instructions. The runner decodes, verifies (SHA-256 and `git bundle verify`), fetches into its own clone, checks out a fresh detached worktree, confirms commit, tree, parent, clean status and fingerprint, and reports PREPARED. Only the coordinator's named GO starts the run. No origin push is involved, so the CLAUDE.md test-ref rule does not apply. A remote focused run is evidence (RED/GREEN), not host-recorded credit for Central claims. DL560's TermAl lane: the Engram Runner's own clone at /home/greg/github/Engram-runner/target/termal-clone (created 2026-10-31 22:36Z from Greg's checkout, push disabled)."
+}

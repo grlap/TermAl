@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-credit-free-window-for-mac-turns",
+    "revision_id": "c676ef2b06a64b43a6d0b8a7c5435524",
+    "previous": null,
+    "body_sha256": "6f7b1d6062e13b27ea29845a954f2138f14904c11b4473237adab0ed6ac99741",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a15a41-cbbd-7bd2-af40-f5f89e7eed42",
+      "work_ref": "w-f5f89e7eed42"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-20T17:01:11.641521Z"
+    }
+  },
+  "body": "Coordinator rule (Fable2, 2026-10-20 17:01Z), holding until w-f5f89e7eed42 is fixed and running on the central host. While a federated remote participant (e.g. O1-Mac, central proxy session-13931) is in a turn, its unresolved remote workdir makes the central host count it as a writer in EVERY central worktree (engram_turn_checks.rs:1328-1337). Any concurrently running check, focused or full gate, in EITHER project then loses host credit. Proof: Sol-8e1f's test-877f0c17 passed 2/0 but was not recorded. RULE: schedule Mac-participant turns (S3 native exchanges, setup prompts) ONLY in a declared CREDIT-FREE WINDOW: no credited check running on the central host, in TermAl or Engram. Give the courier a literal \"CREDIT-FREE WINDOW: GO\" with its length. Before any gate launch, check that 13931 is idle."
+}

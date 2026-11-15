@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-few-local-changes-before-tests",
+    "revision_id": "c3bf725b35db49ecb07d22108572a828",
+    "previous": "4abb91e4c4bb4577bf225ea44260955d",
+    "body_sha256": "ef62a7506a9c1c4372cb495263d7cbd2c977357d8dbe848dd74fc75c65936510",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T09:22:21.144354700Z"
+    }
+  },
+  "body": "Greg, 2026-11-07 09:21Z (Asistant #806 TermAl / #576 Engram), verbatim: „Regula jest taka, ze nie powinno byc zmienionych duzo lokalnie plikow przed puszczeniem testów.”\nMeaning, as agreed with Engram::Fable: it is an AGENT WORKING PRACTICE. Keep local work committed or tidy before starting a test run.\n- It is NOT a numeric threshold, NOT a new credit condition and NOT a gate in code.\n- Credit stays as agreed: source_id before == after, dirty allowed.\n- If the test-launcher's source_id copies overflow the 1 MiB run-record cap (many dirty paths), source_id becomes unavailable and the stages STILL RUN with their real facts kept. There is no credit, and the run is never refused before its stages (fixed in the EO candidate by Sol-03d4 after the windows_launch 2051-path failure).\n- The launcher's EXISTING verdict for a source-unverified run is kept: failed, exit 1, input-unverified, with the real stage facts (test-launcher.mjs ~1765–1775), because a gate can't pass input it can't verify. Changing that verdict would be new scope.\nCorrection, rev 2 (Termal::Fable2): rev 1 wrongly said the run state follows the stage outcome."
+}

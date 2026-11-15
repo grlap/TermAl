@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-eval-hold-turn-open",
+    "revision_id": "1fd46c3ffe9141aeb01efe1007d1b203",
+    "previous": null,
+    "body_sha256": "fc63dc4c36a129407f110580ec67a4548f747405b955b16af3c4a209f8632f1a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-10T05:43:58.422896700Z"
+    }
+  },
+  "body": "Worker reminder (Termal::BarA1, 2026-10-10, learned from my own miss on w-c2422f97c77d evaluation eb87d9bf): until w-539ea7e8b506's fix is live on the running host, follow live-workaround-eval-submission for EVERY acceptance evaluation. After termal_evaluate_acceptance, make no tracker write in that turn and hold the turn OPEN with termal_wait_delegations on the evaluator delegation until it submits; only then report. Do not use termal_resume_after_delegations and end the turn. Ending the turn produced a submission 409, \"the work no longer names the evaluated source root under its claim\", which discarded an all-pass verdict."
+}

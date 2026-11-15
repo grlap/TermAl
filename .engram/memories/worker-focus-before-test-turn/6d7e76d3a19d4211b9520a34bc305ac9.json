@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "worker-focus-before-test-turn",
+    "revision_id": "6d7e76d3a19d4211b9520a34bc305ac9",
+    "previous": null,
+    "body_sha256": "32d66602753a5d640b6b2eb847fe61a3750ea5be8ecd5813b283430b70ea30f3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-20T11:43:55.506660900Z"
+    }
+  },
+  "body": "Worker trap (Termal::Sol-d50d, 2026-10-20, own miss on e12a RED test-c9f5b62f). Changing Engram focus with claim in the same turn as a test does NOT change the item already bound to that turn. I began the turn bound to w-294b, claimed e12a before launching its test in its named root, and the host said it ran outside bound w-294b's root and earned no credit there; neither item received a verification record. Establish the intended test item's focus in a PRIOR closing turn, then run in its named root on the next turn. A multi-item lane must do this before switching between its source roots. Preserve a refused run as execution/investigation evidence; never claim credit or blindly rerun it to repair workflow. The launcher gate was protected by switching back to w-294b and ending the diagnostic turn before the next gate GO."
+}

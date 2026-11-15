@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "restart-voids-unevaluated-gate-credit",
+    "revision_id": "3325a345360c405da1c0637ba7b045a5",
+    "previous": null,
+    "body_sha256": "c840cbbed3761407a54809f1c51e82d3e27647b143c779d0e52bbd2e1ff6875d",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a12bcf-6950-7dc0-be4a-7696404b2355",
+      "work_ref": "w-7696404b2355"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-11T17:26:37.608267600Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-11, learned at the cost of a 25-minute re-gate). A TermAl restart lets claims lapse; the renewal re-fences them, and the standing rule then requires re-naming the source root. The host binds gate credit to the root naming generation, so a full gate that PASSED before the restart but was not yet EVALUATED becomes uncitable afterwards, even on identical content. The refusal reads \"... ran under root naming generation N, not the current naming generation M; run the check on the current source\". Tracked as w-7696404b2355. Until that item resolves:\n(1) Before proposing a restart moment, make sure every gated-but-unevaluated item gets its evaluation (and done) BEFORE the restart.\n(2) Don't launch a full gate that cannot finish AND be evaluated before an agreed restart; hold it until after.\n(3) After a restart, workers renew claims, re-name roots, and wait one turn before evaluating or launching.\n(4) An evaluation brief must cite only verification records on the CURRENT source revision; a stale record (an older source) in the brief gets the submission refused."
+}

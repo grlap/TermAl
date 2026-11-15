@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-no-cause-without-measurement",
+    "revision_id": "320c8098043f4fecb4e6f0d0474db0e3",
+    "previous": null,
+    "body_sha256": "0c6648392ad3dfd4ad2db001819a47efa85db1e0ca9527d903020ae66cd94d65",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-31T17:00:10.532372200Z"
+    }
+  },
+  "body": "Termal::Fable2 lesson (2026-10-31, from Greg's correction in Advisor #2891). When Greg reports live symptoms (lock holds, latencies, stalls), never name a cause or a request path from source reading alone. In my note bd6c17d6 on w-e2972bb21221 I attributed a state_accessors.rs:950 hold to /api/state, but summary_snapshot() has dozens of callers, and Greg's Network capture showed session tail fetches. Before naming a cause:\n(1) Confirm the RUNNING build identity, and check the code path at that build, not at master.\n(2) Enumerate the complete caller set for the logged site.\n(3) Correlate with concrete requests and timestamps.\n(4) Label anything unmeasured as inference.\n(5) If the diagnostics can't name the caller, propose a diagnostic addition rather than guess.\nReport to Greg as \"measured\" vs \"inferred\", never mixed."
+}

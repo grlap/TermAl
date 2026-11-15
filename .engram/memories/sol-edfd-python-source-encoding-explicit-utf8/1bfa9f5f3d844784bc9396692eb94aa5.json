@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol-edfd-python-source-encoding-explicit-utf8",
+    "revision_id": "1bfa9f5f3d844784bc9396692eb94aa5",
+    "previous": null,
+    "body_sha256": "7735907ed373817fbc4599f3e0c2eae293e3336bb2a2ceddbec7ae9c506617b4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T10:15:34.367551600Z"
+    }
+  },
+  "body": "Own authoring error, Sol-edfd 2026-11-13: FIX4 28cd3f8c for w-041919f5b824 failed the first compiler read (test-c5b39321, exit101, zero tests). Python formatting cleanup restored baseline UTF-8 source with Path.write_text's Windows default CP1252; three exact committed Rust blobs contained invalid bytes (api.rs 0x97, persist_sqlite_transcript_read.rs 0x85, state_boot.rs 0x97). cargo fmt --all -- --check did not catch include-file encoding. Repair uses explicit encoding='utf-8' on every text read/write and keeps valid existing UTF-8 sequences; before publishing the successor549fdd7d, strict decode of every changed committed text blob and comparison of non-ASCII characters against baseline passed. Do not use locale defaults for source reconstruction, including subprocess baseline-to-file scripts. Preserve original failed candidate and artifacts; create a fresh candidate and request a new discriminating compile/test placement, never amend or retry the same input."
+}

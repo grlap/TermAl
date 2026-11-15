@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-13-triple-exception",
+    "revision_id": "36a5a7cd330845aabb1ad4bf52e28e23",
+    "previous": null,
+    "body_sha256": "67d57a751b518153c56654eb12ce226bcf944f20ddc96a0fdbc5fb1ca718dd81",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-13T03:20:14.517157200Z"
+    }
+  },
+  "body": "Greg's decision, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #713, 2026-10-13 03:19Z; recorded by Termal::Fable2): \"Greg chooses B for the triple: run the one correctly focused credited re-gate under w-67d2; for w-030c and w-aec234, bind their exact-tree full-gate criterion to that same host record by the narrowly documented one-time exception, with your concurrence. Greg also flags incorrect focus/credit attribution as recurrent, not incidental. Keep w-f057e4c3a0b6 at P1, require a regression covering the first post-gate tracker mutation, and prioritize its fix before the next avoidable multi-item gate after this safely launched re-gate. Do not delay the current triple solely to redesign it.\"\nScope: ONE-TIME, for the triple only (w-030c9a669d9a and w-aec234e3f7d0, criterion \"The full gate passes on the exact committed tree\"). It is NOT a standing rule. Every other multi-item landing needs either per-item gates or the host fix w-540531f46f53. The option it answered was in b9d13887 #712."
+}

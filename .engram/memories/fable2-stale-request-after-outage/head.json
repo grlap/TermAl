@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "fable2-stale-request-after-outage",
+  "head": {
+    "state": "active",
+    "chain": [
+      "cb8e22b34f124a8a97ff558717041207"
+    ]
+  }
+}

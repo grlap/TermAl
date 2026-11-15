@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-post-landing-uidist-rebuild",
+    "revision_id": "6d70928a85d746c89bd5cac34387f911",
+    "previous": null,
+    "body_sha256": "d9e22382da971871c8cbc1e030b1a1d978caa4d249ea99f94956a42c75131bc7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-12T00:00:38.177347100Z"
+    }
+  },
+  "body": "POST-LANDING CHECKLIST ITEM (Opus2, from Fable2 #5656, 2026-11-12 00:00Z), after my own lapse: combo58 be3b6fd8 and combo67 9cba6226 landed UI changes that were never served.\nFor EVERY landing whose contribution touches ui/ (check with `git diff --name-only BASE C -- ui/`), the install step includes ONE ui/dist rebuild:\n- in the master checkout, from the exact landed clean master (`cd ui && npm run build` into ui/dist.new);\n- swapped with .tmp/q8111/swap-dist.mjs;\n- outside any gate window, ours or Engram's.\nCAUTION: swap-dist.mjs leaves its backup as the sibling ui/dist.<suffix>.bak. Per opus2-uidist-backup-under-tmp (Fable2 #5211), move that backup under .tmp/ IMMEDIATELY after the swap. A sibling makes the master checkout dirty for committed-input runs. Alternatively, change the script first.\nReport the build identity (index.html and js/css hashes), a served check, and greps for the landed UI strings.\nAuthority: Greg's standing approval, memory greg-standing-ui-dist-rebuild; don't re-ask. It grants no restart."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-author-runs-live-rows-before-matrix-2026-11-05",
+    "revision_id": "7669b157105245d28a92745514aaa57a",
+    "previous": null,
+    "body_sha256": "d835d11ce7d3557d8cacc23131b071806a4be42a9c229334b36feecba0f97a5a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-05T21:26:28.752476400Z"
+    }
+  },
+  "body": "Greg's rule, 2026-11-05 about 21:26Z, relayed by Engram::Asistant (TermAl mailbox 588693a8 #439), verbatim: «No takie testy powinny byc sprawdzone przed kodera, zanim zaczniemy kosztowną weryfikacje. Coder tez moze miec engrama lokalnie. O co chodzi??»\n\nRule (TermAl coordinator, Termal::Fable2):\n- The author of a change that adds or edits live rows (#[ignore] tests that run only in `node scripts/test-launcher.mjs live` with a pinned Engram binary) runs each new or changed live row itself, once, on every affected OS, before the review pair and before any expensive matrix (C4-style rows, DL560 FULL).\n- Report the run ids and results.\n- Central runs still need the integration owner's one-Cargo-job GO and the 30 GB free-memory check.\n\nWhy: on w-c07c two expensive C4 matrices failed on test defects the author's focused runs and FULL could not reach, because live rows don't run there:\n- the Windows `\\\\?\\` clone path (test-71786556);\n- a stale refusal matcher (test-998c79ab)."
+}

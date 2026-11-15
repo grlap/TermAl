@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "post-restart-task-2-for-opus2-from-fable2-termal-5487-2026-11-11",
+    "revision_id": "32ce78a2638d4dddaecdacefb7052c82",
+    "previous": null,
+    "body_sha256": "4af77d5c0a484d4490db024e764daee00733777539854fb0d97f00e76b0dca1e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T06:54:37.157448700Z"
+    }
+  },
+  "body": "POST-RESTART TASK #2 for Opus2, from Fable2 TermAl #5487, 2026-11-11.\nFable2 sends Greg \"restart now\" right after combo50 (c6516440) lands and is installed, without waiting for combo51.\nAfter that restart:\n1. Read the named-root journal census once at GET /api/diagnostics/named-root-journal. Expect closingJob about 0 and J about 23.\n2. Time the census route with only 2-3 calls, because each call holds the StateInner lock for about 75 ms at J=259.\n3. Report both to Fable2.\nBaseline: on host 34caa386 (combo49), J=259 and closingJob=236, with census latency 71.6-88.0 ms.\nw-d9c949e8a44e is now P1, assigned to Sol-edfd on base cfc4516f."
+}

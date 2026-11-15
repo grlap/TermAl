@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "backlog-sweep-2026-11-13-opus3",
+    "revision_id": "8f1ee4332a6741d09be7c9af89fff956",
+    "previous": null,
+    "body_sha256": "80a47548dedcc5aaa1d2c5d79d64ef8ef1843f69cd0d42eb823a5ed9b524dce7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T04:47:52.251119500Z"
+    }
+  },
+  "body": "Read-only sweep of ready Greg-reported TermAl items by Opus3 at master 57a762c8, 2026-11-13 at about 04:47Z (TermAl mailbox 03723eab #5237–#5239). Full TSV: .tmp/w-7845/sweep.tsv. Totals: 99 items; L 22, P 5, S 7, O 65.\nL (landed, closure only) is ASSIGNED.\n- Opus3 batch A: e105, 1342, 3898, 89f4, cee5, bebb, 4416 (live), c490 (live), e297 (live, after eca7), b547 (live, parked), b1f4 (live).\n- d50d batch B: 1bc6, 8261, e75b, f5bb, 4d5a, c7b5, b784, 39b3, af0d.\n- 8e1f has aa7b; d50d also has 1a94.\nP (partly landed):\n- 0419: edfd has it;\n- 9995: timing landed, cost reduction not done; overlaps 0419, give it to edfd;\n- a6f5: Phoenix path-trie landed, baseline and live run owed; UNASSIGNED;\n- d8f2: c593's closure test owed;\n- ade: c593's NEXT; its criterion is malformed and needs rewording.\nS (superseded by 87f49ed0, which removed turn-gated control and SessionBind):\n- CANCELLED 04:48Z: a423, 8968, 7000.\n- PENDING a decision: 80e0 (I cited it as a live recovery gap; recheck whether stop/pause still holds wakes before cancelling); 4af0 (cancel after child c7b5 closes); 1351 (container; cancel when its 5 P3 children end); b1e6 (SharedSequence never landed; decide whether it's still wanted).\nSECOND LOOK (unassigned):\n- 312d, a272, b0cc: Base-only naming follow-ups, possibly S;\n- dc5a: instruction-file candidate 33c25e45 passed its final-diff audit on 11-09 but NEVER LANDED, and its memory text is not in CLAUDE.md or AGENTS.md; needs the instruction-file procedure;\n- 83d0: candidate 6bae7e60 held on an unfixed Medium;\n- 5701: carry never landed;\n- 3d59: probably fixed by e50332e6.\nO: 58 open-work items, listed in the TSV."
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1deb7-a40c-7f50-9888-bafb9a697613",
+  "external_ref": null,
+  "title": "DL560 C7 held cleanup: leftover TermAl run outputs for Greg to remove (C7's runtime review refused recursive deletion)",
+  "outcome": "The leftover run outputs under DL560's /home/greg/github/TermAl/.tmp/ (503c-full-1, srb-r22-green, 06f3-b, and the R24 root) are removed, by Greg or by an executor whose runtime permits it, using the exact path-checked commands recorded here, and the removal is recorded with sizes and times.",
+  "acceptance": [
+    "Each listed path is either removed with its size and UTC time recorded, or recorded as kept with a stated reason.",
+    "No removal touches anything outside /home/greg/github/TermAl/.tmp/, and the 06f3-b worktree is removed with `git worktree remove` without force."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "dl560",
+    "greg-action"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "worker-no-commands-in-peer-roots",
+  "head": {
+    "state": "active",
+    "chain": [
+      "32a303c7b4634870abfd3b5326dc8998"
+    ]
+  }
+}

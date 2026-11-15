@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-remote-go-defer-to-author-form",
+    "revision_id": "d2384324673143c78123e4bee4052848",
+    "previous": null,
+    "body_sha256": "4f33577b58183d3514834f2d46d4e73971986cbff73d2366fcc03344d72d5412",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-31T12:05:27.884352400Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-31 12:05Z), learned from two slips today on Engram B's a845 batch and the w-18af 7066 batch. When giving a remote runner a named GO, especially an advance GO before the author's job reaches the runner, do NOT spell out a command form of my own (for example 'eight separate focused launchers' or 'two serial launcher runs'). Authors package batches their own way: one focused launcher run of a .sh or .ps1 recipe. My restated form then conflicts with theirs, and careful runners correctly HOLD for reconciliation, which costs a round trip.\nRule: in the GO, name the input identity (commit, tree, parent, bundle or patch sha), the conditions (fresh clean root, own target, census limits such as load ≤4 on the Mac), stop-at-first-failure/no-retry, and notify. For the commands, say 'exactly as the author's job specifies'.\nRelated: before moving a job to another lane, confirm where it is already prepared. A lane flip on crossing messages (B a845 Windows B → DL560 → back) risks a duplicate."
+}

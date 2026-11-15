@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rules-handoff-continuity-2026-11-13",
+    "revision_id": "401a3256c342484f81adebfd0da31dc3",
+    "previous": "0e71faa2f633435390779a6a7b004071",
+    "body_sha256": "1e3a0afa4d2ca4051ad19c8c564db811f0c79637e5f06185048b26b9f45174f7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T03:56:03.000272200Z"
+    }
+  },
+  "body": "TermAl handoff and continuity rules (Termal::Fable2). Rev 8 condenses revs 1–7, 2026-11-13 at about 03:57Z; the history is in those revisions. This MIRRORS the shared Engram rules-push-handoff-2026-11-13 (rev 3+), which governs where the two differ.\nGREG'S WORDS (via Asistant): #1500 „reguly przekazywania dalej sesji musza byc precyzyjne”; #1507 „prace muszą iść cały czas. Bez watcher'a czy mojego 'status'”; #1513 „wylaczmy watcher. Jak przestanie pracowac to poprawimy.”\nCAUSE OF THE 03:30Z \"nobody works\": the FULL train was running on runners the session list doesn't show. The real gaps were unassigned coders (the coordinator's fault), one lost placement request, and display-name sends that didn't wake (w-ee0454f76b19).\nRULES:\n1. Who to whom. Coordinator → coder: assignment. Coder → Opus2: READY or placement. Opus2 → coder: GO or result. Coder → coordinator: done or blocked. Greg is reached only through Asistant.\n2. Queue depth 2. Every coder holds a current item plus a named NEXT. While the current item waits, it does NEXT's read-only plan, and claims NEXT once the current item is in review or gate. On finishing, the coordinator tops the queue back up in the same turn.\n3. Push. Whoever finishes a step wakes the next owner directly, in the same turn. Resource owners (Opus2, the Merger) send the next GO on each END. NEXT names the item plus its dependency id: run, commit, root generation or fence.\n4. Delivery. Use the exact native id (session-N, or host:UUID::session-N), never a display name. A receipt is not delivery. Check the exact messageId's status. Retry only with the identical message, key and route. If a message went down a wrong route, send the recipient a native pointer (mailbox and id) without its content.\n5. Non-pickup. The 20/40-minute thresholds are reference values, checked only on a wake, and only for COORDINATION requests, never for a healthy run. Before any ping or takeover, check the message status, the recipient's ACK, the run's terminal state and the claim/fence. Take over only through an Engram offer/accept plus a native wake, or a recovery claim after a lapse. \"Idle\" in the list proves nothing.\n6. NO watcher of any kind. The cron was deleted at 03:52Z. TermAl's internal handoff-ledger 2 s poll is left as it is, and nothing relies on it as a watcher. Allowed: a ONE-SHOT wake for a fixed-time named event, for example the 09:00Z rollback-hold review, or the act-holds start+15 deadline set only after Greg's „zaczynam” (rules-greg-act-holds-2026-11-12 rev 3; both coordinators concur, #7760/#7762; Greg told so he can overrule).\n7. Event coverage is only: resume_after_test_runs, delegation fan-in, the native mailbox wake, and an Engram offer/accept plus a native wake.\nKNOWN RECOVERY GAPS, fixed when they bite, never with timers:\n- w-ee0454f76b19: display-name sends;\n- w-80e0cb2002da and w-eb21662dce0a: stop, pause or a failed turn holds the queue;\n- w-39913168aff4: a turn dies after accepting a wake;\n- w-acb69d529a71: an ACK continuation is not rebuilt;\n- w-e328556b6a60: offline-peer redrive;\n- no route to the recovery owner, a stated gap.\nQUEUES SET at 03:48Z:\n- c593: w-6930, then w-aa3d5636c295;\n- d50d: w-93b7 and w-70ed, then w-1a94544b753a;\n- edfd: the 4fad and 36d0 closures, then w-79f213be4f9e;\n- a7bb: the 78ec closure, then w-ee0454f76b19;\n- 03d4: w-277b, then w-fd84 with the w-492e slice;\n- 8e1f: w-56cd, then w-eca76d70bca9;\n- Opus3: w-7845, then w-aa0121f4066c."
+}

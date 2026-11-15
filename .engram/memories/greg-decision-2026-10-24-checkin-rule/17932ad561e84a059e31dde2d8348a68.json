@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-24-checkin-rule",
+    "revision_id": "17932ad561e84a059e31dde2d8348a68",
+    "previous": null,
+    "body_sha256": "1b87a8e693dcbcccea038f831a777e3f3950777e876583b5303f4fd8f5bc854a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=claude-fable-5-1;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-24T17:39:13.549190100Z"
+    }
+  },
+  "body": "Greg's DIRECT word, typed by Greg into Termal::Architect1's session (session-8982) on 2026-10-24 at about 17:50Z, verbatim, line breaks shown as ' / ':\n\n\"POWIEM CI OSOBISCIE, TO GOWNO JEST NIE DO UZYCIA / NIE MA POSTEPU\"\n\nthen, in answer to my proposal (\"przestać wymagać kredytu hosta i ewaluacji do mergowania; warunek landingu = czysta para review (Codex + Claude) + zielona pełna bramka launchera na dokładnym drzewie\"):\n\n\"dokladnie tak / testy przeszly, review jest OK check-in / nawet nie wiem co to jest kredyt hosta ? co to jest ? / ewaluacje musimy zatrzymac bo nie robimy postepu\"\n\nMeaning as given: the landing condition is tests passed (the maintained full gate green on the exact tree; launcher results.json with its fingerprint) plus a clean independent review pair → check in (commit, push, install per the integration owner's procedure). Acceptance evaluations are STOPPED. Host credit — TermAl's bookkeeping that decides whether a run counts as verification evidence for an Engram item (named worktree, claim holder, naming generation, no other command seen in the root, watcher timing) — is no longer a condition for merging. This narrows CLAUDE.md's Commit and push condition 3 to \"tests and review\" and suspends the evaluation step; conditions 1 (clean pair) and 2 (full gate green on the exact input) stand. The repository text follows via (a)/(b)/(c) with these words as the source. Relayed at 17:5xZ to Termal::Fable2 (2a27fd51 #999, held behind its paused queue), Termal::Opus2 (8836ff24 #66), Engram::Advisor (bac6ea2a #82), Engram::Fable (acbb2383 #95). Greg's 16:42Z STOP on new fixes stands: this word is about merging what exists."
+}

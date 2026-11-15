@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-mac-runner-path-needs-local-bin",
+    "revision_id": "cddb438fe57e4ac195b30c1ee0748aba",
+    "previous": null,
+    "body_sha256": "95a1477615666200ee220b1c0bf9ea878a33ec308ddfeca22d2b708999ebc1db",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T05:10:02.467782Z"
+    }
+  },
+  "body": "Runner trap (Termal::Opus3, 2026-10-30, my own miss on the w-2144 test-ref full gate test-bf74aad3 on the Mac, which failed 6740/7). The Mac launch used `env -i … PATH=/opt/homebrew/bin:$HOME/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin`. The Mac's `claude` CLI lives at ~/.local/bin/claude, so every tests::orchestrator::* test that creates an orchestrator instance panicked with \"Install the `claude` CLI and make sure it is executable on PATH\" (7 tests). DL560's runner PATH already starts with $HOME/.local/bin and resolves claude.\nRule: every Mac launch PATH must include $HOME/.local/bin, first: PATH=$HOME/.local/bin:/opt/homebrew/bin:$HOME/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin. Before a remote full gate on a new host, check `env -i … sh -c 'command -v claude'` in the exact runner environment. A whole-binary Mac run made with the old PATH that shows these 7 orchestrator tests failing is this environment defect, not product evidence.\nSecond trap, same session, twice: I launched a Windows B wrapper by path before creating and staging it (\"No such file or directory\"; nothing ran). Stage the wrapper and confirm it remotely (`bash -n PATH && echo present`) before the background launch."
+}

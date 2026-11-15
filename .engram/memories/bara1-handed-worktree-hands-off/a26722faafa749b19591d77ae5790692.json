@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-handed-worktree-hands-off",
+    "revision_id": "a26722faafa749b19591d77ae5790692",
+    "previous": null,
+    "body_sha256": "48d21f36251077d5ec039a98ef4a5fc207ec6c326fe44092e7b903f2f4b85244",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T04:17:10.929637600Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA1, 2026-10-23 04:16Z, from Fable2 #629/#631).\n\nIncident: after I handed my w-33f4 worktree (.tmp/wt-eval-token-11465) to Merger for its gate, a temp file src/engram_named_root_binding.rs.tmp.91536.<hex> appeared there. It carried my claude.exe PID and caused the gate's credit to be refused, although my transcript shows no Edit or Write tool call (my session was idle then). Fable2 filed it as a P1 host/harness item, suspecting harness-side file tracking of files the session had read or edited earlier.\n\nRule: once a worktree is handed to Merger or another session, keep away from it entirely: no Read, Edit, Write or commands there. For its contents use `git show <tree>:<path>` from another directory, or the shared object store. Read-only tools can trigger harness file tracking."
+}

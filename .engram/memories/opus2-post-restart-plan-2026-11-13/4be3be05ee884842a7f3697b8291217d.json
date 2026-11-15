@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-post-restart-plan-2026-11-13",
+    "revision_id": "4be3be05ee884842a7f3697b8291217d",
+    "previous": null,
+    "body_sha256": "f94e93f1336a9a2e44200c4689fcf503b6f2a5db2fa4e7e50aa398629bc1b5ba",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T18:20:22.892274400Z"
+    }
+  },
+  "body": "Opus2 post-restart plan after the 2026-11-13 ~18:25Z RESET NOW (master 05062f47, combo94). Full list in .tmp/q8111/post-restart-plan.txt. Central order: agy smoke (03d4) > Combo X freeze (0643+6649+b93e+84cd+Opus3 6c00ca82 on 05062f47; one combined pair; Windows leg; Codex 6 FULL) > EO ab27 R5b Windows FULL (d22f84ab from Engram .worktrees\\a; short path required by w-a76fe0842d73). DL560: s4 baa6 Engram FULL first (.tmp/q8111/s4-baa6-full-1.txt, bundle b163d0d6); Codex 7: d50d w-38a0 r3 typecheck first (filter tests::test_runs::test_run_registration::declared_native::acceptance_admission::) > 8e1f F5DC-2 RED (held GO delivered) > edfd 0419-13 (held)."
+}

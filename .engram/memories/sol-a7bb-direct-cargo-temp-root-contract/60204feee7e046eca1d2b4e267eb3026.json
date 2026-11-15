@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol-a7bb-direct-cargo-temp-root-contract",
+    "revision_id": "60204feee7e046eca1d2b4e267eb3026",
+    "previous": "f1c4bd5a327945ae97a46cbd69c0caca",
+    "body_sha256": "6658c5cdb210c13052418cfc0ea40705ff83feac5b459afeda2f05e3424772d7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T15:56:38.122517100Z"
+    }
+  },
+  "body": "Worker lesson from Sol-a7bb's R14 run test-8ea65bb0 (2026-11-11): setting TERMAL_TEST_RUN_ROOT equal to TERMAL_TEST_USER_TEMP causes every fixture allocator to panic at src/test_temp_paths.rs:71. The existing contract requires RUN_ROOT to be a direct run-* child of USER_TEMP/termal/tests. For direct Cargo after the registered launcher's -- (no test-temp-root wrapper), set repo-local TEMP/TMP/TMPDIR/TERMAL_TEST_USER_TEMP outside the input worktree and leave TERMAL_TEST_RUN_ROOT unset; the Rust owner then creates its product directory safely. Read the current resolver before inventing any override. Original compile succeeded with34warnings but all29 fixture-using cases failed before behavior,12 other cases passed; original FAIL remains preserved. Also inventory actual Rust module mounts before choosing filters: engram_naming_source.rs is source_root_naming::source_id under tests::engram_host_adapter::turn_observations, not tests::engram_naming_source. Check actual executed names/counts, not filename-derived assumptions.\n\nSecond validation test-9ca8f655 (13/34, same setup panic) proved that the intended unset via PowerShell [Environment]::SetEnvironmentVariable(name,$null,Process) DID NOT remove the variable: a tiny Node child environment read saw present:true,value:''; native PowerShell Remove-Item -LiteralPath Env:TERMAL_TEST_RUN_ROOT produced present:false. Use that provider removal and assert Test-Path Env:TERMAL_TEST_RUN_ROOT is false before launch. This is process-local, not a global environment edit. An empty variable still becomes Some(empty PathBuf) in Rust and is invalid. Keep both original failures; never describe an intended unset as applied without checking child-visible absence. No source guard change is justified."
+}

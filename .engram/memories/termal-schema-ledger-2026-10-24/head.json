@@ -1,0 +1,22 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-schema-ledger-2026-10-24",
+  "head": {
+    "state": "active",
+    "chain": [
+      "0cb0374f09eb4a54a362b59c5567849a",
+      "bee604832e9d404891677baba6d07009",
+      "19639573441546a68663f93d2cec0b0a",
+      "59fc601faa664d3db4398c729412adc6",
+      "5d30c55e096a4e7cace7017917c89c6c",
+      "586d2fb6c55c46f68d78612ad25d3033",
+      "9a1f590ad9074ee6bdbc18cda4c9182e",
+      "dbd9aa0d1d584224863004c94b5ba19d",
+      "8ec77f6ac03d4c00936ba6310c21a47f",
+      "913521cac9564272b975b3dc964baa93",
+      "db53028bfc40496ab6d7e711c3db680f",
+      "7b67f57e1621488a8b6a9f3b917dd819"
+    ]
+  }
+}

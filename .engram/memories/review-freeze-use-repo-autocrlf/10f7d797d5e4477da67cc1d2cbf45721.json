@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "review-freeze-use-repo-autocrlf",
+    "revision_id": "10f7d797d5e4477da67cc1d2cbf45721",
+    "previous": null,
+    "body_sha256": "bb75606b5361b9a9c4f255997d688fba72d9bd87e41af406567eaaf740f7cd9b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T07:02:26.869759700Z"
+    }
+  },
+  "body": "Freeze recipe correction (Termal::Opus3, 2026-10-23, on w-80e0). Write the review-freeze manifest under the repository's OWN git config (core.autocrlf=true on this host), with no GIT_CONFIG override:\n`cd <root> && node C:/github/Personal/Engram/scripts/review-freeze-fingerprint.mjs --write <abs .git/worktrees/<wt>/manifest.json>`\nthen `termal.exe review-freeze-check <ABS ROOT> <ABS MANIFEST> <FP>`.\ntermal.exe review-freeze-check computes under the default config. A manifest written with GIT_CONFIG_KEY_0=core.autocrlf / VALUE_0=false gives a different fingerprint whenever the root has CRLF working files, so the check says \"review input drifted\" (and \"manifest … mismatch\" if you pass the default fingerprint against the override's manifest). It only happened to match on roots whose changed files were all LF. The tree id from `git write-tree` doesn't depend on this. Also keep new files' working-copy endings consistent with checkout (CRLF here)."
+}

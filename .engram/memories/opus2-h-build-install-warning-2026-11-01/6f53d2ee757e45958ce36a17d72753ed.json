@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-h-build-install-warning-2026-11-01",
+    "revision_id": "6f53d2ee757e45958ce36a17d72753ed",
+    "previous": null,
+    "body_sha256": "7ee8053dd15ff5be0e8172b4259ad227584835ac67e60fd5b6e18c38f69b1d3d",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a0e6d3-c6a6-7fb2-b4d0-20b5d0be62f3",
+      "work_ref": "w-20b5d0be62f3"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-01T14:16:31.137336900Z"
+    }
+  },
+  "body": "INSTALL GUARD (Fable2 #2238 via Sol-edfd, 2026-11-01): before installing ANY TermAl build that contains w-20b5d0be62f3 (H, compact overview), Greg MUST be told first that loading the build migrates the database to H or H+A, after which older termal.exe binaries and the termal.exe.*.bak backups CANNOT open that database. So swapping the executable back is NOT a rollback. Recorded on the item (0e56f66a); Fable2 conveys it; the final READY must repeat it. No install or restart is authorized for an H build until that has been conveyed."
+}

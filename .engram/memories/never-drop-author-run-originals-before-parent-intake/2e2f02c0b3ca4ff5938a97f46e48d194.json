@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "never-drop-author-run-originals-before-parent-intake",
+    "revision_id": "2e2f02c0b3ca4ff5938a97f46e48d194",
+    "previous": null,
+    "body_sha256": "b173923e933b5fd13c67c53daf0b10fb0e6f23cf27d7533f86427fd68c45c61e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T09:36:57.148801900Z"
+    }
+  },
+  "body": "Scheduler rule (Termal::Opus2, 2026-11-11 09:36Z, my own miss). When dispatching remote author jobs, do NOT authorize the runner to remove a previous job's worktree (RED or GREEN) just because the AUTHOR says it recorded the result. A parent integrator (for example 12325 for Engram sync fixes) may later need the NATIVE original files (results.json, request, input, logs) for its own intake. My GO-MAC-ENGRAM-0867-3 text allowed dropping the 0867-2 worktrees; the RED test-3e236622 originals were removed at 09:10:28Z, and 12325 then could not take them in. Default: retain each author-run worktree until the owner AND the parent integrator (if any) both release it, or until the item closes. Disk pressure is handled by asking the owners, not by preemptive release."
+}

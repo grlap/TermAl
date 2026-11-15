@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "test-hosts-cpu-class-2026-11-04",
+    "revision_id": "000f50bbb4014a7184e9f06aa27d8878",
+    "previous": "e6206ea40a674fdd9470dd6ce54db30e",
+    "body_sha256": "c778d0973ea3f0073a975eb816e4c64cc7fbbb59e075be114818ce569c474ad8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T04:01:09.635232400Z"
+    }
+  },
+  "body": "Greg, 2026-11-04, relayed by Engram::Asistant: „Dl560 ma wolny single core..”, „Tak. Ale dl ma 1ghz na core, windows B ma 4ghz. Inna klasa maszyn.” and „Tak. Jest na oszczedzaniu energii ze wzgledu na hałas.” The last one is deliberate host policy: DL560 stays on power saving because of noise; don't change it or propose changing it. Asistant added: different clock speeds, architectures and loads mean no direct conclusion about a regression from timings alone between these hosts, no needless expensive comparisons, keep the host's configuration and account for it when reading NUMA and mimalloc measurements. Practical rule: compare timings only on one host, on two commits or two settings. Timings across DL560 and Windows B say nothing about product speed. Read from DL560 at 03:58Z, read only: Xeon Gold 6140, base 2.3 GHz, max 3.7 GHz, min 1.0 GHz, governor powersave with intel_pstate active, average 1160 MHz at low load and one core at 3700 MHz. 4 sockets, 4 NUMA nodes, 144 CPUs, distance 21 against 10, numa_balancing=1. A real-clock limit tuned on a fast host is harsher there, which is a test defect, not a host fault. A direct focused cargo test at the default test-thread count ran 400-620 OS threads there; a FULL at 4 threads ran 12-19. NUMA and allocator work is on w-d59057f2b3b5."
+}

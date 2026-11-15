@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "rules-federation-continuity",
+  "head": {
+    "state": "active",
+    "chain": [
+      "0af7ce98ed894f2a8738a2a2c415e2cb",
+      "36a1133b4c39454cb5f58f1744d0fb67"
+    ]
+  }
+}

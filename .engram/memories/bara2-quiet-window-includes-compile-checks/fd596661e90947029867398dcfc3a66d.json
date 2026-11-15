@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara2-quiet-window-includes-compile-checks",
+    "revision_id": "fd596661e90947029867398dcfc3a66d",
+    "previous": null,
+    "body_sha256": "a57df64b9623644c73e1b493314bbc8818b4341d63abedec66d77bd151f2b58a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-24T15:53:36.513418800Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA2, 2026-10-24 15:53Z; my own slip during Fable2's #630 quiet window).\n\nA coordinator's quiet window (\"no new cargo builds or test launches until the gate END\") covers compile-only checks too: cargo test --no-run, cargo check, cargo build. Allowed during the window: source edits, reading, rustfmt and tracker work.\n\nDo not run \"just a quick compile\" to check fixes. Make the edits, then wait for the END mail before compiling. If you slip, report it to the coordinator right away."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol03d4-ready-only-merger2",
+    "revision_id": "56a6ce6011574178981d8ede11008d87",
+    "previous": "8a0723a8a04f43a98efa581f3937950e",
+    "body_sha256": "b8cdef4b7300005463ba7848db1cd28e53e3c948c51eabec48851dd66da141f1",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-25T05:18:43.523732900Z"
+    }
+  },
+  "body": "Worker routing instruction for Termal::Sol-03d4, received from Termal::Fable2/session-8112 at 2026-10-25T04:03:36.978510300Z, mailbox-message-580d5a8e-5f5e-4858-a838-260b004941fa (mailbox5855d837 #1380), relaying Greg's direct word in Merger2's session: \"Coder powien cie poinformawac TYLKO WTEDY kiedy paczka jest gotowa do merge\". Send Merger2 only a completed READY package: independent reviews complete, tests passed, findings dispositioned and full exact-input evidence. No START/END, test-pass or review-in-progress messages to Merger2; send progress to Fable2. This records notification routing, not additional execution/landing authority. The existing c7 READY package and its requested full-evidence export had already been delivered when this instruction arrived.\n\nAdditional worker routing correction, Fable2 #1384 / mailbox-message-72f08956-3059-4131-95ca-1091b5102bea, 2026-10-25T05:18:13.549171700Z, relaying Greg DIRECT in Architect3's session; canonical sources Engram rules-merger-role r7 and rules-architect-escalation-boundary r2. Send Architect3 only concrete collaboration failures needing workflow/rule correction (failed interaction, evidence, impact, current owner), and send the same report to Advisor. Routine START/PASS/FAIL, READY, repair progress and queue status go to task notes and Fable2, never Architect3. Future tests use --notify session-8112 (Fable2); Architect3 is not a notification recipient, result relay or recovery owner. Do not interrupt or rerun any running gate to change routing. Merger2 still receives only a complete READY. This is a worker reminder/provenance record, not another canonical rule or new authority; no reply was requested."
+}

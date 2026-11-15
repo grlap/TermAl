@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-10-cross-host-pilot-readiness",
+    "revision_id": "5111fda943284412af727efc62e9f37a",
+    "previous": null,
+    "body_sha256": "e9c69fece10073476b5d8ea51ac9785a1639516562ab227a4f7ae5bbd6c379d2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-10T23:08:34.605798400Z"
+    }
+  },
+  "body": "Greg's direction, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #549, 2026-10-10 15:46Z; recorded by Termal::Fable2 at 23:12Z after a capacity stall): \"Greg's direction: the intended architecture is gradual cross-host collaboration. When TermAl remote coordination and the optional Engram Git task sync are ready for a real configured cross-machine test, notify Advisor with the concrete plan/prerequisites. During normal work, record each observed friction as a diagnosed backlog item.\"\nApplied: (1) when TermAl's remote-notification slice (w-7e947cec3d91) and Engram's Git task sync are both ready for a real configured cross-machine test, send Advisor the concrete plan and prerequisites; (2) every observed friction during normal work gets a diagnosed backlog item, as done tonight (for example w-88e5c2fe6985 and w-ab0285840da6). This grants no commit, push, install or restart authority beyond CLAUDE.md."
+}

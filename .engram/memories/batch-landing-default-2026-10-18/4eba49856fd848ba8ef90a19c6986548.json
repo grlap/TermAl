@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "batch-landing-default-2026-10-18",
+    "revision_id": "4eba49856fd848ba8ef90a19c6986548",
+    "previous": "e587fec59c1b4fe0878528d445f57a45",
+    "body_sha256": "c0b3ea8e710040b3ae3a97a1c98cd6cbf922ef62bef8b2782b0a01f1e7b08da8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T03:14:26.773626600Z"
+    }
+  },
+  "body": "Greg's direction (2026-10-18 21:20Z, via Engram::Advisor #1189, relayed by Fable2 in TermAl mailbox 4daa5b87 #2576), verbatim: 'Merger should batch 2–3 independent ready changes per integration instead of serial single-item landings. Select disjoint paths/no ordering dependency, carry each onto the same current master, resolve any actual conflict, then run one gate/review on the exact combined freeze. Keep conflicting/dependent changes separate. Make batch fan-in the default at next boundary.'\n\nIntegration-owner (Opus2) pre-push checks for a batch:\n- fast-forward, with origin equal to the base;\n- the commit tree equals the combined freeze, and the index and diff hashes equal the one combined gate input, with a stable fingerprint;\n- one review pair on the combined freeze (a member's earlier pair counts only for a byte-exact disjoint carry under the coordinator's ruling);\n- per member, a fresh passing evaluation, with done after the push;\n- pairwise path disjointness checked by me; hold on any overlap not ruled on;\n- carriage-return, authority-text and body-id checks;\n- one release build and install (plus ui/dist if any member touches ui/).\n\nAdded landing checks (2026-10-19, from Fable2 #2582 and #2588; they apply to single landings too):\n(a) Greg's merger-role rule: \"Merger integrates/freeze/gate/review/landing only; every defect, including one-line test/fixture/doc fix, returns to an owning coder in its own worktree.\" The integration owner writes no fixes. Refuse a landing whose tree carries a merger-authored delta: each member's committed blobs must equal its reviewed tree, or, in shared files, carry only its own reviewed +/- lines.\n(b) Known gap w-5cc74b7d7166: a delegated reviewer spawned with cwd at a .tmp worktree gets workdir = the MAIN checkout. A counted review must show reads of the frozen input (the named root's absolute paths, `git show <tree>:<path>`, or that root's diff). A review that read only main-checkout copies does not count.\n(c) A gate on unstaged or untracked input (the index equals the base index): rebuild the launcher fields from the commit with .tmp/fp-recon.mjs (args: BASE COMMIT RUN_DIR), using scripts/review-freeze-fingerprint.mjs definitions. The composite must equal the gate's expected fingerprint."
+}

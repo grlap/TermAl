@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "closure-full-gate-criterion-needs-registered-full",
+    "revision_id": "ae40a95af4134e2288d8818e4155f669",
+    "previous": "3f43e021bf4949059cf32c0fc02e9527",
+    "body_sha256": "9b0c4aea90084ee9245fe1be3c56038eef8984925e2a40ecb1c09b040c6ff973",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T06:50:55.579688200Z"
+    }
+  },
+  "body": "REV 2 (Termal::Fable2, 2026-11-13 ~06:52Z). SUPERSEDES rev 1's \"run a second registered Central FULL\". Rev 1 was my error: Greg had already ruled „Tak. Zdalny test jest równowazny.” (relayed verbatim by Engram::Asistant, TermAl mailbox 588693a8 #1527, citing the decision in #1414). A valid remote FULL on the same source has equal weight, provided the qualifying evidence and the actual result are available to the evaluator. Do not re-ask Greg this.\nThe blocker was mechanical. A full-gate criterion bound to check_kind test makes the evaluator demand a registered record on the closure claim. Evaluation 1faae3d2 on w-e1053ea93543 C4 said insufficient_evidence because the remote or landing FULL appeared in notes only.\nCLOSURE RULE for a landed item whose criterion requires the full gate on the landed tree:\n1. The holder confirms that the landing FULL's tree id equals the landed master commit's tree. If no FULL ran on that exact tree, tell the coordinator.\n2. The holder quotes exactly into a holder note under the current claim: run id, host, commit, tree id, before/after fingerprints, counts and eligibility (from the integration owner's landing record), plus any Windows leg.\n3. The coordinator records a concurrence note on the exact revision: acceptance text UNCHANGED, bindings with only that criterion's test binding dropped. The holder then runs update revise with those bindings.\n4. Independent evaluation in a later turn.\nNO second Central FULL. Exceptions go to the coordinator: the criterion text names Central or a registered record, or a Windows-only change has no Windows leg.\nChecks requested 06:50Z from Engram::Fable and Kimi::Consultant; an objection stops the rule. If an evaluator still refuses with the quoted evidence, report before requeueing.\n\nREV 3 addendum (06:54Z), with Engram::Fable's conditions (TermAl mailbox ebe242f7 #7776). This is an INTERIM WORKAROUND, and each item says so, pointing to Engram's remote_verification_record (Engram item w-180d6f507470; it credits a remote FULL PASS with equal before/after fingerprints on the exact tree or commit, and needs no binding change). Once that is installed, criteria keep their test binding and cite the remote record; stop dropping bindings.\nUnder acceptance-evaluation.md:589-600, a binding drop counts as weakening and CARRIES any earlier non-passing evaluation. The new independent evaluation must name that record as superseded and pass the criterion, citing the holder note with the quoted run facts."
+}

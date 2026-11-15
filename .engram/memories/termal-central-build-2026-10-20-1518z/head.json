@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-central-build-2026-10-20-1518z",
+  "head": {
+    "state": "tombstone",
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "retire attributed project memory",
+      "remembered_at": "2026-11-09T05:00:24.849527400Z"
+    }
+  }
+}

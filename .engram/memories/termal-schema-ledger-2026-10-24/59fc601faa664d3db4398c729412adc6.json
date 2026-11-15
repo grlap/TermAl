@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-schema-ledger-2026-10-24",
+    "revision_id": "59fc601faa664d3db4398c729412adc6",
+    "previous": "19639573441546a68663f93d2cec0b0a",
+    "body_sha256": "c4488fe7bc9707254d6be7866866e52d7f6bf7650198893ba544d22473db5626",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-25T17:30:15.433103400Z"
+    }
+  },
+  "body": "TermAl SQLite schema ledger, revision 4 (Fable2, 2026-10-25 17:31Z; the authoritative copies are on w-feba31b85e17). It supersedes the 2026-10-24 order for the remote P0 set (Greg #1833: \"every remote issue P0, working today\").\nPRIMARY store (floor on master cde926c4: \"2-metadata-units-2\", from w-cce8fff7c62d):\n1. LANDED: \"2-metadata-units-2\".\n2. NEXT: directPrompt (w-a8af3a34d80a, Termal::Coder) takes the NEXT primary floor directly after \"2-metadata-units-2\". The Coder names it by the lineage convention and records the exact string on w-a8af.\n3. THEN, in the same strict relative order as before, each carried onto the landed directPrompt floor before its final freeze, with its floor string extended from the directPrompt floor:\n a) handoff-1 (Sol-a7bb's v3, the w-a108 batch; ruling be11673f);\n b) obligations-1, the JOINT floor (w-1e85dae945d4 with w-5139; ruling 6cd7777d);\n c) delegations-1 (w-4fad42a4ffe7, Sol-03d4; ruling abb94a3d).\nNone of a-c is READY or in today's scope, so moving them after directPrompt costs them only a re-carry.\nSTRICT publication order, with no sibling floors.\nCOORDINATION store (floor on master cde926c4: \"5-mailbox-relay-1\"):\n- step 6: w-44909af1b8bc (Opus3, central executor outcomes table);\n- step 7: directPrompt (w-a8af3a34d80a).\nContiguous in landing order. If directPrompt is ready to land before w-4490, Fable2 swaps 6 and 7.\nFEDERATION profile contract: a separate constant \"2\" (1150c838, via w-efeee). It is never the storage floor.\nNo floor change: w-efeee, w-de6021f4b32f (landed), w-aa7bb4e4e47f (landed), w-3b6225f4da8b, w-616edd0409b9, w-16cbff19cd11, w-d5e10300b0df (each must ask Fable2 before adding a step)."
+}

@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "focused-launcher-credit-live",
+  "head": {
+    "state": "active",
+    "chain": [
+      "e4f21874391042ecb85aac6b4f98da8a",
+      "ee972a3445e04a049e82cd6a970ec1df",
+      "4ab79f57e4e043fab0c85437367960e5"
+    ]
+  }
+}

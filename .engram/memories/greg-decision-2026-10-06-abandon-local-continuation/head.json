@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-decision-2026-10-06-abandon-local-continuation",
+  "head": {
+    "state": "active",
+    "chain": [
+      "ac49cee4c5114eb39f07389f36d37b46"
+    ]
+  }
+}

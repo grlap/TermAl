@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-pending-count-artefact",
+    "revision_id": "2451d25441224a58addea98ad984aa29",
+    "previous": "1934f59723fa4b31aa69c97e6eafb46c",
+    "body_sha256": "7dcffdafee59e3fe59111d7f995d9245cf0bd099dcd200b051c77ed4935716bc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T04:54:52.696765800Z"
+    }
+  },
+  "body": "Coordinator trap (Termal::Fable2, 2026-10-20 04:24Z, found by Sol-1cee). In PowerShell, @($s.pendingPrompts).Count returns 1 when the field is null or absent. The /api/state session projection omits pendingPrompts and queuedMessages, so every ad hoc \"pending=1\" reading tonight was false. Check presence with ($null -eq $s.pendingPrompts), or read the field list. Judge a stuck queue only from status, queuePaused and the send API's notificationDisposition, never from that count.\n\nRelated structured-read lesson preserved from Fable2's termal-window34-2026-10-19 r7: determine work lifecycle from the actual typed lifecycle field of the response being read (status.work.lifecycle in that status shape), never by regex over the whole JSON. A lifecycle word can occur in unrelated nested criteria, notes or history. Check that the field exists for the particular operation instead of interpreting an absent field or incidental text as state."
+}

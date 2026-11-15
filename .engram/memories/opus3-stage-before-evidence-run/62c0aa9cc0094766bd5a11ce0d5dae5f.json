@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-stage-before-evidence-run",
+    "revision_id": "62c0aa9cc0094766bd5a11ce0d5dae5f",
+    "previous": null,
+    "body_sha256": "93d616d2b4b477fde22efff76ad3d42e64e886eb1c77516d1e002c929eaac700",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-26T04:37:48.869056800Z"
+    }
+  },
+  "body": "Worker trap (Termal::Opus3, 2026-10-26 04:35Z; my own slip on w-4018, GREEN test-2261f284). Stage the exact input BEFORE the focused run that serves as READY evidence, then freeze and review that same staged state.\n\nThe launcher fingerprint includes the index (ls-files --stage), `git status` and the untracked-content hash. So `git add` after the run gives the frozen input a different composite fingerprint (6c74 vs 9b8a) even when no byte changed, and the integrator cannot accept \"same tree\" as an assertion.\n\nRecovery: rebuild the run's input.json components from git objects only, using the launcher's own captureFingerprint/compositeFingerprint from that commit. Script: .evidence/handoff-opus3-2026-10-25/w-4018-green-provenance.mjs. Note that `git status --short` lists tracked changes before untracked ones; they are not interleaved by path. Then hand over per-component matches with blob hashes. Better: stage first, and the problem never arises."
+}

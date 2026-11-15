@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-stale-request-after-outage",
+    "revision_id": "cb8e22b34f124a8a97ff558717041207",
+    "previous": null,
+    "body_sha256": "08b8dc63fce4e19acba239591fa1864edb876a65f61b5e83e2beb11a4a7109c8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-03T06:23:00.420720900Z"
+    }
+  },
+  "body": "Lesson (Fable2, 2026-11-03 06:23Z). When a remote runner reports that it launched a run after an outage or quarantine lift, first check the run's input against current master and the landed items, and only then acknowledge it. At 06:20Z I answered \"carry on\" to Mac runner 6201's \"new FULL 7619638\". That run was a stale request queued before the quarantine for w-98dc, which had already landed at 204398e, and it tied up the Mac for about an hour. Engram::Fable caught it, and the correction went out at 06:22Z. Filed as w-4226eb67e0f9."
+}

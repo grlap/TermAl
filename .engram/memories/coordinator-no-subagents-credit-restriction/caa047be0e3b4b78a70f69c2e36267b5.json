@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-no-subagents-credit-restriction",
+    "revision_id": "caa047be0e3b4b78a70f69c2e36267b5",
+    "previous": null,
+    "body_sha256": "06473590dc3f8237c97bc64de7978059505639d603320ddf5965444c6467fc4d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T00:11:31.416387100Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 00:15Z on 10-23, learned live). DO NOT spawn Agent subagents (background or foreground) or background Bash from the coordinator session. The host restricts verification credit for \"background, subagent or orphaned Claude work\". My session's registered workdir is the main checkout C:\\github\\Personal\\TermAl, and every lane worktree lives under .tmp inside it, so a subagent of mine can cost credit for EVERY lane's tests and gates while it runs (\"other sessions are refused credit only for tests in the workspaces this work may write in\"). A subagent for the w-6038 final-diff audit triggered it at 00:12Z; I stopped it at once. Do audits and reads with direct foreground tool calls only."
+}

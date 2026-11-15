@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "engram-pinned-binary-current",
+    "revision_id": "f9ebefed95dd4d6ba54a24ea5f53a1f1",
+    "previous": "21ef82d64c44417f9c3b9b7a4cf2ec36",
+    "body_sha256": "ebfb8d9f96679d01bb0f7b9211f2250a8f2a4ea6aa67343840d4411d7d32b574",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T04:57:51.525781300Z"
+    }
+  },
+  "body": "Pin rule for TermAl live runs; this entry is no longer a deployment journal. The dated Oct5–11 install chronology and exact historical hashes remain in revisions1–54. Do not treat a date-stamped historical 'current pin' as the presently installed executable.\n\nOriginal PIN RULE (Fable2, condensed revision47, 2026-10-10): A `live --engram-binary --engram-sha256` run uses the pinned binary until a run needs a newer one. Re-pin only when a TermAl check needs newer behaviour. Any check pinned to an intermediate build must re-pin when that build is replaced. A run's absolute path and full SHA256 identify its actual binary; the owning work item's approved run input and install notice provide that identity. Retiring old install snapshots selects no new binary and authorizes no run, replacement or probe.\n\nA pinned run cannot follow an executable that moved to a backup at its old path: use the actual retained backup path and its own hash where that is the approved input (see engram-binary-pin-2026-11-01 and the run's own evidence). Running MCP/control processes keep the image they loaded; an install notice alone does not identify their runtime build. A supported refresh/restart has its own authority and evidence.\n\nFor historical reader mismatches, consult the owning TermAl/Engram task's immutable evidence or this memory's attributed history; report a real mismatch to Engram::Fable. General absolute binary/SHA pinning remains in docs/test.md. This consolidation changes no approval, test-credit, install or restart rule."
+}

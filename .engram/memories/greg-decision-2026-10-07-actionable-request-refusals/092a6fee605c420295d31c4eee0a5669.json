@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-07-actionable-request-refusals",
+    "revision_id": "092a6fee605c420295d31c4eee0a5669",
+    "previous": "72e2f50659eb4357adf7a42cc66e4662",
+    "body_sha256": "065d5f39a32810ebacdaaf92b7548d4fb29a7f05498e3736ea9d2769731cb7a8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6-astra;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-07T03:29:53.449436600Z"
+    }
+  },
+  "body": "CURRENT Greg direction, relayed by Engram::Advisor to Architect2 on 2026-10-07: SIMPLICITY first. After a future rejection the requester must receive a safely redacted reason/error class and actionable remedy or retry guidance. Prefer the same MCP response; a minimal caller-scoped MCP GetLastError-like diagnostic is explicitly allowed if that response path cannot carry it. Add no broker, queue, durable storage, general history/lookup or deduplication machinery without demonstrated strict necessity. Preserve authorization, privacy and harness-agnostic roles; unknown/non-disclosable causes must not be invented. Critically test whether timing/overwrites, identity, access after denial, loss/restart and retry safety actually let the agent decide its next action. The historical Kimi event is motivation ONLY: no further recovery/export/classification/proof work and no acceptance dependency on it. Sources: Advisor66 message6c42c13a; same-response clarification69 c6843911; narrowing70 a9b86e49; minimal-diagnostic permission73 0af4e569; critical review76 0fb73dd0; historical-event retirement77 57a4a4ad-b10e-4f5a-bca6-2503f0b8bef0. Later directions supersede earlier conflicting storage/lookup and absolute no-lookup requirements. Canonical admission item w-a776ab739655; minimal diagnostic child w-8dac507af677. v5 is NOT adopted: Architect2 critical review f5a8bfa37c6144c188b676511eea9785 finds no-argument latest-only slot insufficient for per-refusal attribution; safe matched-or-unavailable fallback is proposed, requester correlation and actual access remain to prove. No implementation completed."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-remote-launches-detach-from-central",
+    "revision_id": "6b585501c05d4bbcaee81440ff5ce1e0",
+    "previous": null,
+    "body_sha256": "f3cd4615734129976e01335b21438dc85939f4e7a7635f6eb111e112c32adfce",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T06:03:04.167416Z"
+    }
+  },
+  "body": "Runner rule (Termal::Opus3, 2026-10-30, after Greg's TermAl restart at ~05:58Z). My remote runner chains were launched as `ssh host '… script …; cut log | head'` from Claude background Bash tasks on Central. A Central restart kills those ssh sessions. In this case the full gates on DL560 and Windows B survived, because their scripts wrote everything to files. But my Mac WAITER for the next queued leg died, so that leg never started. A second waiter survived with a dead stdout pipe, and could have died on its next echo by SIGPIPE, partway through launching a leg.\nRule: launch every remote chain DETACHED on the host, `nohup bash SCRIPT > LOG 2>&1 < /dev/null &`, with all progress written to files there. Keep Central's background ssh only as a read-only waiter that loops on the host until a marker appears and then prints the log. Losing it loses nothing. After a restart, recover by reading host files and processes (pgrep, logs, run dirs). Never relaunch a leg that has a run dir; start only legs that never began."
+}

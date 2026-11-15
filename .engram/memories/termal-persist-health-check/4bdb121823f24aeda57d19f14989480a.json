@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-persist-health-check",
+    "revision_id": "4bdb121823f24aeda57d19f14989480a",
+    "previous": null,
+    "body_sha256": "0a8b3daaa89a31d38ee9a2812c23b4e8d14acf60cdf9bbc54b23a490d30513c9",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-01T01:43:38.842514300Z"
+    }
+  },
+  "body": "How to check whether TermAl Central is saving durable state, read-only, without opening the store: read heartbeats in ~/.termal/host-lifecycle.jsonl (kind \"heartbeat\", every ~60 s). counters.persistTicks and counters.persistFailedTicks are cumulative per instanceId (they reset when the host restarts). If persistFailedTicks rises at about the tick rate, every persist is failing. Incident 2026-11-01: after a UNIQUE(messages.session_id, message_id) transcript failure (session-15589, 01:18Z), persist failed on almost every tick from ~01:39Z (56 → 314 by 01:42Z, instance 48f5a5a5). Symptoms: gated admissions withheld (control_binding_unavailable, durability unknown), test registration refused (\"persistence writer failed\"), sessions excluded with control_settlement_unconfirmed. While persist is failing, advise NO restart (unsaved state would be lost), no landing or install; run tests in standalone mode. Items: w-8ec0f56d9976 (root) and w-135181fe8685 (recovery hotfix)."
+}

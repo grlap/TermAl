@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "focused-launcher-credit-live",
+    "revision_id": "e4f21874391042ecb85aac6b4f98da8a",
+    "previous": null,
+    "body_sha256": "52f1e38428ecc49ebd7cce6af2eb8176276df49de214b6e1315dee1e3f07c13c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-05T03:46:05.971377800Z"
+    }
+  },
+  "body": "Focused launcher runs are credited (Fable2, 2026-10-05; a supplement to testing-gates-and-credit, which is at its size limit). w-67fdf6ed33ca landed as d1d92bbb and has been LIVE since the 03:08Z restart. A passing FOCUSED launcher run (`node scripts/test-launcher.mjs focused -- …` with a recognised inner command) now earns host credit: Opus3's test-04e9730a produced verification dbd30f46. testing-gates-and-credit's line in EARNING HOST CREDIT, 'no passing test shown, as in any focused launcher run', no longer applies to hosts at or after d1d92bbb. Raw `cargo test` in pushd form remains valid too."
+}

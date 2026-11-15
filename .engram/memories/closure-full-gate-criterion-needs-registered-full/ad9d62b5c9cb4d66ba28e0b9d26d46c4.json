@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "closure-full-gate-criterion-needs-registered-full",
+    "revision_id": "ad9d62b5c9cb4d66ba28e0b9d26d46c4",
+    "previous": "28e10eb6448b42e09f72357f141b041b",
+    "body_sha256": "32bd260b596507863c4162d741f042e5683400d48f1ded713d00bce60599da0b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T16:14:09.966196200Z"
+    }
+  },
+  "body": "REV 8 (Termal::Fable2, 2026-11-13 16:15Z). CURRENT RULE. It supersedes revisions 1-7.\nGREG'S WORD (verbatim via Asistant 588693a8 #1547, 16:12Z, about re-running FULLs for e105/aa7b/w-70ed): „absurdalny wymog, powinimy miec jeden run i tyle, nic nam nie daje, ze mamy 2 osobne rany na 2 maszynach tyle ze tracimy wiecej czasu”. Asistant's gloss: this clarifies „Zdalny test jest równowazny”. Use qualifying runs already executed on the right code; no extra FULL just because K3 didn't exist; never fabricate.\nRULE: ONE qualifying run on any host is enough. Never a second run \"for the record\". For a landed item whose test-bound full-gate criterion has only a remote or legacy landing run:\n1. The holder confirms the run's tree equals the landed commit's tree (fingerprint or tree id).\n2. The holder quotes the run's facts exactly in a holder note.\n3. The coordinator records a concurrence note citing Greg's #1547 words.\n4. The holder revises only that criterion's test binding, with the text unchanged and marked as a workaround pending Engram w-180d6f507470.\n5. An independent evaluation follows in a later turn, superseding any carried failure.\nKimi's objection (#235) asked for exactly this Greg word, and it is now given.\nApplied 16:14Z: e105 (Opus3, note bdbe52c2), aa7b (8e1f, a18db168), w-70ed (d50d, a8918056). Future runs get native remote credit via K3 plus w-180d."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-gate-preflight-node-modules",
+    "revision_id": "06a03a304b624cfe965f515937e2ed0c",
+    "previous": "87d47c34a07444d29a9dbdd8e6b1dc38",
+    "body_sha256": "f5a6b705d2a9c758812d6daadefdaf4a56d84c9151b5870afc43036e57c2c16e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-31T10:47:08.478902300Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA1). Revision 2026-10-31, after Fable2 #974. It supersedes the 2026-10-19 rule, which predates the launcher change.\n\nThe full launcher (`node scripts/test-launcher.mjs full`) now prepares private UI dependencies itself. Its `ui-dependencies` preflight runs `npm ci --include=dev --no-audit --no-fund` in the candidate's ui/ (docs/test.md, \"Before those five stages\"). So a FRESH worktree with NO ui\\node_modules is the correct state for a full gate. Do NOT run a manual `npm ci` there: an existing installation is reused only when npm's installed lock metadata matches the source lock, and a stale or partial one makes setup fail without modification.\n\nPre-flight, reads only:\n- ui\\node_modules absent (it will be installed) or a matching earlier launcher install;\n- never a junction or symlink, since an outbound node_modules link is refused.\n\nThe preflight install adds a few minutes to the gate.\n\nThe old failure mode (ENOENT on ui\\node_modules\\typescript\\bin\\tsc, test-c85d2a3d, 2026-10-19) came from a root whose junction I had unlinked, under the older launcher."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "shared-machine-gate-alternation",
+    "revision_id": "cf9e5d403de44b34954d281d9a243acb",
+    "previous": null,
+    "body_sha256": "a7d83da5ecce2d03314204b79932e901454f5858dee3fc433422785b7fc48211",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-09T18:57:40.204831300Z"
+    }
+  },
+  "body": "Shared-machine gate alternation between Engram and TermAl, agreed 2026-10-09 18:57Z (Engram::Fable ebe242f7 #948, accepted by Termal::Fable2). It followed two TermAl gate slowdowns or failures under load (Rust suite 1273 s against about 557 s quiet) and Advisor #503: C: at 303% disk time, from Steam about 64 MB/s plus both projects' cargo.\n1. During either project's credited full gate, the other project runs no full gate and no release (install) build. Focused single-target cargo tests and incremental checks continue, one at a time per session. Running work finishes; nothing is killed.\n2. Gates alternate one-for-one (Engram, then TermAl, then Engram …). If one side has nothing ready, the other takes the slot.\n3. Each coordinator announces START (run id, ETA) and END by mailbox to the other.\n4. Engram::Fable asked Advisor to ask Greg to pause Steam downloads during gate windows.\n5. A timing assertion that fails inside an overlapped window is investigated and classified, never blindly rerun.\nTermAl-internal addition (Fable2): during TermAl's OWN gate windows, no other TermAl session runs any cargo or test command. During Engram's windows, TermAl sessions may run focused single-target tests, one at a time each."
+}

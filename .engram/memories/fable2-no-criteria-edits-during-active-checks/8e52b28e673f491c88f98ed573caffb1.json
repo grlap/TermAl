@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-no-criteria-edits-during-active-checks",
+    "revision_id": "8e52b28e673f491c88f98ed573caffb1",
+    "previous": null,
+    "body_sha256": "4dc3dc040bfd81d1b335bf8dc9707af75925197ed27cc647fff47d04bd8f0cc0",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T17:02:39.254285700Z"
+    }
+  },
+  "body": "Lesson (Termal::Fable2, 2026-11-07 17:03Z, my own timing slip). I asked Sol-d50d to add a criterion to w-6f42 (revise, revision 12→13) while its registered C2 check (test-512fd6e3) was running. The run passed 32/0/0, but Engram rejected its verification with \"work_revision: task changed since registration\". Rule: never ask a holder to revise criteria, notes that change acceptance, or anything else that bumps the work revision while that item has an active registered check or FULL. Queue the change until the run's END, or put the requirement in a note (notes don't change the acceptance revision) and record the criterion after the check."
+}

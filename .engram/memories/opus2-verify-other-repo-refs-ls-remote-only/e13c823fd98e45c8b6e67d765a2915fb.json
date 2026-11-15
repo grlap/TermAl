@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-verify-other-repo-refs-ls-remote-only",
+    "revision_id": "e13c823fd98e45c8b6e67d765a2915fb",
+    "previous": null,
+    "body_sha256": "708e9db59cbdb2399268960b9788a08de59875765f29abf2d648d782fcc4f474",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T19:19:42.334231Z"
+    }
+  },
+  "body": "Opus2 lesson (2026-11-13): to verify a ref in another project's repository (e.g. Engram author-test refs), use `git ls-remote` only. A `git fetch` in C:\\github\\Personal\\Engram writes objects and FETCH_HEAD into another project's .git, outside the TermAl repository rule. Bundles made read-only with `git -C <worktree> bundle create <TermAl .tmp path>` are fine (they write only into TermAl's .tmp). Commit/tree/parent checks can use objects already present (git show on a known local commit) or the runner's own fetch."
+}

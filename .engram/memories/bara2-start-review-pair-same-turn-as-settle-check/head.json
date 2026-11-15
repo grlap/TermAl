@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "bara2-start-review-pair-same-turn-as-settle-check",
+  "head": {
+    "state": "active",
+    "chain": [
+      "0ba68490d2424d50bc5c00a565c8add1"
+    ]
+  }
+}

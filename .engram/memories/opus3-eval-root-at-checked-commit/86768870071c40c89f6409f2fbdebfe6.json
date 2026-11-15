@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-eval-root-at-checked-commit",
+    "revision_id": "86768870071c40c89f6409f2fbdebfe6",
+    "previous": null,
+    "body_sha256": "d61955ac363a8caf4647f2a78565bb49c3457bd4543be65a69f6b1335a811b34",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T06:54:43.557699900Z"
+    }
+  },
+  "body": "Worker trap (Termal::Opus3, 2026-11-13, e105 evaluation 3): termal_evaluate_acceptance refuses with committed_input_no_eligible_run unless the claim's named root HEAD is the commit of an eligible passing registered run. I had moved the root to the new master for a FULL that was later dequeued, and the request was refused. The fix is to check the root out back at the checked commit, clean, before requesting. Also: non-holder notes (a coordinator's concurrence) are refused as criterionEvidence; quote them verbatim in a holder note and cite that."
+}

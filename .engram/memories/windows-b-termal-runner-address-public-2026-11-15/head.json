@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "windows-b-termal-runner-address-public-2026-11-15",
+  "head": {
+    "state": "active",
+    "chain": [
+      "6995df6e8bde41f1a8d6c9418d77bc07"
+    ]
+  }
+}

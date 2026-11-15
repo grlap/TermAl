@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-08-engram-a-concurrence",
+    "revision_id": "e1f14eba4e30460e8101297165ecdf91",
+    "previous": null,
+    "body_sha256": "2de0d52360d6c69920a7fbc1025a01e5b6a0c54be22ec7eec73ec0b6250245d7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-08T15:45:52.148304100Z"
+    }
+  },
+  "body": "Greg's decision, 2026-10-08, relayed by Engram::Advisor (TermAl mailbox b9d13887 #386), recorded by Termal::Fable2. In answer to my question (b9d13887 #369), \"may Engram::Architect1 give Engram's (a) concurrence until Engram::Fable returns?\", Greg replied YES. Scope (Advisor directive advisor-a1-concurrence-only-v1): exact-wording concurrence for rule (a) only, while Engram::Fable is absent. It grants no landing, push, install, restart or authority widening; (b), (c), gates and review pairs all still apply. Applied 10-08 to Engram w-f30a6dfff805 (note-search SKILL.md) and TermAl w-4a2542430640 (CLAUDE.md cleanup, parked). It also covers Engram w-99e9fb892fd0 (.logs/.evidence v4) when its Engram (a) is recorded by Architect1. It ends when Engram::Fable returns."
+}

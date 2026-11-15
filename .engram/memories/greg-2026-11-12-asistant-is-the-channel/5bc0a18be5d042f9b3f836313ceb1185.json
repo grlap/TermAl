@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-2026-11-12-asistant-is-the-channel",
+    "revision_id": "5bc0a18be5d042f9b3f836313ceb1185",
+    "previous": null,
+    "body_sha256": "3dbae7bc80cd365912fc94aa36298fcfe33a9f1d58790918d1264c98ebff8bf3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-12T19:25:20.052001700Z"
+    }
+  },
+  "body": "Greg's rule, 2026-11-12 about 19:24Z, relayed by Engram::Asistant (TermAl mailbox 588693a8 #1454), verbatim: „nie jestem w stanie monitorowac wszystkich sesji, generalnie komunikacja z agentami jest przez twoja sesje”.\nAsistant's operative reading: treat Engram::Asistant (session-15908) as THE main channel to Greg. Send there every status that needs his attention, every question, signal and instruction. Never assume he sees other sessions or Advisor. To check that a message arrived and was handled, use proper acknowledgements, not the mere send. Keep working without needless questions.\nConsequences for TermAl:\n(1) Every Greg act (restart, cutover, install decision) goes to Asistant first, in plain words. Advisor gets a copy where CLAUDE.md's restart clause names it.\n(2) Done means Greg replied, not \"message sent\" or \"acknowledged by a relay\".\n(3) Context: the 2026-11-12 cutover signal went only to Advisor and never reached him (w-bebbae70639c; memory rules-waits-and-wakes-greg-act-holds-2026-11-12)."
+}

@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rules-shared-boundary-contract",
+    "revision_id": "f7011fcd9ed142cab3cecf10f84e22f9",
+    "previous": null,
+    "body_sha256": "67def400a828cf8ca56b74bdb221154f1eef17363486bbb348caa6b77c91f353",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a0e6d3-c6aa-7340-8ae6-a08b0320448f",
+      "work_ref": "w-a08b0320448f"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T16:50:43.471276600Z"
+    }
+  },
+  "body": "SHARED BOUNDARY CONTRACT — Engram and TermAl. TermAl copy of Engram rule rules-shared-boundary-contract r1, published by Engram::Architect3 on 2026-10-30. Joint concurrence from Termal::Architect2 and Termal::Fable2. Recorded verbatim by Termal::Fable2.\n\nGreg's direction: unify existing solutions and make processes universal across projects and supported hosts. Source and joint plan: Engram w-d7826c4f78ec, TermAl w-a08b0320448f. These are current design and operating rules, not new execution or landing authority.\n\nUse one producer-owned specification of the existing wire contract, referenced by both projects. For every crossing field, record its semantic role, producer, supported wire form, equality/normalization, project/store/host scope, and its normal/recovery/reload consumers. Reuse existing types and schemas, with one validator per semantic kind per side. Remove divergent copies instead of adding per-call assumptions.\n\nKeep record identity separate from content fingerprints.\n- New Engram record ids are 32 lowercase hex. Existing 64-lowercase-hex ids remain opaque and unchanged.\n- SHA256, content-v1, Git and review fingerprints compare content. They never mint or replace record ids.\n- A 64-character record id and a SHA256 may share syntax. The field, producer, provenance and existing semantic checks decide meaning.\n- Never pad, truncate, rehash or relink stored ids, or force all identities into one textual format.\n- Fingerprint callers keep their fingerprint validator.\n\nReuse the existing lifecycle and owners end to end. TermAl executes and captures. Engram records and returns the actual receipt ids. TermAl settles and exposes them. Verification read, evaluation and completion follow their existing contracts where applicable.\n- Normal, recovery, reload and carried paths obey the same correlation and idempotency rules.\n- Unknown retries the identical intent/key, not the test run.\n- Missing evidence and refusals stay explicit. Exit 0, summaries or a closed grant are not evidence.\n- OFF observations create no gated authority or test credit.\n\nPreserve the actual scope where applicable: project/store, source host/native session, work/run/claim/fence, root generation, result/attempt. Reuse supported authenticated federation and remote admission. Local receipts do not create remote authority. Routine builds and restarts add no security qualification or approval gate.\n\nConformance belongs in the existing suites. It uses actual producer output, or provenance-preserved producer wire, against the real consumer.\n- Generate ids and fingerprints at test time; never pin hashes.\n- Cover representative 32/64/mixed records, malformed/partial/duplicate receipts, fingerprint fields, semantic/scope mismatches, same-key replay, restart/reload, and duplicate/reordered delivery.\n- Assert the associations and that there are no duplicate effects.\n- Reuse ordinary supported remote work for a peer case. No exhaustive matrix, manual manifest/export duty, extra sequential proof gate or mandatory canary.\n\nConcrete defect fixes and gated-control restoration continue independently. Coordinators own implementation and resources; architects own design."
+}

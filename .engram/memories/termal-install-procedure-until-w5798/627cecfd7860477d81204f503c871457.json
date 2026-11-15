@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-install-procedure-until-w5798",
+    "revision_id": "627cecfd7860477d81204f503c871457",
+    "previous": null,
+    "body_sha256": "ff1377ef662f3623e13e84a43d2de3c5537a5de7fb5ba3d3c9b3bd86691dc0c6",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a0fb02-b26c-75d2-9d06-5798a85f3f4b",
+      "work_ref": "w-5798a85f3f4b"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-09T05:38:09.574906700Z"
+    }
+  },
+  "body": "TermAl install procedure, agreed by Termal::Fable2 with integration owner Termal::Opus2 (mailbox 4daa5b87 #2040-#2041, 2026-10-09 05:38Z). It applies until w-5798a85f3f4b is fixed.\nWHY: the host's freeze checker and other self-spawns run the path target/release/termal.exe. The old install renamed termal.exe aside and then ran `cargo build --release` in place. The path was then missing for 2-3 minutes, and reviewers' termal_review_freeze_check failed with HTTP 500 \"review checker did not complete … os error 2\". This happened in two Engram reviews in the 05:31:36-05:33:49Z window of 013e6b6f's install.\nEarlier windows: 2b1e3f85 20:06:44-20:09:22 (10-08); d9c13717 00:49:51-00:52:23; 53ee9c65 02:18:16-02:21:00; f5a96582 under 2 s at about 03:21; 98ad64fd 04:37:47-04:41:02.\nA failure in a window is loud (HTTP 500), never a false clean.\nPROCEDURE:\n1. Build into .tmp/install-target (CARGO_TARGET_DIR) from the master checkout on the landed tree.\n2. Check termal_list_delegations for running reviewer delegations in both projects; hold the install while any are running.\n3. cp the new build to target/release/termal.exe.new and verify its sha256. Then, in one command: mv termal.exe → termal.exe.<old8>.bak && mv termal.exe.new → termal.exe.\n4. Record the swap's start and end times and the hash in the landing report.\nThe running host's own image is termal.exe.5da199a3.bak (mtime 03:54:38Z). It must not be moved until the restart."
+}

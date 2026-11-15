@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "w-18a1-install-order-engram-first",
+    "revision_id": "cf7f90da8efd4fb18856199999100243",
+    "previous": null,
+    "body_sha256": "fc9696f98952eaa0bfe7b403acc8d4dd189006a25ae3a7744a8a11b390542d57",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T13:32:18.201435500Z"
+    }
+  },
+  "body": "Landing/install condition for TermAl w-18a1 (Fable2 #5577, 2026-11-11): its R9+ sends the Engram source command --timeout-ms 60000, but the installed Engram source owner caps at 30000; 60000 arrives only with Engram w-6ecc in the Engram sync install. On EACH host (Central and DL560) the Engram sync install must come FIRST, then the TermAl w-18a1 install; otherwise every committed-input evaluation on that host is refused NotClean. Check this at w-18a1 install time on both hosts."
+}

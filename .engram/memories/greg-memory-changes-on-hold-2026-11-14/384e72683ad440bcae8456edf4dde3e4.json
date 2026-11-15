@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-memory-changes-on-hold-2026-11-14",
+    "revision_id": "384e72683ad440bcae8456edf4dde3e4",
+    "previous": "57806d2a184946d8b323f6592abd25b3",
+    "body_sha256": "cf0d6e43ba77f5b9463868290696a1b9fbb24f4e05808dc6898e57440add4052",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T17:41:22.463021200Z"
+    }
+  },
+  "body": "Greg's word, verbatim via Engram::Asistant 588693a8 #1711, 2026-11-14 17:37Z: „Nie. Nie robicie nic z pamięcia narazie. Jak sie wyloży zobaczymy gdzie. Skupmy się na rowiezieniu sync i EO.”\n\nThis supersedes his earlier mimalloc direction (#1699 and #1701) for now. ON HOLD:\n- TermAl mimalloc w-794fbe2d6123 (d50d; candidate aa0759bf frozen, author ref deleted, item blocked);\n- the TermAl allocation-retry wrapper w-ee06482f6d8e (Opus3; blocked, minidump kept in .evidence);\n- Engram's mimalloc w-fd5b.\nNeither goes into a build until Greg lifts the hold. If the host crashes again, use the RUST_BACKTRACE output (Greg set it) to find the site.\n\nNOT on hold, because it is scheduling and not a memory change: the bounded-jobs rule for FULLs on Central (memory central-full-bounded-jobs-2026-11-14).\n\nFocus: Engram sync, including project memories as a sync feature, and EO.\n\nREVISED 17:41Z. Greg's word, verbatim via Asistant #1713: „Mimalloc dolaczyc. To jest trywialna zmiana nie wymagajaca testow.”\n\nmimalloc is RESUMED in both projects: TermAl w-794fbe2d6123 (candidate aa0759bf, unblocked) and Engram w-fd5bd4280765. There is no separate test round for it. Landing still takes the standing-rule review pair plus the train's FULL as its gate.\n\nSTILL ON HOLD: allocation-retry and OOM-resilience work (TermAl w-ee06482f6d8e)."
+}

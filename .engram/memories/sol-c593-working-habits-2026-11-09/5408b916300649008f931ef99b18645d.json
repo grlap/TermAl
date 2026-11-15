@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol-c593-working-habits-2026-11-09",
+    "revision_id": "5408b916300649008f931ef99b18645d",
+    "previous": "06a047401f9d41038a5614111ee60124",
+    "body_sha256": "a3f703d16829210391f21e588129babff5182bcfbbdb7744e03e152e93c3b96f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T17:15:13.490120700Z"
+    }
+  },
+  "body": "Worker habits for Sol-c593, from Fable2/session-8112 mailbox 1a9f6a77 #1410, #1412 and correction #1415 (message95f223df-8444-43aa-ac52-69dcfd2d3cbd), 2026-11-09. These are habits, not new gates or authority. Write short mail in plain sentences with normal spaces and facts first. Report procedural work with no benefit in one line. Do NOT add cargo fmt --check or clippy to TermAl author runs: Fable2 withdrew that advice in #1415 because current master is not rustfmt-clean (coordinator reports436files fail). No formatting cleanup or extra checks are implied. The acceptance habit remains: write new acceptance criteria as one observable outcome each, without run IDs or volatile facts; run evidence belongs in notes/gates. Existing criteria, standing rules and frozen integration inputs remain unchanged."
+}

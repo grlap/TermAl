@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-authority-notice-own-wording",
+    "revision_id": "5a74f24e0c984d64893831ad046113a3",
+    "previous": null,
+    "body_sha256": "a041d4812e6dc8bc895b2ad08b29a1aa243805d144bc4fbb140e2865c01014cf",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a15217-f3ac-7a91-bafe-edb79ddbf033",
+      "work_ref": "w-edb79ddbf033"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T12:52:20.501438100Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-19 12:52Z; Engram::Fable caught this in the w-edb79ddbf033 final-diff audit, #3572). Condition (b) of the authority-change rule (Greg has been sent the exact wording and its consequence) must be met with THIS project's own final wording. A notice that carried the twin project's text does not count, even when the only differences are role names: Engram's \"Engram::Merger\" versus TermAl's \"the integration owner (as of 2026-10-19: Termal::Opus2)\". The fix was a separate notice of the exact TermAl bullet via Engram Advisor #1810 (12:50:45Z), checked equal to bullet.md. For every cross-project authority twin, send Greg each project's exact text, or confirm one notice quotes both, before the audit."
+}

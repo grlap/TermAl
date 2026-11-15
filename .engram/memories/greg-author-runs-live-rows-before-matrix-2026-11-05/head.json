@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-author-runs-live-rows-before-matrix-2026-11-05",
+  "head": {
+    "state": "active",
+    "chain": [
+      "7669b157105245d28a92745514aaa57a",
+      "e4361cdd4f254f2a9006ec8083a5b0e9",
+      "9ea7da0c1a9d43f08fbed3001189fa92"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "settle-gate-record-before-experiments",
+    "revision_id": "9cab21eac9d24adaae7f5088ca9b7982",
+    "previous": null,
+    "body_sha256": "1cea8fa9c07691504aa22eb5650175f3270e6f553ca54963336623e267723e2e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T04:24:39.358591Z"
+    }
+  },
+  "body": "After a detached full gate ends (PASS or FAIL), the lane must let one closing checkpoint settle the host record BEFORE any source experiment in that root (a fixture swap, a stash or a restore). Otherwise the host withholds the gate record because of \"differing snapshots\". Occurrence 2026-10-17 04:14Z: Sol-license's failed gate test-408b0c46 (record 41aa2989) was withheld because the fixture-swap diagnostic ran before settlement. When directing a failed-gate investigation, say: \"first end a read-only turn so the record settles, then experiment\". Diagnostics run outside the named root (for example in the master checkout) earn no credit; label them investigation evidence."
+}

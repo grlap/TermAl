@@ -1,0 +1,31 @@
+{
+  "id": "01a1e043-631a-75b2-885b-e0df41e91371",
+  "external_ref": null,
+  "title": "Remote witness command shape (`ulimit …; env -u … K=V … node scripts/test-launcher.mjs …`) is not recognized as a test, so no provider observation or native completion forms",
+  "outcome": "Remote witness command shape (`ulimit …; env -u … K=V … node scripts/test-launcher.mjs …`) is not recognized as a test, so no provider observation or native completion forms",
+  "acceptance": [
+    "A DL560 runner can issue a focused or full launcher request with its required environment (private HOME/TMPDIR/CARGO_HOME, unset RUN_ROOT/TRACE, raised file limit) in a form the host recognizes as the test command, so the run gets its provider observation and native completion; shown by a behaviour test with that exact shape (or the documented supported shape the runner switches to).",
+    "If a command shape is not recognized, the reason is reported per the refusal rule (memory design-rule-refusals-explain-themselves-2026-11-15) instead of silently treating it as not a test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "check-credit",
+    "cross-machine",
+    "design-rule",
+    "eo",
+    "k3"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

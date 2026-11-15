@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-restart-notice-rule",
+  "head": {
+    "state": "active",
+    "chain": [
+      "9cfb13936bbd417d83e6178435f5c1f4",
+      "d6bd9f0d62024752b932bb8511fdf68f"
+    ]
+  }
+}

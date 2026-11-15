@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-central-restart-2026-11-13-0436",
+    "revision_id": "15cc29bac314476dbae255344b9e5ce1",
+    "previous": null,
+    "body_sha256": "10cc4ee19b823e92877379a8716f789204ad739cfa95e63366dc7dd1cd03a117",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T04:36:28.433374100Z"
+    }
+  },
+  "body": "Central TermAl restart, 2026-11-13 (Termal::Fable2). Greg said ready (Asistant #1519). Central was quiet at 04:35:50Z (Opus2 #5818): FV 21.8 GiB, no rustc, launcher or vitest, no landing or push. RESET NOW was sent to Greg through Asistant (#1522) at about 04:36Z: Central only, git pull plus cargo run --release in C:\\github\\Personal\\TermAl, rebuild target master 57a762c85778230cce06a4c76290bd5726fe28c6. Reasons: the running 73f0fe27 lacked w-36d0 (pre-spawn evaluation refusal), w-78ec, w-d8f2 and w-a6964. Engram unchanged (b2fc71a9), so the rollback hold is untouched. Engram::Fable concurred (#7766): Central only, and I am the single sender. DL560 and the Mac are NOT restarted: DL560 still runs 42851443 and the Mac 62a4785a.\nAFTER THE RESTART:\n1. Confirm the running build: pid, start time, checkout HEAD, binary sha and mtime (memory central-restart-cargo-run-rebuilds-exe).\n2. Tell Opus2 the host is back. Opus2 re-grants in this order: 03d4 277b, edfd 36d0 Test, d50d w-93b7 check, a7bb, 12329, the d50d combo83 Windows leg, edfd b078, then Engram::Opus ab27 EXCLUSIVE. The evaluation slot goes to Engram::Opus e0e2 first.\n3. Set a one-shot wake at start + 15 min after Greg's „zaczynam”/„zrobione” (rules-greg-act-holds rev 3).\n4. Remaining one-shot: the rollback-hold review at about 08:57Z, but cron cca0c557 is session-only and is lost if this session restarts. Re-create it if it's gone."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "engram-rollback-hold-2026-11-12",
+    "revision_id": "23a425ee03d747968ddd5466aab1bbd9",
+    "previous": null,
+    "body_sha256": "f6163f21ae6192f785709f937d73a93625f41c61528cb9228b3539a51f72cb6d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-12T21:26:56.146527200Z"
+    }
+  },
+  "body": "ROLLBACK HOLD (Fable2 #5769, 2026-11-12 21:26Z), in force until BOTH coordinators (Fable2 and Engram::Fable) send \"rollback hold ended\" (review about 09:00Z on 2026-11-13). The AACB rollback scripts refuse unless the installed Engram binary is exactly the old or the cutover build: Central C:\\Users\\grzeg\\.cargo\\bin\\engram.exe d4d0182b (old) or b2fc71a9 (cutover); DL560 /home/greg/.cargo/bin/engram 0c7d8988 (old) or 5b5ac67e (cutover). So NOTHING installs or replaces the installed engram binary on any host. The Engram Merger lands and pushes w-34e0 and w-5f56 but does not install them. TermAl landings and termal.exe installs are unaffected. s4, Codex 6/7 and the Mac lanes are bound by it too."
+}

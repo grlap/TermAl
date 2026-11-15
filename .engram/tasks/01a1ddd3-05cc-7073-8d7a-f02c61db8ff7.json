@@ -1,0 +1,29 @@
+{
+  "id": "01a1ddd3-05cc-7073-8d7a-f02c61db8ff7",
+  "external_ref": null,
+  "title": "Publish predecessor no-report diagnostics produced while acknowledging a source-root name",
+  "outcome": "A no-report diagnostic created during acknowledged naming is committed and delivered to clients at that transition.",
+  "acceptance": [
+    "A behavior test makes naming acknowledgment settle a predecessor without a report or job and verifies its exact-turn System diagnostic is durably committed and present in the published session projection before any unrelated operation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "named-roots",
+    "review-low",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d6bd-7cb5-7f60-9b9f-4093c33dc14e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

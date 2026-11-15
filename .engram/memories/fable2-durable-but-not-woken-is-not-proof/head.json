@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "fable2-durable-but-not-woken-is-not-proof",
+  "head": {
+    "state": "active",
+    "chain": [
+      "15a0e62009b74a69b9ef64cb9f58c692"
+    ]
+  }
+}

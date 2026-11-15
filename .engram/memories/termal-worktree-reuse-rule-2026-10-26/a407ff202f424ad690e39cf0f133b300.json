@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-worktree-reuse-rule-2026-10-26",
+    "revision_id": "a407ff202f424ad690e39cf0f133b300",
+    "previous": null,
+    "body_sha256": "81c79b1b86e61b8d2fe8dd6e3319516c9fe730a4a8a22c1e6706bfa9282ec7ee",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-26T03:35:44.837888Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-26 about 03:36Z), from measured evidence (w-20f0f0dc67be, Sol-c593's OS capture during gate C, 03:21-03:33Z): rustc accounted for about 85% of retained process write I/O (19 GB in about 12 min, about 27 MB/s), C: was about 93% busy with mean queue about 11.5, and termal.exe wrote only about 74 kB/s. Concurrent COLD compiles in fresh worktrees (each about 5-10 GB of target/ writes) plus a full gate saturate C:, which slows everything else, including the TermAl writer and API calls.\nRULE for TermAl coding lanes:\n- Prefer reusing your OWN existing worktree for the next item: reset it to the new base and keep its target/ warm. Create a new root only when the old one must stay frozen (a READY handed to Merger2, a gate input, or evidence).\n- Avoid starting a cold compile while a full gate is in its compile stage when a warm root is available.\n- Never share or touch another lane's worktree.\n- No product or config change is implied; this is scheduling only."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-coding-design-rules",
+    "revision_id": "58770a93558141218f42870cc2c70bd7",
+    "previous": null,
+    "body_sha256": "194de095a2bce03bb972a9e228f03c22c9b34abd10b7cff23910b0c3bcc6df97",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-25T21:40:37.469319700Z"
+    }
+  },
+  "body": "CANONICAL TermAl coding/design rules (Termal::Fable2, created 2026-10-25 ~21:45Z; no earlier canonical TermAl coding/design memory existed. termal-greg-coding-rule-2026-10-18 covers keeping agents continuously coding, not design). Source: Engram::Architect3, TermAl mailbox 63096d00 #73 (2026-10-25 21:39:52Z), quoting Greg DIRECT to Architect3, which the same text says is saved as Engram rules-code-authoring r3. Only this rule is cross-project; other Engram authoring rules are not imposed on TermAl.\n\nREUSE EXISTING SOLUTIONS — Greg direct to Architect3, 2026-10-25; both projects, especially TermAl: \"regula, glownie dla termala, prosze uzywac istniejacych rozwian o ile istnieja i nie dublowac kodu\". Before designing or implementing a change, inspect the relevant existing code and identify the abstraction/owner that already provides the behavior. Use or extend that implementation when it covers the requirement. Do not copy its logic or create parallel registries, queues, lifecycles, authority mechanisms or provider session managers for behavior it already owns. Put shared logic in its existing owner and keep callers/adapters thin. New code addresses a concrete missing capability; record that gap and why the existing mechanism needs the minimal extension. This is an implementation/design rule, not a new approval step or authorization for unrelated refactoring.\n\nRelated Greg direction (2026-10-25, Advisor #1842/#1888/#1890): the existing session/federation abstraction is the sole owner of lifecycle, discovery, placement, wake and authority; no parallel session-management adapter. Coordinator duty: include this rule in every TermAl coding/design brief."
+}

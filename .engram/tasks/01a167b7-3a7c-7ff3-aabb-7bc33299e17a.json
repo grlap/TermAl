@@ -17,12 +17,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Post-restart live StateInner measurement recorded: 16m55s idle-host window (868 consecutive persistence ticks, 0 gaps, 0 failed), collectWait max 663.5 ms / p99 214 ms, tail-trim bound max 12.7 ms, heartbeat longest hold 404-560 ms always at src/test_runs.rs:1126 (test-run rescan commit lock). turn_begin not applicable. Evidence in notes 12b9908b, 8c858427, b31987c9; independent evaluation 7fd6ee16 passed the criterion.",
+    "completed_at": "2026-11-15T19:08:34.304224100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

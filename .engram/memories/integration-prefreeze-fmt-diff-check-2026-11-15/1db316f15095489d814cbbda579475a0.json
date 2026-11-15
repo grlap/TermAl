@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "integration-prefreeze-fmt-diff-check-2026-11-15",
+    "revision_id": "1db316f15095489d814cbbda579475a0",
+    "previous": null,
+    "body_sha256": "02c4dee9f716b80c082e4b7dfcb6d20bc5f55de1fdffcabee52f92b3aa9d83c7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-15T16:00:07.519711200Z"
+    }
+  },
+  "body": "From 2026-11-15 (Fable2 #6397, following Kimi's rules review, delegation b680a154), the integration owner and scheduler requires authors to run `cargo fmt --all -- --check` and `git diff --check BASE COMMIT` in their own root before any freeze or author-test/test ref push. Both cost no Central compile. Opus2 refuses a freeze or test ref whose fmt --check fails. Reason: on 2026-11-15 four remote runs were lost to failures a local check would have caught (three compile, one fmt). Authors may also ask the scheduler for a Central `cargo check` slot (within the FV floor and one-cargo-job rules) before a long remote batch, instead of spending a remote lane on a compile error."
+}

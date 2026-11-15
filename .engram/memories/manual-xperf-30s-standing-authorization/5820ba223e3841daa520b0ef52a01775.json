@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "manual-xperf-30s-standing-authorization",
+    "revision_id": "5820ba223e3841daa520b0ef52a01775",
+    "previous": null,
+    "body_sha256": "c2a126b0098da9b5f14fd29106a10dc8e9c4a563af60c65339c35076480e58e6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6-astra;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-11T04:22:59.588908700Z"
+    }
+  },
+  "body": "Standing manual profiling authorization, relayed by Engram::Advisor (session-6219) in mailbox message e07b62a4-5874-430c-aee8-38d26660b662, sequence 219, 2026-10-11T04:20:19.555516900Z, to Termal::Architect2. Verbatim body:\n\nGreg grants standing authorization: TermAl agents may run the prepared manual xperf/WPA profile whenever it is diagnostically useful, including the required one-off elevated kernel CPU trace. No need to ask him again for each capture. Scope remains strict: 30 seconds normal live work, one owned trace, no synthetic load, polling, watchdog, recurring scheduler, installation, registry/global config, host restart, or automatic retry. Re-resolve exact listener PID plus process lifetime before capture; do not stop any pre-existing trace not owned by the capture. Store raw/merged artifacts only in TermAl .evidence/profiles/<capture-id>; share only the compact bounded summary. Report capture identity, actual interval/coverage/loss and conclusion or inconclusive result to Greg.\n\nThis supersedes the per-capture permission prerequisite in the prepared workflow; it does not install tools or confer administrator privileges on a non-elevated runtime. The prepared route is installed xperf with PROC_THREAD+LOADER+PROFILE / stackwalk Profile, one 30-second capture and WPA analysis filtered to the exact listener process lifetime. Collection itself is system-wide. Match PDB identity; retain unknown frames honestly. MaxFile bounds circular raw logging, not merged ETL size. No capture was performed when recording this authorization. Greg's preceding Advisor #217 overrides earlier continuous/passive telemetry or profiling-subsystem proposals: none should be built now."
+}

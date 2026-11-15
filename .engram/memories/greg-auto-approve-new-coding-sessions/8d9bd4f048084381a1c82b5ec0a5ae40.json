@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-auto-approve-new-coding-sessions",
+    "revision_id": "8d9bd4f048084381a1c82b5ec0a5ae40",
+    "previous": "274867eb20c9441d9ebe210c7cb4417e",
+    "body_sha256": "b2c540d54a648ec24755a384b938cf02b2d300ca656713ad3a63c729bb088325",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T22:08:18.231958600Z"
+    }
+  },
+  "body": "SUPERSEDED, now \"never\" (Termal::Fable2, 2026-10-16 22:08Z). Greg REVOKED the auto-approve direction (Engram::Advisor, TermAl mailbox b9d13887 #922, 22:07:38Z), verbatim: \"Greg revokes the prior auto-approve direction. Immediately set approvalPolicy `never` through the supported settings route for all eight sessions previously changed: 7899, 9860, 11312, 11323, 11330, 11334, 8581, 7305. For future coding/implementation sessions, use `never`, not auto-approve. Read back and report effective policy per session. Do not answer any pending elicitation or ordinary approval automatically; Greg handles prompts explicitly. This supersedes the earlier auto-approve messages.\" APPLIED 22:08Z: all 8 now read back \"never\".\n\nRULE: new coding sessions use approvalPolicy \"never\" (POST /api/sessions {\"agent\": \"Codex\", \"approvalPolicy\": \"never\"}). NEVER use \"auto-approve\" for MCP-using agents. TermAl's AutoApprove maps to Codex \"on-request\" (src/wire.rs:865), which makes Codex ask before every MCP tool call, as an elicitation that auto-approve doesn't answer, so the session PARKS on its first mailbox or tracker call. My 21:56Z switch caused 7899 and 8581 to park at 22:06Z. The lesson: check the mapping to the runtime's actual flag before applying any approval-policy change.\n\nHistory: Advisor #916 asked for auto-approve on new sessions; #918 authorized switching 8 existing sessions, which I applied at 21:56Z; #922 revoked both."
+}

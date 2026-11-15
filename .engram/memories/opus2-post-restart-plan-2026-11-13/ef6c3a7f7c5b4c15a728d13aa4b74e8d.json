@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-post-restart-plan-2026-11-13",
+    "revision_id": "ef6c3a7f7c5b4c15a728d13aa4b74e8d",
+    "previous": "4be3be05ee884842a7f3697b8291217d",
+    "body_sha256": "d8b250e5110ece8e6eba8698dccaff80cd15d3da447552a049a92eff53071f04",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T19:45:41.735241400Z"
+    }
+  },
+  "body": "SUPERSEDED (restart held by Greg 18:24Z for the scroll fix). Live train at 19:45Z: combo96 (d50d w-38a0 a33efa4b, item w-7954e8ed8a5a, ref test/w-7954e8ed8a5a-b9065aba, FULL Codex 6) > X'' (a6071ef8 = Combo X' stacked on combo96, item w-fe16da72ee07, combined-tree ref test/w-fe16da72ee07-e3bbc0ee tree 234da7ac, FULL Codex 7; Windows leg running on Central in .tmp/wt-comboXc-8111) > combo97 (8e1f w-f5dc a700eb94 carried as cca3d3b2, item w-faa0a4cd308f, combined-tree ref test/w-faa0a4cd308f-b1c6324d tree 67067221, FULL queued Codex 6). Landing scripts .tmp/landing-msgs/land-a33e.sh, land-a607.sh, land-cca3.sh (allow the 6 dirty scroll paths in main only without overlap). Engram Windows FULLs: the 2 task_sync_materialize_cli failures are w-a76fe0842d73 (verbatim \\\\?\\ path in -c core.attributesFile), NOT path length."
+}

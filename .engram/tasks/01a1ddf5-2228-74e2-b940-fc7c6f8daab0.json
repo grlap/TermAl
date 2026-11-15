@@ -1,0 +1,31 @@
+{
+  "id": "01a1ddf5-2228-74e2-b940-fc7c6f8daab0",
+  "external_ref": null,
+  "title": "Focused launcher recognizer rejects --request-message-id, so a remote causal focused run never gets a provider observation or native completion",
+  "outcome": "A focused launcher run started with --request-message-id is recognized as a test command, gets its provider observation, retains its native completion, and its causal remote credit can settle on the requester.",
+  "acceptance": [
+    "engram_focused_launcher_words accepts exactly one --request-message-id with a validated value and refuses a duplicate, shown by tests.",
+    "A regression through the real provider-observation boundary shows that a focused `node scripts/test-launcher.mjs focused --input commit --request-message-id <relay id> -- …` command is recognized, observed and retains a native completion, including on a runner whose project has Engram enabled:false.",
+    "Existing recognition, causal completion and admission tests stay green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "check-credit",
+    "cross-machine",
+    "eo",
+    "k3"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

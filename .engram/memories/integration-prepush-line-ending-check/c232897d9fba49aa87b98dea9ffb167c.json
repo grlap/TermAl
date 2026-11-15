@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "integration-prepush-line-ending-check",
+    "revision_id": "c232897d9fba49aa87b98dea9ffb167c",
+    "previous": null,
+    "body_sha256": "dfe0bc060692662b560ae6da3799ead32befb580c1bec1e2ba5c2f7ae9ef80e3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-11T05:24:16.823807300Z"
+    }
+  },
+  "body": "Integration owner pre-push check (Termal::Opus2, from Termal::Fable2's mailbox 4daa5b87 #2159, 2026-10-11 05:23Z). The Merger's w-d3e9 commit 76e1819d stored all four files as CRLF: whole-file churn of +14360/-13998, and its evaluation then found criterion 4 insufficient. It was never pushed and must be refused if it is ever handed over. The Merger recommits the gated LF index on 765a9a5a (branch merger/d3e9-landing) with a fresh evaluation.\nRULE: before pushing any Merger commit, in addition to the usual checks (master tip = reviewed/gated commit, origin/master = base, fast-forward, staged blob ids), run `git diff --stat <base> <hash>` and refuse when the line counts are whole-file sized for small changes, i.e. line-ending churn.\nBackground: this machine's system core.autocrlf=true makes `git apply` write CRLF while the index stays LF. Carry with `git -c core.autocrlf=false apply`, or write files from their index blobs (see the carry rule in termal-merger-model-2026-10-10)."
+}

@@ -1,0 +1,39 @@
+{
+  "id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "external_ref": null,
+  "title": "Preserve or explicitly refuse provider association for tests in a distinct linked worktree",
+  "outcome": "A genuine test command issued with an explicit cwd in a distinct linked worktree does not silently lose provider-to-launcher/native-completion association because the runner session works in the main checkout.",
+  "acceptance": [
+    "A disposable behavioral regression uses the real provider observation, registration, artifact refresh and native-completion owners with the session workdir at the main root, explicit command cwd in a distinct linked worktree and Engram disabled; it exposes the current silent empty-root/artifactless association failure before the production fix.",
+    "For a genuine test command whose explicit cwd is inside a linked worktree of the session's own repository (the documented fresh-worktree runner flow), provider/registration/artifact/native-completion association succeeds with the original runtime and request identity, and a native completion is produced. Only a start placement outside any worktree of the session's repository may instead refuse, and it then exposes a bounded readable reason at that boundary. In no case is a silent empty root, fabricated completion or credit produced, and original custody, source and qualification guards remain intact.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed tree that lands."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a15bc9-c8a2-71f0-9ac8-48c4a207f226",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

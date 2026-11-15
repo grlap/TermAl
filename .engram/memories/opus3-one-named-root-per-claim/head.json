@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus3-one-named-root-per-claim",
+  "head": {
+    "state": "active",
+    "chain": [
+      "4c2a454fac874725ada9189ae0ed321b"
+    ]
+  }
+}

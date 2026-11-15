@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "rules-waits-and-wakes-greg-act-holds-2026-11-12",
+  "head": {
+    "state": "active",
+    "chain": [
+      "c1915fa6e8f243988190d973b763308c",
+      "5a27aea3c07f47418e06ccc1912521dc"
+    ]
+  }
+}

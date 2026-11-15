@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-06-temporary-kimi-for-claude",
+    "revision_id": "b86ca4beb72c4da99bbb883ec9c18f77",
+    "previous": "af8d41aa600d45b1bb4821b34db69aeb",
+    "body_sha256": "a89dcb421256a0210c4b35b40548f81809771c1961aef0dc3638e80090bae411",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6-astra;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-07T22:53:23.338672600Z"
+    }
+  },
+  "body": "CURRENT SCOPE — narrowed 2026-10-07T22:34:14.857955600Z by Greg's current direction relayed through Engram::Advisor6219, mailbox-2f563cf1-5f83-40eb-a593-3a470306ab54 #161, message250450f6-d745-4ca9-b363-846575b9c766. Exact relay: \"Greg's current direction: Kimi may replace Claude for SIMPLE isolated tasks. Classify and record that scope explicitly; do not use this substitution for pilot blockers, authority/instruction text, storage/schema, host protocol/security/recovery behavior, or non-mechanical cross-cutting changes. Prepare clean current-master review freezes/manifests for candidates that need Claude at availability; reviewers need immutable exact inputs, not separate writable worktrees. The workspace tab-lookups extraction appears a possible simple candidate; assess/record it, while Node/Build/pilot work still waits for Claude.\"\n\nThis supersedes revision1's broad temporary-capacity substitution for future review/landing decisions. Record a concrete simple-isolated scope classification before using Kimi for Claude; actual capacity/refusal evidence and normal exact-input test/review/acceptance requirements remain. Complex/pilot/host-protocol/security/recovery and authority/storage/schema work requires Claude, with immutable current-input preparation while unavailable. Do not infer a pause of already authorized implementation from reviewer unavailability, nor waive review.\n\nHistorical revision1 retained Greg's earlier words via Advisor#42/message56c1154e-8cb3-4e85-9b19-58ef1ebe0163 at2026-10-06T19:46:42Z: “Kimi zastępuje Claude, aż będą tokeny”. Previous decisions and completed substitutions remain attributed to that then-current direction; do not rewrite them as Claude reviews. Node a6c655a4 was pushed22:02:26Z, installed22:09:49Z and sealed09f9af47 at22:11:51Z BEFORE this narrowing; report that chronology explicitly, without inferring rollback, restart or new approval authority. No commit/push/install/restart authority granted by this memory.\n\nCLARIFICATION 2026-10-07T22:52:52.528196Z — Greg via Engram::Advisor6219, mailbox-2f563cf1-5f83-40eb-a593-3a470306ab54 #163, message fda42d24-eec3-4863-b11a-3993cb7ef80d, read in full: \"Greg clarifies: code may be prepared now. For work that needs Claude, proceed with implementation, focused/full validation and an exact frozen candidate when appropriate; wait only for Claude review and landing until Claude is actually available. Preserve the narrow Codex+Kimi exception only for the pre-classified simple workspace split; do not broaden it.\" This governs current preparation: Build and harness-role implementation/validation continue; their Claude review and landing wait. The exception is confined to the already classified workspace split, not a general new-task exemption."
+}

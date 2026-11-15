@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-restart-cargo-run-rebuilds-exe",
+    "revision_id": "a9e6d8b911664857bb184b0e932887ec",
+    "previous": "055f389f4a704d239b5db41eb0d2a895",
+    "body_sha256": "2a68eab25fccbcde5481a3124bedf004188be8e0cef39f1ccefd53fd8afce6ca",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-10T15:54:28.436789Z"
+    }
+  },
+  "body": "Greg starts TermAl on EVERY host with the same two steps. His words, 2026-11-10 15:54Z, relayed by Engram::Asistant in 588693a8 #1278: „robie: - git pull - cargo run --release\".\n\nConsequences for every landing and restart:\n- **Installed copies are not what runs.** The running binary is cargo's build in target/release from whatever `git pull` brought in. A copy installed beforehand, even in target/release, is rebuilt or relinked over. A copy in install-target is never used.\n- **Same commit, different sha.** This was seen on Central (2026-11-07: b31c9ab9 instead of the installed d93351b9) and on 2026-11-10 at three hosts:\n  - Central cf655290 instead of the installed 7b460f25;\n  - DL560 486f14ba instead of the installed 99f1808f;\n  - Mac 17493c76.\n  All built from the same source.\n- **No cargo parent on Unix.** `cargo run` exec-replaces itself, so the TermAl process's parent is Greg's shell. That doesn't mean cargo wasn't used.\n- **A host restarted for one landing moves to master HEAD.** `git pull` brings any host Greg restarts to origin/master, not to an older planned build. On 2026-11-10 the Mac was meant to stay on a6978c03 but was restarted.\n\nAfter every restart, report for each host: pid, start time, checkout HEAD (read-only `git rev-parse HEAD`) and the binary file's sha with its mtime. Name the build as \"Greg's git pull + cargo run --release at HEAD X\". Record a sha as attested only when the file's mtime is earlier than the process start. On 2026-11-10 the DL560 and Mac files had mtimes about 4 minutes AFTER the start, which was unexplained at the time of writing.\n\nDon't re-install a binary just to make the hash match; Greg's next start rebuilds it anyway."
+}

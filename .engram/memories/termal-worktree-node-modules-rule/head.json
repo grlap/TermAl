@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-worktree-node-modules-rule",
+  "head": {
+    "state": "active",
+    "chain": [
+      "600e6e00c77b4431a5fddc6734e87731"
+    ]
+  }
+}

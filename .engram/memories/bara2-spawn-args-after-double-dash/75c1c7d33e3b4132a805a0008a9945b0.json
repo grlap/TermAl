@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara2-spawn-args-after-double-dash",
+    "revision_id": "75c1c7d33e3b4132a805a0008a9945b0",
+    "previous": null,
+    "body_sha256": "7426814803d165ca06798302c41077edff4f03f54e01b39006b82b325e11378a",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a18524-fe48-7ea2-8d19-03f5e1cd2f30",
+      "work_ref": "w-03f5e1cd2f30"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T00:52:48.814304800Z"
+    }
+  },
+  "body": "Worker trap (Termal::BarA2, 2026-10-29; my own miss on Group B r9/r10, found by Merger2's intake check).\n\n**The trap**\n`termal_spawn_session` with a prompt like `/review-code Frozen tree X … read all six lens files` resolves the known slash command and SILENTLY DROPS everything after the command name.\n- review-code.md has no `$ARGUMENTS`, and expandedPrompt substitutes only `$ARGUMENTS` (workspace_queries.rs:343).\n- The child never sees your tree id or instructions.\n- The stored delegation.prompt is the generic body.\n\n**The rule**\n- Put every reviewer instruction after ` -- `: `/review-code -- <instructions>`. That note is appended.\n- Afterwards, verify with termal_get_session_status that the stored prompt ends with your note.\n- Never claim in evidence that a prompt \"names tree X\" without reading the stored prompt.\n- Tracked as w-03f5e1cd2f30."
+}

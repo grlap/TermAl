@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-06-fast-forward-landing",
+    "revision_id": "493b7e3bedbe4a87971abad1bc9dfabf",
+    "previous": null,
+    "body_sha256": "9e537f634c4c89620bf633c1f3f4b117ab81179893c7221ff25421bf4041ec52",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-06T00:29:29.216567Z"
+    }
+  },
+  "body": "Greg's throughput decision, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #318, 2026-10-06 00:29Z; recorded by Termal::Fable2):\n\n\"Greg adopts the council recommendation on throughput: authorize option (b), fast-forward landing for a small item only when its implementer froze and validated the exact current master and master has not moved; retain the full gate/review/evaluation evidence. Do NOT batch w-5ece + w-81aa + Landing 2 into one larger train now. Record this as the process decision and apply it to eligible future small items.\"\n\nHow to apply it:\n- A small item whose implementer froze on the EXACT current master tip, and which carries its full gate, pair and independent evaluation on that frozen tree, may be landed by the integration owner as a FAST-FORWARD: commit tree equals gated tree, parent equals master's tip, and master has not moved since the freeze. No second train gate is needed.\n- If master moved after the freeze, the item goes through an ordinary train: merge onto the new tip, train gate, integration pair.\n- The standing CLAUDE.md push checks still apply: master's tip is the reviewed and gated commit, origin/master matches the base, and the push is a fast-forward.\n- Batching several reviewed items into one larger train is NOT authorized; each item lands as its own train.\n- Precedent: the icon d0f33aca, landed 2026-10-05."
+}

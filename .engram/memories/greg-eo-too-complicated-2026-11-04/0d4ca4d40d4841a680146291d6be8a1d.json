@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-eo-too-complicated-2026-11-04",
+    "revision_id": "0d4ca4d40d4841a680146291d6be8a1d",
+    "previous": "09dd7e4fc82c4dfcb484a074f40d29d3",
+    "body_sha256": "11890399d9453de7adeefc9d64cd47825cc70e89c85cfca9dfc82325519528e7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T20:20:11.359233500Z"
+    }
+  },
+  "body": "Greg, verbatim, via Engram::Asistant 588693a8 #381, 2026-11-04 19:56Z: „obawiam sie bardzo, ze system do EO jest bardzo skomplikowany, kiedy nie powien byc”. Asistant's scope: with Engram, assess and simplify the whole path from running a test to evaluation: the minimal source and evidence model, what must really work, which states, comparisons and procedures are unnecessary and cause false refusals, and concrete code simplifications, not new ceremony. Ordinary work must work automatically, real source changes stay told apart, historical evaluations untouched. P0 repairs continue; one short joint proposal goes to Greg. Before approving any new EO mechanism, ask first whether the commit comparison already decides it (src/acceptance_committed_input.rs).\n\nDECIDED, 2026-11-04 20:19Z. Greg's word „tak” to the joint proposal, as relayed by Engram::Asistant 588693a8 #387: a registered check on a commit, a clean repository and submodules, no blocking by turn reports; an edit reverted to the tested state before the decision is accepted; existing evaluations and seals untouched; work autonomously, no workarounds or complicated procedures; report real blockers and readiness for a restart. Rule: at evaluation and at done, the claim's named root is clean at a commit and a registered check passed on exactly that commit, the newest result at that commit deciding; Engram reads Git itself, TermAl earlier at request. Exact commit, not tree. Absent or unreachable root refuses, so done comes before removing the worktree. Engram w-633b5cacc42a; TermAl launcher selection under w-83d4e75fef4f. N13, 0fc2921f, b1fa and w-d6b6's endpoint are no longer needed for evaluation currency."
+}

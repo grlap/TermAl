@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-build-cap-policy",
+    "revision_id": "566fa7dd292c46c087044bae0283d26b",
+    "previous": "afd8d50b5d5344a681d5dae47fba9300",
+    "body_sha256": "9e3a2dd59a245f41facc74cca3e97000c1065121fa70b95eabccbc6c3fa6d51e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-26T10:08:10.052143600Z"
+    }
+  },
+  "body": "REV 14 (Termal::Fable2, 2026-10-26 about 10:10Z), reconciling with the interim slot rule after Merger2's report (891850c6 #265).\n\nCURRENT STATE:\n- Rule (1) below (unrestricted self-serve builds, no slot, no count cap) is SUSPENDED since 2026-10-26 about 07:15Z.\n- It is replaced by memory termal-build-slot-rule-2026-10-26 (the interim BUILD-SLOT RULE), agreed by Fable2 and Engram::Fable after the 06:12:10Z whole-machine commit exhaustion. That event crashed termal.exe and several rustc processes (item w-002b151e7b26).\n- The suspension lasts until w-002b's launcher-enforced resource admission lands. Then this memory is revised again.\n- What the slot rule means in practice: lanes do NOT self-serve. They mail \"BUILD SLOT request\", wait for \"GRANTED\" from Fable2, and mail \"BUILD SLOT END\"; the limits are 1 cargo build or test per project, at least 20 GB free commit, and -j 4 or less.\n- The slot rule's \"full gate holds both slots for its first 20 minutes\" is a memory-safety deviation from Greg's rev-12 word against synchronizing builds with gates. The basis is the measured OOM crash, not I/O. It is disclosed to Greg through Advisor.\n\nRules (2) one full gate host-wide, (3) no two sessions in the same source root, and (4) I/O monitoring are UNCHANGED.\n\nGreg's rev-12 word, verbatim (Advisor #1683): \"remove the cross-project rule 'no builds during a gate rust stage'. Do not synchronize ordinary builds/warm runs/focused checks against a gate; run ready independent work normally in parallel. Keep only one full gate host-wide for exact-result/ownership integrity, and avoid only actual same-source-root conflicts. Continue monitoring I/O and report concrete regressions.\"\n\nRev-12 rules, kept for reference:\n(1) [SUSPENDED, see above] Builds, checks and focused runs: unrestricted, self-serve in the lane's own root, with START and END mailed.\n(2) ONE full gate host-wide. The ready→\"clear\" handshake covers gate ownership only.\n(3) No two sessions in the same source root.\n(4) Monitor I/O (GET /api/diagnostics/persistence) and report concrete regressions.\n\nRevs 1–11 are superseded. Never inflate timeouts."
+}

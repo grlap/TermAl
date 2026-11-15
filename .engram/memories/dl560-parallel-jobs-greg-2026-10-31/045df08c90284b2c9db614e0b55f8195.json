@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "dl560-parallel-jobs-greg-2026-10-31",
+    "revision_id": "045df08c90284b2c9db614e0b55f8195",
+    "previous": "27c6870efaf5461c984b1e3344d2c2be",
+    "body_sha256": "9828582312f44c833cd7473e5b3552940e8759e19428033ac2c70afc7687ccee",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-31T15:51:12.693467900Z"
+    }
+  },
+  "body": "Greg's direction, relayed by Engram::Advisor (TermAl mailbox b9d13887 #2878 and Engram Advisor #2459, 2026-10-31 15:49Z), verbatim: „DL560 ma 72 cory i 256 GB pamieci; jego zdaniem nie wymaga synchronizacji dostepu i powinien obslugiwac rownolegle zadania. Prosze usunac sztuczny jeden slot na DL560 i zaplanowac rownolegle niezalezne gate i cargo, z osobnymi worktree/targetami i rozsądnymi limitami faktycznych zasobow; potwierdzic praktyczne wykorzystanie.\"\n\nSHARED DL560 RULE (rev 2, 15:51Z): proposed by Engram::Fable (ebe242f7 #5664), concurred by Termal::Fable2 with one addition. It supersedes my interim rev 1 (max 3, disk ≥ 100 GB, load < 100) and the dl560-runner-checklist r17 line \"2 concurrent jobs, 1 Engram + 1 TermAl\".\n- No per-project slot and no fixed job count.\n- Each job runs in its own fresh detached worktree, with its own target and a throwaway HOME and TMPDIR, in each project's own runner clone. Only the toolchain and the cargo registry cache are shared.\n- Admission at launch: MemAvailable ≥ 64 GiB, free disk ≥ 60 GB plus the job's expected footprint (40 GB until measured), and 1-minute load < 64. Otherwise the job is queued with the reason.\n- Fable2's addition: if any other job is running at launch, the new job's environment gets CARGO_BUILD_JOBS=48. It can be dropped if measurement shows it's unnecessary.\n- Heavy and stress jobs record the concurrent load. Each START lists the concurrent job ids.\n- A contention failure is diagnosed as a failed gate and never retried until green.\n- Each project's coordinator schedules its own lanes with a named GO per job. There is no cross-project GO.\n- After the first parallel window, the Runner reports peak concurrency, RAM, load and per-job wall time.\nCentral Windows stays one Cargo job at a time; this covers DL560 only."
+}

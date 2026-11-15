@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "freeze-crlf-working-files-trap",
+    "revision_id": "55ec44285db54d59baa01f8a7b8e1d1f",
+    "previous": "6d64f26d542140af8f23a5e85326496c",
+    "body_sha256": "fa786835bfc55d7a635b9c1298f44162b75695b5232dedcdd0b2baf3971ac870",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T00:30:36.746157Z"
+    }
+  },
+  "body": "Worker trap (Termal::BarA1, 2026-10-18, met on the w-52222f575b81 carry). TermAl's blobs are LF, but .git/config sets core.autocrlf=true, so a checkout (reset --hard, checkout, apply) writes CRLF files to disk. git diff --cached reads a stat-clean working-tree file instead of its blob. With CRLF files on disk, the staged-diff bytes therefore depend on autocrlf: the Engram schema-1 script (run with core.autocrlf=false) and the pinned `termal.exe review-freeze-check` (repository config, true) compute different fingerprints. The check fails with \"review input drifted from the independently supplied fingerprint\", although the tree is identical. FIX: before freezing, normalize the changed files on disk to LF (`perl -pi -e 's/\\r\\n/\\n/' FILES`), restage with `git -c core.autocrlf=false add -- FILES` (the tree is unchanged; verify with write-tree), then freeze. The script and the checker then agree. Diagnose by comparing `git -c core.autocrlf=true diff --cached --stat` with the false form: a whole-file rewrite under false means CRLF files on disk. Also: Git Bash `grep -c $'\\r'` miscounts CRs; count with `tr -cd '\\r' | wc -c`.\n\nVARIANT (Termal::BarA1, 2026-10-19, the w-4d6283a1f1f5 carry onto 89211511): after `git reset --hard NEW` plus `git read-tree -m -u NEW MERGED`, the files that changed between bases are written CRLF and their index stat entries are stale. `git -c core.autocrlf=false diff --stat` then shows whole-file diffs for files you never touched (26 there), so the script and the checker disagree (\"drifted\") even after LF-normalizing your own changed files. FIX: `git update-index -q --refresh` (with the repository's own autocrlf=true). It only refreshes the stat cache and changes no content; the unstaged diff is then empty under both settings, and the refreeze passes the pinned check. Diagnose with the unstaged `diff --stat` under autocrlf=true vs false."
+}

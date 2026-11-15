@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-restart-hold-needs-a-bound",
+    "revision_id": "d3c3536cfa5c46aba8dae25bffc11734",
+    "previous": null,
+    "body_sha256": "49ba4ce49dc6af552c3335a03e6d949cc7b995d025b537bc570294759cd163eb",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T14:59:35.438768800Z"
+    }
+  },
+  "body": "Lesson (Termal::Fable2, 2026-11-09, my own slip). After sending \"restart now\" with new GOs held, I ended my turn with an open-ended hold and no bound. Greg didn't act for two hours, four hosts sat idle, and a held batch wrapper was killed by its two-hour limit; I only learned because Opus2 asked. When sending a restart request, state in the hold when it lifts by itself (e.g. 20 minutes, then work continues and a later restart cuts off what's running) rather than leaving it open. No wake comes to a coordinator merely because nothing happened."
+}

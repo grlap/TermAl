@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-windows-run-for-new-fixtures-2026-11-05",
+    "revision_id": "835b99c2718e4447b7184b903ce95af8",
+    "previous": null,
+    "body_sha256": "39323fc2d48807c872d62bcc2532dd2686cde20aa7efcf2d9b7662798f397e78",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-05T16:51:00.920937700Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-11-05, from w-d57f7ec79343). Two observed_terminal tests that landed with w-814b in 7eb731fc spin forever on Windows; the landing gate was a Linux FULL, where they pass. From now on, a landing that adds or changes tests using filesystem or Git fixtures (temp roots, worktree loss, path walking) gets a Windows run of those new tests before landing, even when the FULL runs on Linux. This doesn't replace the standing rule's gate. It's my check when reading condition 3 and gate evidence."
+}

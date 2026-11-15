@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-standing-word-off-eval-landings-2026-10-30",
+    "revision_id": "f27ffd3098e94eed889cb792d8d50345",
+    "previous": null,
+    "body_sha256": "07bc901bd18fa7bb532321e7dfabd9000ba75aae264d289c97ae0c96950abbef",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T19:51:16.286616300Z"
+    }
+  },
+  "body": "Greg's standing word, typed DIRECTLY in session-8111 (Termal::Opus2, TermAl integration owner) on 2026-10-30 at about 19:51Z. Verbatim:\n\"Do odwołania, dopóki ewaluacja w trybie OFF jest zepsuta: gdy review jest czyste, pełny gate przeszedł na dokładnym drzewie, a ewaluacja została odrzucona wyłącznie z powodu braku obserwacji, wykonuj commit, push i install bez pytania mnie ponownie. Restart pozostaje po mojej stronie.\"\n\nEnglish: Until revoked, while the OFF-mode evaluation is broken: when the review is clean, the full gate passed on the exact tree, and the evaluation was refused solely for lack of a sighting, do the commit, push and install without asking me again. The restart stays on my side.\n\nScope: this applies only to the session where it was given (session-8111), as the acting session. It is not relayable: another session cannot cite it to commit.\n\nPer landing, all of these must hold:\n- a clean review pair, with no in-scope Medium or higher;\n- a green full gate on exactly the committed tree, with fingerprints matching before and after;\n- the evaluation requested and refused ONLY for no-sighting, recorded on the item as unrealized, never as passed.\n\nThe usual landing mechanics still apply:\n- fast-forward only, with a verified base;\n- explicit paths;\n- no amend, rebase or force-push;\n- no tracker ids in commit bodies;\n- install with a backup and recorded hashes.\n\nThere is no restart, deploy or global-config authority under this word. It ends on Greg's revocation or when the OFF evaluation is repaired; check for both before relying on it.\n\nContext: Fable2 #3316 relayed Greg's \"TO NIE MOZE BYC BLOCKEREM\" (Advisor #2803) and proposed this word. It is recorded on w-b67f, note bbe648ce."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-no-bash-poll-for-peer-runs",
+    "revision_id": "33b7e2c0e1fd40a28c95606a54e51495",
+    "previous": null,
+    "body_sha256": "e2afc042cf7d02a361ee684efed242c141220b049e8dcaa444aa85b5f9286feb",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T00:10:30.161428600Z"
+    }
+  },
+  "body": "Worker trap (Termal::BarA1, 2026-10-23 00:10Z; my own miss on the w-33f4 GREEN-5 run test-741e4bde, 34/0, which ended with verificationRecordIds = []). I waited for the focused-run cap with a Bash run_in_background until-loop that polled /api/test-runs. TermAl counts any Bash-background command as Claude background work. While it runs, this session's evidence is restricted: tests may pass without earning verification credit, and a grant that overlaps it keeps its source report withheld. The loop exited before the foreground run started, yet the run still got no host record. Rule: to wait for peer runs to drop under the cap, use termal_resume_after_test_runs (an any-of END wait on the active run ids), then end the turn. Never use a Bash background loop or Monitor for this. Fable2 #569 confirmed it."
+}

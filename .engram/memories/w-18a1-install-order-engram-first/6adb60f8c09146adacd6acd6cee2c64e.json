@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "w-18a1-install-order-engram-first",
+    "revision_id": "6adb60f8c09146adacd6acd6cee2c64e",
+    "previous": "d9f83b88769347e4a6908cb492b469fa",
+    "body_sha256": "6ce18906bad46142859ec7be882aa6640a7caddc3b4e4d77f34318a35ba90702",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T15:25:25.477144700Z"
+    }
+  },
+  "body": "Landing/install condition for TermAl w-18a1 (Fable2 #5577, 2026-11-11): its R9+ sends the Engram source command --timeout-ms 60000, but the installed Engram source owner caps at 30000; 60000 arrives only with Engram w-6ecc in the Engram sync install. On EACH host (Central and DL560) the Engram sync install must come FIRST, then the TermAl w-18a1 install; otherwise every committed-input evaluation on that host is refused NotClean. Check this at w-18a1 install time on both hosts.\n\nWIDENED (Fable2 #5584, 2026-11-11 14:44Z, from a7bb's #1266 finding): the w-18a1 launcher (scripts/test-launcher.mjs createRun -> sourceOwnerMetadata) probes the installed Engram source owner with --timeout-ms 60000 on EVERY run, even with --input plain. So once w-18a1 is on master, every launcher run on a host whose Engram is pre-sync fails before its tests, including test-ref FULLs. The Engram-first order therefore covers EVERY host that runs the launcher, not only installs: Central, DL560 and the Mac runner. BEFORE LANDING w-18a1, confirm with Engram::Fable that the Engram sync install (w-6ecc, 60000 cap) is on all three hosts. Until then, R13-era diagnostics may use the published master launcher by absolute path from the candidate cwd (30000 budget), disclosed, plain, with no credit (GO-CARGO-R13-1).\n\nLIFTED for R14 (Fable2 #5590, 2026-11-11 15:25Z, decision recorded on w-18a1): a7bb's R14 inventory shows R14 sends NO timeout or budget value to Engram. The source argv is exactly `source --root ABS --json`; the old owner defaults to 30 s, which is no more than master's current --timeout-ms 30000. The Engram-first condition (installs AND the all-launcher-hosts extension) is therefore LIFTED for R14 and its byte-identical successors. Caveat: until Engram::Fable confirms that the DL560 and Mac Engram builds also default the omitted flag, R14 launcher runs go on CENTRAL ONLY. REINSTATED automatically by any later w-18a1 change that sends a budget value to Engram; recheck the inventory on each successor that is not byte-identical."
+}

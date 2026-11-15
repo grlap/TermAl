@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "no-agent-watches-running-tests",
+    "revision_id": "b1762c10178441ddbb06127e67926bb8",
+    "previous": "91700e811eb0420e8dbaa9a1fea7d494",
+    "body_sha256": "cd68c328d6007f45ef5453abc8b0f47ccc9b5424eda688f0a4779497ecd23747",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-08T18:59:01.175060800Z"
+    }
+  },
+  "body": "Greg, 2026-11-08 17:39Z, on Codex 6 posting every 53 s during a FULL: 'why Codex 6 is babysitting testrun? this is a big problem as it consumes the tokens'. Rule: no agent watches a running test. No polling, sleep loops, log tailing, status reads or progress posts during a run.\n\nHow, by case:\n- Remote runner jobs dispatched by the integration owner: one background script that survives the turn; the launcher runs hostless with TERMAL_* removed for that child only; an EXIT trap sends END once to the dispatcher with the run dir and exit code; the agent ends its turn.\n- Local detached gates: --detach --notify to a different coordinator, then end the turn.\n- Registered runs in a root session: the supported wait, then end the turn.\n\nCause found on 2026-11-08: Opus2's dispatch forced a foreground hostless launcher, with no wake and a 'sampled load' report line. Its own account says what produced the 53 s updates is unconfirmed; a long tool wait is a guess.\n\nRelated gaps: w-f7c5c15cf8b0 (domain mailbox never wakes a domain-bound runner), w-5e2f3fba987a (remote run wait and registration).\n\nNever add another polling mechanism as a fix.\n\nConfirmed by Codex 6 itself (via Opus2 #5035, 2026-11-08 18:00Z): 'During the run I continued foreground waits, progress updates, stage/log and load reads under the original dispatch; I did not act on #657 in time.' Lesson: mail to a runner in a foreground wait doesn't stop that wait. Only the dispatch shape prevents polling.\n\nCORRECTION, Termal::Fable2, 2026-11-08 18:59Z: I listed w-5e2f3fba987a as an open gap and as the reason remote runs stay hostless. That was wrong: it COMPLETED on 2026-11-06 and landed at fc1fea6c, delivering origin registration from an approved independent clone and durable host-qualified remote waits, observation-only and uncredited. So the reason for hostless remote runs is NOT established by that item. The background-script shape remains a valid no-polling launch, but whether a tracked remote run plus the remote wait is better is an open question for the integration owner. Engram::Fable earlier saw termal_resume_after_test_runs return 404 'test run is not indexed' for remote runs; check that against this item before relying on the wait."
+}

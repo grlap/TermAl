@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-worktree-node-modules-rule",
+    "revision_id": "600e6e00c77b4431a5fddc6734e87731",
+    "previous": null,
+    "body_sha256": "8d25366c76f9ad0fae383c9a3e32679b246c904e2a6472eb9d9528bdd904cb12",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-18T01:44:00.291432500Z"
+    }
+  },
+  "body": "WORKTREE ui/node_modules RULE (Fable2, 2026-10-18 01:45Z), from TermAl w-affe gate test-e2706734's vitest failure. The log said \"Error: Denied ID C:/github/Personal/TermAl/ui/node_modules/mermaid/dist/mermaid.min.js?url\", and whole UI files failed with 0 failing tests.\nCause: the worktree's ui\\node_modules was a JUNCTION to the main checkout's ui\\node_modules, which is an old install (287 entries versus 400 from a fresh npm ci). Vite resolves the real path outside the worktree's allowed root and denies it.\nAbout 90 .tmp\\wt-* roots carry this junction.\nRULES:\n(1) Before any full gate or UI focused run, a lane checks that `(Get-Item <root>\\ui\\node_modules -Force).LinkType` is empty. If it is a Junction, remove ONLY the link (`cmd /c rmdir \"<path>\"`), then run `npm ci` in <root>\\ui.\n(2) NEVER remove a junctioned node_modules with Remove-Item -Recurse or rm -rf: it can delete the main checkout's packages. Any worktree cleanup must unlink junctions first. This is relevant to the audited release w-52222f575b81."
+}

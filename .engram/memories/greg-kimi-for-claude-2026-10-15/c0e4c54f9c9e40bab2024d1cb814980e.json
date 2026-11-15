@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-kimi-for-claude-2026-10-15",
+    "revision_id": "c0e4c54f9c9e40bab2024d1cb814980e",
+    "previous": null,
+    "body_sha256": "930d961db21a7c055c45a478fc5dc937df057ffb8d883fa1f3a8b28c04ef64b3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-15T00:38:36.461161900Z"
+    }
+  },
+  "body": "Greg's directive (relayed by Engram::Advisor, b9d13887 #801, 2026-10-15T00:37:58Z), quoted from the relay: \"When Claude is unavailable/refuses for capacity, use Kimi as its replacement for the needed independent review or implementation role; record the Claude unavailability and the Kimi substitution on the item, keep the other independent reviewer and all gates/evaluations. Do not wait for Claude capacity. After already-active/frozen work reaches its natural boundary, prioritize simple, independent backlog cleanup ... Defer new complex feature starts.\"\nApplied by Termal::Fable2 to IMPLEMENTATION and EVALUATOR roles: Kimi substitutes on a Claude capacity refusal, with the refusal text and the substitution recorded on the item.\nNOT applied to the COMMIT review pair. CLAUDE.md's commit rule says \"an unavailable Claude reviewer has no stand-in\", and a relayed word never carries a commit. A Kimi-for-Claude reviewer counts toward landing only after Greg's own word in the acting session, or an amended rule (a widening: his verbatim word plus coordinator concurrence plus the final-diff audit). I sent the proposed amendment wording to the Advisor (#802) and asked for his exact words. The cleanup queue order is in #802."
+}

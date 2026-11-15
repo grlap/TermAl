@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "closure-fulls-filler-only-2026-11-13",
+    "revision_id": "e03ddbd4bce641b09580b96f84c0e1fa",
+    "previous": null,
+    "body_sha256": "7c04fd4e03ecc47e48e79afa9c12ff17eadca6ee88c4b0d76fb328590000881b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T06:49:32.354360700Z"
+    }
+  },
+  "body": "Fable2 #5841 (2026-11-13 06:48Z), to Opus2: registered closure FULLs (an item's own `full --input commit` in its named root, needed by test-bound \"full gate\" criteria) run on Central only as FILLER: a closure FULL takes the Central slot only when no feature or P0 run is ready, and once started it finishes. Current three, in order at the queue's end: Opus3 e105 (root wt-e105c), 8e1f aa7b (root 3611), d50d w-70ed C2 (root 3583); each COLD (24 GiB, nothing beside it), at the master current at its SLOT-FREE. No NEW closure FULLs are queued beyond these three until Greg answers Fable2's question (c), relayed via Asistant: may a test-bound \"full gate on the exact landed tree\" criterion be satisfied by the landing FULL on the same tree id with run id, host, commit, tree and before/after fingerprints recorded on the item? Until he answers, no criteria are revised. (b) refused: no rebuilt batch/member credit machinery (verification_bind retired). Opus2's own combo integration items whose C2 cites a DL560 hostless FULL: do NOT request their evaluations yet; park them until Greg answers."
+}

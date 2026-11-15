@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-forward-notify-completions",
+    "revision_id": "814b85bda3404cc78c6a5fa44d42e223",
+    "previous": null,
+    "body_sha256": "3bf3c67536fc12fa6cf53132f8110fdbd5aaeaef2da470d94ade627103e4712e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-12T23:42:08.414834400Z"
+    }
+  },
+  "body": "Integration-owner rule (Opus2, 2026-11-12, my own miss on 12329's w-8f12 Windows step 1). When a lane runs a detached launcher with --notify session-8111, the completion is addressed to ME. It shows up in the shared mailbox as my message, and the lane is NOT woken by it. I wrongly assumed 12329 'had it without a forward'; its steps 2-4 then sat idle for about 30 min with Central's cargo slot unused (23:09-23:40Z). Rule: on every --notify completion from a lane's run, send an explicit forward to that lane (session id) at once, in the same turn, with the run id, PASS or FAIL and exit code, and tell it to continue its next step. Never assume a completion in a shared mailbox woke its owner. Also, when a lane holds the Central slot, check for idle (no cargo, rustc or launcher) whenever I'm woken, and ask at once."
+}

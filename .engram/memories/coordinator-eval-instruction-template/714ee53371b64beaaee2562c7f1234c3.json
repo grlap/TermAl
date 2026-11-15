@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-eval-instruction-template",
+    "revision_id": "714ee53371b64beaaee2562c7f1234c3",
+    "previous": null,
+    "body_sha256": "216fb00b49b6be448dcf6d9bf9402ef0f4493c51faa9fc672af7197e376e6cd4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-20T20:14:34.673247900Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-20 20:19Z; I repeated the 2026-10-12 miss). EVERY instruction that asks a worker to request an acceptance evaluation must restate, verbatim: \"after termal_evaluate_acceptance: no tracker write, no mail; hold the turn OPEN with termal_wait_delegations on the evaluator delegation until it submits; only then read the verdict, mail and note.\"\n\nOn 10-20 I told Sol-c593 to \"request termal_evaluate_acceptance now… mail me the evaluation id\". Both w-9ca5 evaluators intended PASS but were refused 409 \"source root changed\" (w-539ea7e8b506 / w-eda892234c41), wasting two Opus evaluations and about 15 min. Source: memory live-workaround-eval-submission."
+}

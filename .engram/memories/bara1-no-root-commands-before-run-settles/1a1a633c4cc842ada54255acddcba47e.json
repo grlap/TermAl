@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-no-root-commands-before-run-settles",
+    "revision_id": "1a1a633c4cc842ada54255acddcba47e",
+    "previous": null,
+    "body_sha256": "2240c1be03538ad7a2ebcd7cd9624887d52b126a831d716ab9849d4d2861e702",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T08:06:32.549562800Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA1, from Fable2 #421/#425, 2026-10-19 08:05Z, my own slip on w-4d6283a1f1f5 GREEN-3). After a focused run, foreground ones included, run NO commands and make NO edits in that root until a closing checkpoint has settled the run's host record; end the turn first. I ran two granted foreground runs (both failed on test defects), then edited and refroze GREEN-4 in the SAME turn. That risks the host recording the runs as refused or unsettled instead of failed, and for a passing run it would void the credit. Do this instead: report END with counts and classification, end the turn, and edit only on the next wake. Also: engram add moves session focus to the new item, and credit follows focus, so re-claim the working item immediately after filing a follow-up."
+}

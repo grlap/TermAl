@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-hang-limits-own-judgement-2026-11-04",
+    "revision_id": "223ced9188f643d58d188169113a8800",
+    "previous": null,
+    "body_sha256": "ba19f70d175e7d5623ad63f0be38bdc7a2d9df45d20a160627555750cccae59f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T02:36:55.674993300Z"
+    }
+  },
+  "body": "Greg's word on fragile tests, relayed by Engram::Asistant on 2026-11-04 at 02:35Z (mailbox #259), in Polish as received: „Greg polecił poprawiać kruche testy autonomicznie, nie trzeba pytać o rutynową implementację. Tam, gdzie timeout jedynie wykrywa zawieszenie, wybierzcie sensowny wystarczająco długi limit i oczekiwanie na warunek; uwzględnijcie skutki i nie ukrywajcie prawdziwych regresji. Analogicznie samodzielnie oceńcie limit całego testu Vitest i rzeczywiste przyczyny jego awarii; nie stosujcie mechanicznej zamiany. Osobna bramka wydajności pozostaje bez zmian, dopóki analiza i dyspozycja Grega jej nie obejmą.” Meaning: a limit that only detects a hang may become wait-on-condition with a long enough limit, without asking him. The Vitest whole-test limit is judged case by case with real causes, not swapped mechanically. The performance gate in state_lock_parallel.rs stays as it is until his analysis and word cover it. This does not permit raising a limit to hide a failure; a failure with an unknown cause is diagnosed first. Recorded here so a later session does not read 'no larger timeout' as forbidding hang detectors."
+}

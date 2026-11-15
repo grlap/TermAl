@@ -1,0 +1,27 @@
+{
+  "id": "01a1dfca-680a-7f10-869b-606004f453fc",
+  "external_ref": null,
+  "title": "Say whose review-freeze fingerprint the test-ref landing-gate clause binds (the one recorded on the item)",
+  "outcome": "The CLAUDE.md and AGENTS.md test-ref bullet says explicitly that the review-freeze fingerprint it binds is the one recorded on the item for the reviewed input, so no reader takes it as the runner's own measurement (which can never match). The change lands through the authority-text route: coordinator concurrence, Greg sent the wording, final-diff audit.",
+  "acceptance": [
+    "Say whose review-freeze fingerprint the test-ref landing-gate clause binds (the one recorded on the item) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "authority-text",
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

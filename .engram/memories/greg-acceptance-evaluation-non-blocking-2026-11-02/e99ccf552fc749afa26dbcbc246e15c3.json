@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-acceptance-evaluation-non-blocking-2026-11-02",
+    "revision_id": "e99ccf552fc749afa26dbcbc246e15c3",
+    "previous": "9e501d068503464b9600cde744f0f6e8",
+    "body_sha256": "b5036ed295bd3363b51a1898539389257f5f9dd3403eb355e1bcf25ce2a1d2b7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-02T00:21:48.379616600Z"
+    }
+  },
+  "body": "REVISION 4 (2026-11-02 ~00:23Z): the 'replaced' reading in revision 3 is WITHDRAWN.\nGreg's direction (~00:06Z, relayed verbatim by Engram::Architect3, TermAl mailbox 63096d00 #464; Engram note 2016df8c): 'independent acceptance evaluation first, THIS SHIT IS TURNED OFF UNTIL WE GOT THIS WORKING'.\nEngram::Fable withdrew its #5841 'replace/delete' reading in TermAl mailbox ebe242f7 #5846: Greg rejected deleting the evaluation feature.\n\nSTATE:\n- Acceptance evaluation is OFF as a blocker until it works. The code STAYS.\n- Both live stores run allowed_modes=[] with mechanical_basis=asserted (epoch 3); TermAl's policy is e83a04e5.\n- Nobody requests or waits for an evaluation as a delivery step.\n- An item stays open only for criteria it has not actually met, and no verdict is fabricated.\n- CLAUDE.md condition 3's independent-evaluation clause is not applied while this lasts; every other standing condition still applies.\n- Making evaluation work again is TermAl w-fdbb4fb85a50 (scope restored: record the sighting with gating off so an evaluator can start; P1, non-blocking).\n- Engram w-ff546a940de0 is withdrawn.\n\nSEPARATE, unchanged: turn gating is DELETED, not retired (Greg: 'FUCK NO / I TOLD TO REMOVE THIS UNUSABLE SHIT'; 'NIE NIE NIE KAZALEM TO USUNAC!!! MAMY POLITYKE ZERO LEGACY…'). This covers TermAl w-3fe8 and Engram w-5b17.\n\nALSO: Greg ordered a STOP of all work at 00:18Z ('ZATRZYMAJ WSZYSTKIE PRACE'). Nothing proceeds until he explicitly resumes."
+}

@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "bara1-engram-calls-one-per-message",
+  "head": {
+    "state": "active",
+    "chain": [
+      "3772a4d551ba4f9996f321d8c7d9f07c"
+    ]
+  }
+}

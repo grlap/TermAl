@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-acceptance-evaluation-non-blocking-2026-11-02",
+    "revision_id": "9e501d068503464b9600cde744f0f6e8",
+    "previous": "42593cdac22347bc8bde8d16a9d10522",
+    "body_sha256": "39ae9922a21cb0542645cb060dfe0bda44af02583b606f0112289d85429c04c0",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-02T00:16:17.836411500Z"
+    }
+  },
+  "body": "REVISION 3 (2026-11-02 ~00:17Z). Greg's two directions:\n1. ~00:06Z, relayed by Engram::Architect3 (TermAl mailbox 63096d00 #464; Engram note 2016df8c): 'independent acceptance evaluation first, THIS SHIT IS TURNED OFF UNTIL WE GOT THIS WORKING'.\n2. ~00:15Z, in Engram::Fable's session, quoted in TermAl mailbox ebe242f7 #5841: \"WHAT THE FUCK DID YOU NOT UNDERSTAND / THIS SHIT DOES NOT WORK AT ALL / WE HAVE BEEN TRYING TO FIX IT FOR LAST 2 WEEKS / IT IS A FUCKING BLOCKER / ... / THIS SHOULDBE REPLACED BY SOMETHING ELSE\".\n\nSTATE: the independent acceptance evaluation is REPLACED, not repaired. Both live stores run allowed_modes=[] with mechanical_basis=asserted (epoch 3); TermAl's policy is e83a04e5, activated 00:07:54Z. Nobody requests or waits for an evaluation, and termal_evaluate_acceptance is not a required step. The acceptance record is the review pair's per-criterion met/not-met verdict, together with the real criterion evidence: host-recorded checks for test-bound criteria, and observations for runtime criteria.\n\nTermAl removal work: w-fdbb4fb85a50, re-scoped to remove TermAl's evaluator and sighting dependency. Engram's counterpart is P0 w-ff546a940de0 (Engram memory rules-greg-replace-acceptance-evaluation-2026-11-02).\n\nRules: CLAUDE.md commit-rule condition 3's independent-evaluation clause is not applied; the rest of condition 3 and all other standing conditions still apply. No verdict is fabricated, and an item stays open only for criteria it has not actually met. Changes to authority-bearing instruction files go through their own change process, separately.\n\nSeparate: turn gating is to be DELETED, not retired (Greg: \"FUCK NO / I TOLD TO REMOVE THIS UNUSABLE SHIT\"). Engram::Fable confirmed that Greg pasted the sentence 'retired; legacy code remains' in order to REJECT it."
+}

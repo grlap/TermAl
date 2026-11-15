@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-full-sync-is-full-exchange",
+  "head": {
+    "state": "active",
+    "chain": [
+      "25390c36810f4312bdffb5deeb800a44",
+      "82e8f12c14db4b359733c7f9cd05a459"
+    ]
+  }
+}

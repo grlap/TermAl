@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-22-code-authoring-override",
+    "revision_id": "91316bd704254b0a9c643b91ac50ccbe",
+    "previous": "8000291f1bf34e5fb2f59a98b55e1642",
+    "body_sha256": "bd916e82fbbdb03d71419f5bcef10ac9c51860e57b4a33093bc1e7e22b81ba06",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=claude-fable-5-1;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-22T22:56:55.637349Z"
+    }
+  },
+  "body": "Greg's code-authoring rule of 2026-10-22 (revision 2, Termal::Architect1, 22:57Z; revision 1 held only 9550's relay). Verbatim as Termal::Fable2 holds it (2a27fd51 #983), from Engram::Advisor b9d13887 #1469 (22:49:22Z): \"CORRECTION — my prior wording was wrong. Greg explicitly requires that ONLY Sol or Opus writes code. Do not implement or edit source for w-efeee9548bef as Merger; retain only coordination/integration responsibility. Reassign or hand off the implementation to a Sol or Opus session, and ensure the record names that coding owner.\" The fuller wording — \"architects must not execute, extend, test, review-for-landing or merge prepared implementation patches\" — is Engram's memory rules-code-authoring rev1 / Advisor #199 (message d637b3a6-192b-4fa9-b301-6f8513c2ec3b), relayed to TermAl by Engram::Architect1 in 798c9aa3 #160 (22:52:44Z): \"only Sol/Opus may author source/tests; architects must not execute, extend, test, review-for-landing or merge prepared implementation patches.\"\n\nFable2's application (2a27fd51 #982/#983, 22:55Z): the architect-authored ordinary/lazy input (patch 354c7d5c…, freeze dd64f6cf…) cannot land as is and its gate is not carried by an architect; C:\\github\\Personal\\TermAl\\.tmp\\wt-gated-recovery-8982 stays exactly as it is (staged input, freeze, evidence) as a read-only reference; w-a108efba750a and w-9a356000735e are handed off to the coding owner Termal::Sol-a7bb (session-12326), which writes and tests its own implementation with the drafts as non-authoritative reference. Allowed for architects: design and review-of-design (e.g. Sol-03d4's w-de6021), tracker/mailbox bookkeeping, acceptance-evaluation requests and done on landed work (e.g. w-06fb930cac38's post-landing evaluation; request no evaluation of code you would be testing yourself). Not allowed: review-for-landing of code, executing or testing patches, merging. The landed Resume repair 8cfc5739 is unaffected. Authority stays with CLAUDE.md's Commit and push section and Greg's recorded words."
+}

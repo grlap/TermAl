@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-leave-existing-evaluations-alone",
+  "head": {
+    "state": "active",
+    "chain": [
+      "0cf971e7cabb4a7eb5df5301f966cd66"
+    ]
+  }
+}

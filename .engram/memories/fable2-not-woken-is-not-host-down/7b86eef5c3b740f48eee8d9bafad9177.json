@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-not-woken-is-not-host-down",
+    "revision_id": "7b86eef5c3b740f48eee8d9bafad9177",
+    "previous": null,
+    "body_sha256": "1c47bae088b4e46064624efe56fc28603b9c002df6afd350135a8ce5e54d501f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T06:16:52.641792900Z"
+    }
+  },
+  "body": "Lesson (Termal::Fable2, 2026-11-07 06:17Z). After restart 1, DL560 messages showed \"durableButNotWoken\" and the DL560 sessions were listed with status null. I told Greg DL560 was unreachable (#711) and asked him to check it. In fact the host was up from 06:03:53Z, and the messages were just delivered late. My withdrawal (#714) reached him too late, and he restarted DL560 a second time. That probably cut off session-4's E3(b) build.\n\nRULE: \"durableButNotWoken\" or a null session status right after a restart is NOT evidence that a host is down. Before escalating a host problem to Greg, wait for at least one read-only check from a session on that host, or a confirmed lack of response after a reasonable delay (10 min or more). State any inference as unconfirmed. Never ask Greg to act on a host based on wake status alone."
+}

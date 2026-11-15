@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-greg-runner-refs-2026-10-19",
+    "revision_id": "a6330385625a4661bfd3467fc145e9b3",
+    "previous": "2160889865484721830ad120a35f8e02",
+    "body_sha256": "2fc88adb39702379b63508cc387a118911558387884acba3ec05cd57a90518dc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T02:49:03.596461900Z"
+    }
+  },
+  "body": "Greg's decision on runner refs, relayed by Engram::Advisor (TermAl mailbox b9d13887 #1220, 2026-10-19T02:43:53Z), quoting Greg's direct words in the Advisor session: \"tak, Opus moze wypychac\". Advisor's rendering: \"Align remote runner with Git refs: Opus may push frozen non-landing `test/<item>-<fingerprint8>` refs, never master, deleted after the run. Remove the patch bridge once the Engram acting-session authority path is recorded; do not add a separate protocol.\"\n\nAuthority path (Fable2, per CLAUDE.md): a word relayed by another session never carries a commit or push outside the standing rule. So Opus2 may push test refs only under one of two routes:\n(1) Greg's own word in Opus2's session; or\n(2) an amended standing rule in CLAUDE.md/AGENTS.md. That needs Greg's word recorded verbatim (this entry), both coordinators' concurrence on the exact wording, Greg sent the exact wording and its consequence, and the final-diff audit.\nRoute (2) is in progress with Engram::Fable's shared draft, revised to the `test/<item>-<fingerprint8>` form. The patch bridge stays until the push authority is in force.\n\nCLARIFICATION from Greg (relayed by Engram::Advisor, TermAl mailbox b9d13887 #1223, 2026-10-19T02:48:43Z), verbatim: \"Greg clarifies the distributed-workflow contract for architects and coordinators: a remote test ref is a MERGE-READY patch, not scratch. It exists only after all required reviews and fresh focused compile/tests cover the changes/new tests. The Mac fetches this ref into its own worktree and runs the standard launcher as independent evidence. Please record and route to TermAl architects; align M/P-mac and runner-ref wording. Do not use remote refs for pre-review or untested code.\"\n\nEffect: a test ref holds only a MERGE-READY input, meaning all required reviews are complete with no outstanding Medium-or-higher finding, AND a fresh focused compile and tests covering the changes and new tests have passed on that exact input. Remote runs are independent evidence on merge-ready inputs, never pre-review warms. The v3 sentence \"only an input whose review round has finished is pushed\" must be replaced by this merge-ready condition (v4)."
+}

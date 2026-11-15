@@ -1,0 +1,38 @@
+{
+  "id": "01a1e097-deb4-78d0-90db-bcd7a36a586a",
+  "external_ref": null,
+  "title": "Expose bounded native-completion refusal diagnostics for registered launcher runs",
+  "outcome": "A terminal registered launcher run that cannot retain its genuine provider-correlated native completion exposes the refusing phase and closed reason through supported diagnostics, preserving custody and granting no inferred completion or credit.",
+  "acceptance": [
+    "For a terminal registered launcher run whose native completion cannot be retained, supported diagnostics identify the failing prerequisite with bounded closed reason codes, including absent native origin, absent or mismatched provider execution identity, registration/session mismatch and invalid terminal facts; behavioral controls distinguish these refusals without exposing private tokens, payloads or paths.",
+    "Valid native completion retention, exact original provider correlation, durable replay and remote qualification remain unchanged; a diagnostic never fabricates completion, receipt, verification or credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "capacity",
+    "criteria-proposed",
+    "cross-project",
+    "design-rule",
+    "diagnostics",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d3bf-d40d-76b2-bfeb-f82345ff320f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

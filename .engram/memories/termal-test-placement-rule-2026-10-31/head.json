@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-test-placement-rule-2026-10-31",
+  "head": {
+    "state": "active",
+    "chain": [
+      "2c74b91b02e744c896fe7b4a3c3274c0"
+    ]
+  }
+}

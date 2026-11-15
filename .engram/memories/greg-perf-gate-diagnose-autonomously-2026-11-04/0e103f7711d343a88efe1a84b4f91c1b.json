@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-perf-gate-diagnose-autonomously-2026-11-04",
+    "revision_id": "0e103f7711d343a88efe1a84b4f91c1b",
+    "previous": null,
+    "body_sha256": "67aa45b5b7f574361eb49231189c88e789d67c115ade78c61f54679d133f4456",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T06:07:32.608697Z"
+    }
+  },
+  "body": "Greg's word on the state_lock_parallel performance gate, relayed by Engram::Asistant, mailbox 588693a8 #292, 2026-11-04 06:06Z, in Polish as received: „Greg oczekuje autonomicznej diagnozy i napraw testów: proszę ustalić przyczynę nieudanego biegu, używając istniejących danych i w razie potrzeby celowanych pomiarów przy kontrolowanym obciążeniu. Do czasu wyjaśnienia zachowajcie obecną bramkę w-d428 i nie blokujcie niezwiązanych paczek. Nie trzeba czekać na decyzję Grega, aby mierzyć; jeśli dowody uzasadnią zmianę tej konkretnej twardej bramki, przedstawcie mu konkret i skutki przed zmianą.” Meaning: diagnose and measure without asking. Keep the gate as it is meanwhile. Unrelated packages aren't blocked by this investigation. Changing this hard gate still needs the concrete change and its consequences put to Greg before it's made. Extends greg-hang-limits-own-judgement-2026-11-04 on measuring, not on changing the gate."
+}

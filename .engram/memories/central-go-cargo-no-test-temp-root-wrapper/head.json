@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "central-go-cargo-no-test-temp-root-wrapper",
+  "head": {
+    "state": "active",
+    "chain": [
+      "1c95f20bb78e426b9e12c1d5b7978bda"
+    ]
+  }
+}

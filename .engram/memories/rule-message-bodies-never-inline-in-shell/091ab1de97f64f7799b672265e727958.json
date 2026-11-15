@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rule-message-bodies-never-inline-in-shell",
+    "revision_id": "091ab1de97f64f7799b672265e727958",
+    "previous": null,
+    "body_sha256": "839e2f3722e5e52f201a44c6b5a658bd2ebba138b23d23683dfb430bbf70b784",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T00:25:56.151477100Z"
+    }
+  },
+  "body": "Rule (from an Opus2 incident on Central, 2026-11-07 00:22:39Z). Never put mailbox or tracker message text inline in a double-quoted shell string. Bash treats backticks and $( ) in the text as command substitution. A message containing `cargo run --release` started a second TermAl build in the main checkout; it was caught before link and the host was unaffected. Pass message bodies through a file written with a single-quoted heredoc (e.g. --message-file), or use the MCP tool, which takes the text as a parameter with no shell involved. The same applies to commit messages and notes passed to CLIs."
+}

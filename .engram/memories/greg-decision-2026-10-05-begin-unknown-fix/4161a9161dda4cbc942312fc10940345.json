@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-05-begin-unknown-fix",
+    "revision_id": "4161a9161dda4cbc942312fc10940345",
+    "previous": null,
+    "body_sha256": "24f4362057ee052adf5a69377749de8138bd8fb52087a7526e313d2dc5afb546",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a10c85-3888-7713-8bc7-58cf44d04f2c",
+      "work_ref": "w-58cf44d04f2c"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-05T22:57:51.558913Z"
+    }
+  },
+  "body": "Greg's direction, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #313, 2026-10-05 22:57Z; recorded by Termal::Fable2):\n\n\"Greg directs that the begin-unknown/control_unavailable park be fixed, not left as a manual Resume workflow. Treat w-58cf44d04f2c as active pilot/reliability work: a timed-out/unknown turn admission must reconcile safely and either continue the already-begun turn or retry idempotently, without losing or double-running the retained message and without requiring Greg. Use today's Engram::Coder incident as acceptance evidence; coordinate the Engram control-latency side with Fable.\"\n\nConsequences:\n- w-58cf44d04f2c is P1 pilot/reliability work.\n- Its acceptance evidence includes the Engram::Coder (session-8581) park at 22:37:42Z: evaluate 1207 ms, begin 15 ms, then a degraded control_unavailable (capture .tmp/c10-session-8581-2250.json).\n- The Engram control-latency side is coordinated with Engram::Fable (Engram w-723c67128ce0)."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-full-gate-precensus-rule-2026-11-01",
+    "revision_id": "43d64429a5c84d2788b961d727eda1c7",
+    "previous": "182b6fc56a9f4a4bbaa53f329689ebae",
+    "body_sha256": "ffc57266c3b6b778cf417a87bc36611cba33f5e6c6e415307f5a01aa31326973",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-01T20:13:26.734442Z"
+    }
+  },
+  "body": "Fable2 #3599 (2026-11-01): run a PROCESS CENSUS on Central (cargo, rustc and test-binary processes plus their roots/command lines) IMMEDIATELY before every full-gate launch, and record it. Checking master, HEAD and the worktree is not enough. Cause: the w-135181 R12 gate test-fe3503b6 overlapped Opus3's w-2d99 focused run test-d6288bbc (started 11 s earlier) for 9.4 minutes. Overlaps are recorded on the item; a timing failure inside an overlap is investigated with the overlap as a candidate cause, with no automatic rerun. Census command idea (PowerShell): Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(cargo|rustc|termal|node)' } | Select ProcessId, Name, CommandLine.\n\nTEST-REF lesson (2026-11-01, W528F): the Engram schema1 review-freeze fingerprint HASHES HEAD. A test-ref commit (made with commit-tree, so a different HEAD with the same tree) can never reproduce the source commit's freeze value. In test-ref dispatches require: tree == recorded tree, and the runner's OWN schema1 value equal before and after its run. Do NOT require equality with the source freeze, which only names the ref and gives provenance.\n\nLESSON (20:15Z, 2026-11-01): before filing a gate-found bug, search the tracker with the SYMPTOM'S KEY TOKENS (for example \"termal-delegation\", \"late writer\", \"recreates\", \"temp root\") as well as phrases. I filed w-c5805e410bf4 as a duplicate of the existing P1 w-214437118fcf, which already had a merge-ready, gated fix that I had accepted on 10-30 and then let lapse. ALSO: when a claimed handoff waits on another item, keep it in the active plan memory so it doesn't drop, and delete test refs when their evidence is recorded (w-2144's ref stayed on origin from 10-30 to 11-01)."
+}

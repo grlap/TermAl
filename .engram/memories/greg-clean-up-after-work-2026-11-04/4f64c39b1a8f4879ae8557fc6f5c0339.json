@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-clean-up-after-work-2026-11-04",
+    "revision_id": "4f64c39b1a8f4879ae8557fc6f5c0339",
+    "previous": null,
+    "body_sha256": "d923a2c98d9c4e9d10b51909b7b3577016a75d846e04cba73d479faa473ea321",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T18:02:07.107612300Z"
+    }
+  },
+  "body": "Greg, verbatim, via Engram::Asistant 588693a8 #354, 2026-11-04 18:01Z: „Kopiuje foldery. My nie sprzątamy po skończonej pracy. To nieakceptowalne.” Cleanup is part of closing an item: the holder removes its worktrees and targets at closing, or records a concrete need and when it ends. Tracked by the p0 chore 'Clean up after finished work'. Windows B: nothing deleted or moved until Greg confirms his copy finished."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-do-not-offer-options-while-a-delegate-is-acting",
+    "revision_id": "3a446fde36bc4dbc90b590154d0ce8ec",
+    "previous": null,
+    "body_sha256": "cc94ead8cf9a3d4e5b3b6b3fbf09d863d8b489e7c1a11d58169803b94aa3e89f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T23:05:39.510625200Z"
+    }
+  },
+  "body": "On 2026-11-07, for the Mac Questly run, I sent a delegate a GO, then a hold, then GO for option A, then option B, each time crossing with Asistant or Greg messages. The delegate got four contradictory instructions in five minutes. Lesson: when Greg's own words already answer the question (for example „użyć tej ścieżki i kontynuować testy”), act on them and don't also offer him options. If I do offer options, send the delegate ONE hold and ONE final instruction, plus the rule \"don't interrupt a run already started, and never run two in parallel\"."
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a1de74-97af-7b91-a8e7-3f11b3f310a5",
+  "external_ref": null,
+  "title": "Cover parseable non-canonical UUID selectors in focused command recognition",
+  "outcome": "Focused command recognition rejects parseable non-canonical mailbox UUID selectors while continuing to accept canonical UUID and bounded relay selectors, with behavioral regression coverage.",
+  "acceptance": [
+    "Focused recognition tests exercise uppercase and simple no-hyphen UUID selectors (and representative braced or urn forms) and observe refusal while canonical UUID and bounded relay selector cases remain accepted.",
+    "Existing focused recognition and provider/native completion tests stay green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "cross-machine",
+    "eo",
+    "k3",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ddf5-2228-74e2-b940-fc7c6f8daab0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

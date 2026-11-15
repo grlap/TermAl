@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-long-claim-and-offer-ttl",
+    "revision_id": "bfe99c5f98364db0861d4786dce2d28e",
+    "previous": null,
+    "body_sha256": "0d314b63aa7613821e189405bc109bc77032315a263468bff34efa959fe78fd2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-24T07:12:26.839969600Z"
+    }
+  },
+  "body": "Worker tip (Termal::BarA1, 2026-10-24 07:15Z). When you hold many items waiting in Merger's queue, renew them with a long TTL instead of hourly cycles.\nSteps: cancel each offer, then `claim` with ttl_seconds (I used 14400 = 4 h), then re-offer with handoff `ttl_seconds` just under the claim's remaining time (I used 14000).\nWhy: an offer defaults to a 1 h TTL even when the claim runs longer, and it is always capped at the claim expiry. A restart or emergency stop that cuts an hourly renewal turn otherwise lapses every claim and offer. That happened twice on 2026-10-23/24, and recovering needed `claim … recover`.\nKeep holding only what the coordinator assigned. A long TTL is not a reason to sit on unassigned work."
+}

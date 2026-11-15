@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "no-synthetic-cpu-load-on-shared-machine",
+    "revision_id": "ffff91b5915e4cde8faa566a1d35fd22",
+    "previous": "3d038c36db494db8a53c534394c2323f",
+    "body_sha256": "cd46c420a5031e89e25de5517acfd6b0a1d66117771b755d69cdd5eacd38ee9d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T05:06:05.193112300Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-09 17:03Z, learned from my own approval). Do not approve synthetic CPU-load diagnostics (busy-loop \"burner\" processes) on the shared machine. At 16:59-17:00Z, a diagnostic I approved for Termal::Opus3 ran 72, then 144, node busy-loops for about 40 s. In that window the TermAl host's control API timed out (30 s): my mailbox acknowledgement and Engram::Advisor's mailbox read both failed (w-e19cc72d5c89). The machine was already overloaded with credited gates. To test a load hypothesis, use evidence already on hand (gate timings, per-test durations) or preserved logs, or run the single test alone. If contention must be reproduced, do it only when no credited gate or reviewer is running in either project, with both coordinators agreeing, and keep it short.\n\nRelated scoped performance-diagnosis lesson, preserved from the Oct21 acting-coordinator audit during memory cleanup (not a new general ban on functional fixtures): Greg's direction relayed by Advisor #229–232, recorded in termal-acting-p1-known-code-audit-2026-10-21-7422 r3 and the persistence-parent history, rejected synthetic/capped load, benchmarks and repeated passive captures for that P1 investigation. Artificial traffic did not represent the actual concurrent sessions, durable writes, UI and queues; prioritize concrete known fixes and ordinary production telemetry when material to a specific fix. Quiet samples did not establish the live root cause or causal benefit. The scoped instruction and numerical history belong on w-1fcaa9b93d12; it grants no new diagnostic run or exception to the current test and resource policy."
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a1de65-5d12-7ed0-983f-0d4d548184dc",
+  "external_ref": null,
+  "title": "Launcher registration from a delegation worktree is refused with \"test run requires a local project\" and no supported route",
+  "outcome": "Launcher registration from a delegation worktree is refused with \"test run requires a local project\" and no supported route",
+  "acceptance": [
+    "A foreground test-launcher run started inside a TermAl delegation worktree either registers against the delegation's original project (with credit semantics unchanged: a delegation child earns no claim credit unless the existing rules grant it), or is refused with a reason that names the deciding check, the delegation worktree, and the supported route (for example: run it from the claim's named source root); shown by a behaviour test.",
+    "Registration from ordinary in-repo roots is unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "delegation",
+    "design-rule",
+    "host-feedback"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

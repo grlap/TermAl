@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-resume-on-durable-not-woken",
+    "revision_id": "913d3c1e2b864ff2966bc0282727d36e",
+    "previous": null,
+    "body_sha256": "15a6689d88c8a8a8b2c3348edae526b420ebcb2a434606f4682eeb69a33fb83d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-20T10:31:47.471286400Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-20 10:33Z, from 8 occurrences today across 5 sessions: Sol-1cee, Sol-d50d, CSharpProof, Sol-edfd and Coder, on both Codex and Claude workers). When a send to a worker returns notificationDisposition \"durableButNotWoken\", check that session right away with GET /api/state. If it is idle with queuePaused=true, POST /api/sessions/{id}/queue/resume and re-check; it should go active. Then record the occurrence on w-80e0cb2002da. Do not resend: the message is already durable, and the resume delivers it. Without this, the worker sits idle on a GO until the next watchdog tick. This holds until w-80e0's fix is live on the running host."
+}

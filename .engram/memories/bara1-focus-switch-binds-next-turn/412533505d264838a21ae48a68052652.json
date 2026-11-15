@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-focus-switch-binds-next-turn",
+    "revision_id": "412533505d264838a21ae48a68052652",
+    "previous": null,
+    "body_sha256": "521b24b789375a564c7a19b8142878c25d8e2b436dacbcddb5af7f0c3adf79bf",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T05:34:43.725526400Z"
+    }
+  },
+  "body": "Worker trap (Termal::BarA1, 2026-10-23 05:35Z, my own miss on w-b23a test-6b5a0bd5, which passed 24/0 but has boundWorkIds = [w-06fb] and verificationRecordIds = []).\n\nA test run binds to the item that was the session focus at the START of the turn. Claiming another item, which moves focus, does not rebind runs in the same turn. The host said: \"A recognised test ran in the named root of w-b23a, outside bound item w-06fb's root, and gets no credit\".\n\nRule: when a GO arrives while another item is the focus, claim the target item and END the turn first (for example send \"re-claimed, launching next turn\" and wait for any wake). Launch only in a later turn where the turn-start focus is the target item. Check /api/test-runs boundWorkIds after the run."
+}

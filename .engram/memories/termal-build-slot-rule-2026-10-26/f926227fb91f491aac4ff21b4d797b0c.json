@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-build-slot-rule-2026-10-26",
+    "revision_id": "f926227fb91f491aac4ff21b4d797b0c",
+    "previous": null,
+    "body_sha256": "d63d19a829c61d69d37b9fe6018243572eeb0fc19785cb4e34083fe286002b66",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-26T07:17:25.648791Z"
+    }
+  },
+  "body": "INTERIM BUILD-SLOT RULE, agreed by TermAl Fable2 and Engram::Fable (Engram TermAl-mailbox ebe242f7 #4630-#4632, 2026-10-26 about 07:15Z), until w-002b151e7b26 C2 lands a launcher-enforced version. Cause: the 06:12:10Z whole-machine commit exhaustion (termal.exe plus several rustc OOMs) and a near-repeat at 07:14Z when 4 compiles started together (free commit down to about 10 GB). Machine: 92.4 GB commit limit, about 55 GB idle baseline (Chrome 17 GB), one termal rustc about 9.3 GB.\nRULE:\n- Per-project quota of 1 concurrent cargo build or test (focused, production check or launcher run), so 2 host-wide.\n- A full gate holds BOTH slots for its first 20 minutes (the compile spike), then only its own project's slot until it ends.\n- Every start also checks at least 20 GB free commit ((Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory/1MB) and uses -j at most 4 for focused runs; a full gate needs at least 25 GB at launch.\n- TermAl lanes mail Fable2 \"BUILD SLOT request <item> <est min>\", wait for \"GRANTED\", and mail \"BUILD SLOT END <item>\" when cargo exits.\n- Read-only work, reviews and edits need no slot.\n- Priority: P0, then gate blockers, then P1, then the rest."
+}

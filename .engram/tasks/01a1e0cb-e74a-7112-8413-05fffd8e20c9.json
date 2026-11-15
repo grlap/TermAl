@@ -1,0 +1,40 @@
+{
+  "id": "01a1e0cb-e74a-7112-8413-05fffd8e20c9",
+  "external_ref": null,
+  "title": "Central's causal-completion recovery reaches a new remote test request only after a full sweep of all mailbox history (32 rows per tick), so remote credit takes hours",
+  "outcome": "A remote run's native completion for a new causal test request is pulled and settled within a bounded time that does not grow with Central's total mailbox history.",
+  "acceptance": [
+    "A causal test request's native completion, once durably available on the runner, is pulled and settled within a bounded number of recovery ticks that is independent of the number of unrelated rows in mailbox_messages and mailbox_relay_intents. A behavioural test with a large unrelated history ahead of the request row (several thousand rows) asserts settlement within that bound.",
+    "The existing guarantees are kept: per-row malformed-row skips with bounded diagnostics (the w-0742 fix), idempotent saved-completion replay, original custody and selector checks, and no unindexed full-table scan per tick.",
+    "A pending request whose completion is not yet available is retried within the same bound once it becomes available. It is never skipped until a later full sweep.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed tree that lands."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "capacity",
+    "cross-project",
+    "eo-critical",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "remote-credit",
+    "scaling",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a15bc9-c8a2-71f0-9ac8-48c4a207f226",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

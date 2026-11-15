@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "windows-b-engram-54a-build-for-termal-e2-w-8f4c-hostless-windows",
+  "head": {
+    "state": "tombstone",
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "retire attributed project memory",
+      "remembered_at": "2026-11-09T05:19:59.352857600Z"
+    }
+  }
+}

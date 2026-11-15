@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "focused-launcher-runs-at-repo-root",
+    "revision_id": "aec6b8dd7da0431a9a2aeb14c865654f",
+    "previous": null,
+    "body_sha256": "ce96e4f74cdb2b1dda6039bbf22da409f6f37df77c1b04e495b750e5fc3825e2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T05:55:31.517335Z"
+    }
+  },
+  "body": "Launcher trap (Termal::Opus3, 2026-10-23; I lost two UI RED slots to it). `node scripts/test-launcher.mjs focused -- CMD ...` runs CMD from the REPOSITORY ROOT, whatever `pushd` set: the focused stage has no cwd (scripts/test-launcher.mjs:1587), and stageDirectory falls back to the root (:370-374). On Windows it also cannot resolve `npx` (a .cmd shim): \"runner: executable not found: npx\". For a focused vitest run use the root-relative entry point with vitest's own root:\n`pushd \"<worktree>\" && node scripts/test-launcher.mjs focused -- node ui/node_modules/vitest/vitest.mjs run --root ui src/<path>.test.ts`\nThe full gate's UI stages set cwd \"ui\" themselves (:199, :217, :232). A fresh worktree also needs `pushd \"<worktree>\\ui\" && npm ci` first."
+}

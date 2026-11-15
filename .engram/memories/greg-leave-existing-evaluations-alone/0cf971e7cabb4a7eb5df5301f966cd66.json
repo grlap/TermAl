@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-leave-existing-evaluations-alone",
+    "revision_id": "0cf971e7cabb4a7eb5df5301f966cd66",
+    "previous": null,
+    "body_sha256": "60a82e29e2188677985555e0e41f8864241dbf9c4879504dec72d5a1360dfe0c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-03T22:10:56.038057700Z"
+    }
+  },
+  "body": "Greg's rule (2026-11-03 20:36Z, via Engram::Asistant, verbatim): „prosze zostawcie istniejace ewaluacje w spokoju... OK ?”. No source-identity change rewrites, recomputes, relabels, invalidates, deletes or re-runs a stored evaluation, verification or seal. If a real case can't meet that, bring Greg the facts and options FIRST. The interaction to watch: after a default flip to git-commit:, an open item's evaluation stays under content-v1:, and Engram's exact-string freshness check (Engram src/storage/work/acceptance_evaluation/source.rs:145) would treat it as not fresh if enforcement is on. So before the flip or any evaluation re-enable, list the affected open items and take them to Greg; no automatic reruns."
+}

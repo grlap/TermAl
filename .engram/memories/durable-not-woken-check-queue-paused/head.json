@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "durable-not-woken-check-queue-paused",
+  "head": {
+    "state": "active",
+    "chain": [
+      "28c991ccac1b4a23af456ed706e3a4e5",
+      "fb1951cbab3d4d01b682e9b5dd9e5d71"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-launch-form-by-runtime",
+    "revision_id": "df1b0f2eebfa442080b8666690aa60ad",
+    "previous": null,
+    "body_sha256": "748f9e17598e95699deb39b7308de2dd3ae789200c56d75bdffe19a845c0636a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-15T15:24:13.347900300Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-15 15:24Z, learned from my own wrong LAUNCH NOW). Match the gate-launch form to the worker's RUNTIME:\n- Claude worker: one Bash call in background mode, `pushd \"C:\\…\\worktree\" && node scripts/test-launcher.mjs full --detach --notify session-8112`, nothing chained.\n- Codex worker (Termal::Merger, the Sol-* coders, Codex-*): its NATIVE command, with workdir set to the worktree and command `node scripts/test-launcher.mjs full --detach --notify session-8112`. Codex's /bin/bash can't pushd into a Windows path; it fails with \"No such file or directory\" and nothing launches.\nI sent the Merger (Codex) the Claude pushd form for w-c538. It refused cleanly at 15:16Z and asked, and the gate start slipped about 10 min. Check the worker's runtime before writing the form."
+}

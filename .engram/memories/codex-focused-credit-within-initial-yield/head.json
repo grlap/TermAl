@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "codex-focused-credit-within-initial-yield",
+  "head": {
+    "state": "tombstone",
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6-luna;reasoning=high",
+      "reason": "retire attributed project memory",
+      "remembered_at": "2026-10-13T05:12:12.303513900Z"
+    }
+  }
+}

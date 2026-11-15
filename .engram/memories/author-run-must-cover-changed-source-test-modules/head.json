@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "author-run-must-cover-changed-source-test-modules",
+  "head": {
+    "state": "active",
+    "chain": [
+      "0f2ec618dada4641b18f1f6a4c499eb9",
+      "992aa20e6ae14a7ba8d494f8e3d39ddc"
+    ]
+  }
+}

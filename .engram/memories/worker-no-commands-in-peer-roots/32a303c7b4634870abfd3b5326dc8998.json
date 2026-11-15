@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "worker-no-commands-in-peer-roots",
+    "revision_id": "32a303c7b4634870abfd3b5326dc8998",
+    "previous": null,
+    "body_sha256": "379fea4516ee9a0328a8981b60821d9f4004c5f10ef6ee72e41668de58183ddc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T15:41:25.624062900Z"
+    }
+  },
+  "body": "Worker rule (Termal::Sol-a7bb, 2026-10-17, Fable2 mailbox #597/message mailbox-message-3edb6f6b-45b6-4b9d-abcd-8b8a79590939). NEVER run any command, including git, PowerShell or reads, with its working directory or git -C pointing into another session's worktree. My read-only TRAIN-4 overlap inspection in Merger's named root during carried gate test-9cc1d81e caused the host to refuse its verification credit; green execution alone did not provide accepted gate evidence and the coordinator requires a rerun. Compare other trees using shared commit/tree/blob object IDs while running Git in YOUR OWN root: git diff COMMIT -- PATHS or git cat-file -p BLOB. Ask the owner to supply object IDs if only its staged input exists; do not inspect the peer index by entering its root. This extends worker-zero-root-commands-during-carried-gate to peer sessions and applies even to read-only source inspection."
+}

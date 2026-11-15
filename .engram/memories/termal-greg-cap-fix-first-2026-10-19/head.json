@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-greg-cap-fix-first-2026-10-19",
+  "head": {
+    "state": "active",
+    "chain": [
+      "bc517f64ce1a4a89a11df6941ef60688"
+    ]
+  }
+}

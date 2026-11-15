@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara2-start-review-pair-same-turn-as-settle-check",
+    "revision_id": "0ba68490d2424d50bc5c00a565c8add1",
+    "previous": null,
+    "body_sha256": "36ead65ee3baf45651790f486778947569dae95c117e3a6735c2db9bfbc3c4f1",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T10:06:50.114047300Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA2, 2026-10-23 10:06Z; my own idle slip on w-748c). After a focused GREEN run, I ended the turn to let the run settle and planned \"the review pair next turn\". But no wake arrived, so I idled for about 30 min until Fable2's status check (#360). Fix: when I end a turn only to let a run settle, the next turn is triggered only by mail. So either (a) start the review pair in the SAME turn right after the run ends, since spawning read-only reviewers is not a worktree command or edit and cannot touch the run's credit; or (b) if I must wait, tell the coordinator explicitly that I am waiting for a wake. Default: (a)."
+}

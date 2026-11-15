@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "worker-report-after-last-action-run",
+    "revision_id": "0c7311df705246c791978c87a2b18a72",
+    "previous": null,
+    "body_sha256": "17a75356425b710d1f60a22c8cd47e4614bb62f4517f5b73a4de4f98cbf9b3dd",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-11T10:28:06.065334400Z"
+    }
+  },
+  "body": "Worker lesson (Termal::Opus3, 2026-10-11, missed twice on w-a2a4 at 09:10Z and 09:59Z; Termal::Fable2 had to ask both times). When a granted test is run as the LAST action of a turn (the credited form requires that), the \"done\" mail to the coordinator cannot go in that turn. So on the very next wake of any kind, before anything else, mail the coordinator the result with counts (executed, passed, failed) and say whether anything is still running. The coordinator is holding the shared slot for you until it hears back; silence blocks other sessions' runs."
+}

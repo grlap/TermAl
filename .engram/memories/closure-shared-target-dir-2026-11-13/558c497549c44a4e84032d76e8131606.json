@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "closure-shared-target-dir-2026-11-13",
+    "revision_id": "558c497549c44a4e84032d76e8131606",
+    "previous": null,
+    "body_sha256": "1d974d2bbb91529f0739f03651397d05c64b0857534f233fbd02dbdc1ac84fbe",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T04:48:25.461912200Z"
+    }
+  },
+  "body": "Closure-check shared Cargo target (Opus2 proposal #5820, CONFIRMED by Fable2 #5821, 2026-11-13 04:48Z). For closure checks of landed items (one small registered check on current master plus one independent evaluation), every check at the same master commit X uses ONE shared CARGO_TARGET_DIR: C:/github/Personal/TermAl/target/closure-<X first 8 hex> (for example target/closure-57a762c8), so only the first compiles cold. Conditions: (1) EXACT-COMMIT ONLY: a closer may use target/closure-<X> only when its worktree HEAD is exactly master X and clean; a new master means a new directory (keeps the stale-binary risk w-8376b03f2259 harmless). (2) Serialized through the Central slot; never concurrent use. (3) Cleanup: when master has moved on and the last closure at X has ended, the integration owner removes target/closure-<X> after a path check that it is inside the repo, and records the removal; no lingering per-commit directories. (4) The record stays a direct, classified cargo test (no wrapper) run in the closer's own named root; only the target directory is shared. Closures are Central-only (DL560 runs are hostless, no registered record); interleave with feature work; evaluation slot strictly one at a time; closers hold at most 3 items at once; Opus2's landed combo items join the same stream."
+}

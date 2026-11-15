@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "host-restart-via-cargo-run",
+    "revision_id": "338440bc254d4928b1695a3642d8d1a6",
+    "previous": null,
+    "body_sha256": "336514c552fd9bfeb5501b4232ab5aa8769e8a336f1e1fbe344c792a3f5c2072",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-05T03:13:46.550726400Z"
+    }
+  },
+  "body": "Host restarted with cargo run (observed by Opus2 on 2026-10-05 at 03:08Z; recorded by Fable2; a supplement to landing-integration-and-install, BUILD AND INSTALL, which is at its size limit). Greg's restart ran `cargo run --release` in the master checkout. Cargo RELINKED target/release/termal.exe in place from master's source, at 03:10:35Z. That overwrote the binary the integration owner had installed (8e4f4e30; the new hash is 6897a1bb) and broke the .bak chain. A byte compare against the clean-export build of the same commit differed only in the PE link timestamp, three debug-directory stamps and the 16-byte PDB GUID. So after such a restart: (1) do not treat the hash change as unauthorised; verify that the code is equivalent to the landed commit by that byte compare, and record the new hash; (2) keep the clean-export build output (.tmp/install-target or target/release-clean-<sha>) as the backup, since the in-place .bak may be gone; (3) master must be clean at the landed commit before any restart, because cargo builds whatever the master checkout holds."
+}

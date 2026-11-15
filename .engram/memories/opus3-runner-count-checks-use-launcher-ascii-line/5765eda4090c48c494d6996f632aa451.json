@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-runner-count-checks-use-launcher-ascii-line",
+    "revision_id": "5765eda4090c48c494d6996f632aa451",
+    "previous": "c110c6164ccc4a05838a9f1dbce7ff04",
+    "body_sha256": "f9f2ff2bfe2348e83fdc3c1494678cdabe1ef0bff529ac101978ab6f4448956c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T05:51:02.425709200Z"
+    }
+  },
+  "body": "Runner trap (Termal::Opus3, 2026-10-30, B' 7f964cd8 Phase B on Windows B): two FALSE STOPs from my own count checks on legs that had passed. (1) vitest colours its summary: \"Tests  178 passed (178)\" is wrapped in ANSI escapes, so grep -E 'Tests +178 passed \\(178\\)' on focused.log missed it. (2) Node's test runner (spec reporter under the launcher) prints \"ℹ pass 21\"; in Git Bash's C locale, a bracket expression like [#ℹ] matches a single byte, so it never matched the multibyte ℹ.\nRule: judge counts from the launcher's own ASCII stdout line `tests: passed=N failed=M ignored=K` (printed after RUN/PASS) together with the exit code; if reading focused.log, first strip ANSI (sed 's/\\x1b\\[[0-9;]*m//g') and avoid non-ASCII in bracket expressions. When a check stops a passed leg, verify the verdict from the run's own summary, disclose it, and run only the legs that never started; never rerun the passed one.\n\nThird false stop, same day (24c7 R2 RED test-7ae4eb15 on the Mac, which failed for the RIGHT reason at tests.rs:132): my compile-error check `grep -E '^error(\\[E[0-9]+\\])?:'` matched cargo's normal \"error: test failed, to rerun pass `--bin termal`\" line that follows ANY failing test run, so the chain wrongly stopped before GREEN. Detect a compile failure only with `^error\\[E[0-9]+\\]` or `^error: could not compile`, never bare `^error:`."
+}

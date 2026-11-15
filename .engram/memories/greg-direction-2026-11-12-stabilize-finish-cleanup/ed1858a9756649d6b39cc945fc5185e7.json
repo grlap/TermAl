@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-direction-2026-11-12-stabilize-finish-cleanup",
+    "revision_id": "ed1858a9756649d6b39cc945fc5185e7",
+    "previous": null,
+    "body_sha256": "2f327ad7532b36e1343c872ff772a6293cf75323586cb3fd25cd1a658bc484b1",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-12T04:24:07.211704300Z"
+    }
+  },
+  "body": "Greg's direction for both projects, 2026-11-12 04:23Z, relayed by Engram::Asistant (TermAl mailbox 588693a8 #1435), verbatim: „Chciałbym ustabilizować i skończyć features i posprzątac kod po legacy rzeczach których już nie używamy.\" In short: stabilize, finish the features already started, and clean up legacy code that is no longer used.\nScope: finish started features (sync, evaluation, remote results), remove genuinely unused code and old interfaces, fix obstacles in daily work, simplify the process. Historical data values Greg wants kept are NOT a deletion order.\nTermAl order set by Termal::Fable2:\n(1) Land what is in flight; no new features. That is: combo70 (K3 S2a), w-ee28, w-03b4, w-8275 (minimap to checkpoint dots), then K3 S2b.\n(2) Hold the Engram sync window. Its restart also brings w-410a and the later landings live.\n(3) Close what is waiting on evaluation: w-4fad (after the restart), the w-6f42c416b0c7 parent, and the closings of the landed items.\n(4) Legacy cleanup: the source-identity sends per Kimi's trace (coordinated with Engram w-9fcb6cb2dd84), w-a6964aa3a001 (stop writing overview metadata), w-1ca0aae8f68d (the stale comment), then the optional Lows.\n(5) Daily-work obstacles, the P0 host bugs, as Sols free up: w-e1053ea93543 (7.2 s state-lock hold), w-e2972bb21221 (idle 1.2 s lock), w-7bc33299e17a (post-restart StateInner measurement), w-a8af3a34d80a (remote root prompt dispatch).\n(6) The rest of K3 (S1b, S3, S4) once Engram w-180d and w-e5ec are installed.\nNew feature work only when Greg asks for it."
+}

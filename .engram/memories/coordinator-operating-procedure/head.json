@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "coordinator-operating-procedure",
+  "head": {
+    "state": "active",
+    "chain": [
+      "e615fed4ecf248169666a0b53a1d1e88",
+      "93a9b77274bb4f6783d4eca67bc3f710",
+      "1730b5f391024c72ac2a6106e5dcac68",
+      "b6421607b86d413595e8d22e30464837",
+      "036fb1e377924e2fa4e201660c47a935"
+    ]
+  }
+}

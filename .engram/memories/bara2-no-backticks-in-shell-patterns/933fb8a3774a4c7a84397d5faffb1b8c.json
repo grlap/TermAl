@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara2-no-backticks-in-shell-patterns",
+    "revision_id": "933fb8a3774a4c7a84397d5faffb1b8c",
+    "previous": null,
+    "body_sha256": "9071b3d88f57af9c9e0812568aecf8185842fef6f5c0d768938f9e67388bf399",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T10:53:26.672038100Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA2, 2026-10-23 10:52Z; my own incident). In a Bash-tool command, never put backticks inside a double-quoted argument (for example grep -E \"warning: `termal`\"). bash command-substitutes them. Here it ran target/release/termal (on PATH), which tried to start a second TermAl server and refused only because the live host holds the ~/.termal lock. For patterns that contain literal backticks or $, use single quotes, or match without the backticks (for example 'generated [0-9]+ warnings'). Read every filter pattern for `, $( and $VAR before running it."
+}

@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "central-restart-caveat-observed-2026-11-07-at-restart-1-greg-rel",
+  "head": {
+    "state": "active",
+    "chain": [
+      "d98a7a9494b5461aa55930669a60a834"
+    ]
+  }
+}

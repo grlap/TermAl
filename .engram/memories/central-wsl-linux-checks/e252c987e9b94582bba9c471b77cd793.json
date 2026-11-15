@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-wsl-linux-checks",
+    "revision_id": "e252c987e9b94582bba9c471b77cd793",
+    "previous": "9a8fe5c462794bf08a946c8e185b61dd",
+    "body_sha256": "ed3f6b42f4eb6b8d47ca1b372089fd366ce680cde2a45a487b7caf0546b42580",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-03T03:03:09.459322700Z"
+    }
+  },
+  "body": "Native Linux compile checks are possible from Central, the Windows dev host, through WSL. Found by Termal::Opus2 on 2026-11-03 for w-91c2674a7e58.\n- Distributions: Ubuntu (default for this), docker-desktop, podman-machine-default.\n- Ubuntu already has a Rust toolchain at /home/greg/.cargo/bin (cargo 1.99.0, 5f94df478 2026-08-27; rustc, clippy, rustfmt, miri) and gcc/cc at /usr/bin. Nothing was installed; use only what is there.\n- Usage, from Git Bash or PowerShell:\n  wsl.exe -d Ubuntu -- bash -lc 'cd /mnt/c/github/Personal/TermAl/.tmp/<worktree> && CARGO_TARGET_DIR=/mnt/c/github/Personal/TermAl/.tmp/linux-wsl-target cargo check --bin termal'\n  Also `cargo check --tests` and `cargo test --bin termal --no-run`. Pipe the output through `tr -d '\\0'`.\n- Keep CARGO_TARGET_DIR inside the repo (.tmp/linux-wsl-target). Cargo's registry cache is WSL's ~/.cargo, a tool cache.\n- Gotchas:\n  - git inside WSL cannot read a Windows worktree: its .git file holds a C:/ path (\"not a git repository\"). Do not chain cargo after a WSL git command; record git identity from Windows git instead.\n  - A Windows cross-target check (`cargo check --target x86_64-unknown-linux-gnu`) does NOT work. The target is installed, but there is no Linux sysroot: ring needs assert.h and libsqlite3-sys needs stdio.h, even with LLVM clang from C:/Program Files/LLVM. Use WSL.\n  - The first WSL check of termal on /mnt/c took a few minutes; later checks took about 40 s to 1.5 min.\n- This catches cfg(unix)-only compile errors that the Windows gates never compile, such as w-91c2's E0282 in bounded_read_process.rs.\n\n\nLimit found by Sol-03d4 on 2026-11-03 (run edba5d06): running TESTS (not just cargo check) in WSL on a /mnt/c worktree fails any test that builds a full AppState with SQLite. tests/mod.rs (about line 945) checks the private state root for mode 0700, but DrvFs under /mnt/c reports 777. All such tests fail before reaching their logic. Do NOT relax the check or change mount settings, and do not move scratch outside the repo. Use harnesses that avoid the SQLite bootstrap (for example a real CaptureLifetime + root without the DB), or treat native WSL runs as compile and DB-free test evidence only."
+}

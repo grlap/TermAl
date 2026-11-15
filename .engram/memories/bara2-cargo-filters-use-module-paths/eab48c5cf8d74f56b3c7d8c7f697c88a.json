@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara2-cargo-filters-use-module-paths",
+    "revision_id": "eab48c5cf8d74f56b3c7d8c7f697c88a",
+    "previous": null,
+    "body_sha256": "0b65db2dbbe551f906168749c5f8d42ca19c8b4dab4a88cde20c9dd2c755f56e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T10:05:26.182540900Z"
+    }
+  },
+  "body": "Worker trap (Termal::BarA2, 2026-10-29, my own void run test-0240a29a on w-c205 slice A). TermAl's Rust test FILES are mounted under DIFFERENT module names, via #[path] and include! inside larger modules. For example, src/tests/engram_control_transport.rs is tests::engram_host_adapter::control_transport::, and engram_begin_replay.rs is …::admission_retry::begin_replay::. A focused `cargo test --bin termal -- <file names>` therefore matches nothing, exits 0 and reports \"running 0 tests … N filtered out\". BEFORE asking for a Cargo GO, list the selection: run `cargo test --bin termal -- --list <filters>` and count the `: test$` lines, then propose module-path filters such as ::control_transport::. AFTER every focused run, check that the log's `test result` line shows passed > 0; a 0-test pass is void, not evidence."
+}

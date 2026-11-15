@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-stop-timing-comparisons-2026-11-04",
+    "revision_id": "be85d9a64e0846cab02dba6e523327e7",
+    "previous": null,
+    "body_sha256": "30c908cb2f487da04d5fcf3935a0b17accfadb1b84a16c48112d4ad6b87f1f95",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T06:23:59.741647100Z"
+    }
+  },
+  "body": "Greg's word, relayed by Engram::Asistant, mailbox 588693a8 #295, 2026-11-04 06:23Z, as received: „Moim zdaniem tracicie czas. Nie wiem co ma to dać. Testy na czas nigdy nie sa wiarygodne i stabilne.” Przerwijcie planowane dalsze kosztowne porównania czasu mimalloc/NUMA oraz testy w poszukiwaniu przejścia progu, zachowajcie dotychczasowe wyniki. Wróćcie do EO, wysyłki Telegram, UI i lądowania poprawek. Testy zachowania budujcie deterministycznie zamiast agresywnych wall-clock limitów, bez osłabiania kontroli. Osobna dawna bramka ma swoje istniejące warunki, ale nie blokujcie niezwiązanej pracy; jeżeli zmiana jej progu lub usunięcie wymaga konkretnej decyzji, przedstawcie ją konkretnie. Potwierdźcie co zatrzymane i co kontynuujecie. Meaning: stop further costly mimalloc/NUMA timing comparisons and threshold-crossing tests, keep existing results. Priorities are EO, Telegram sending, UI and landing fixes. Behaviour tests are built deterministically, not with aggressive wall-clock limits, without weakening control. The old performance gate keeps its conditions, doesn't block unrelated work, and a change or removal goes to Greg as a concrete decision. This replaces the measuring part of greg-perf-gate-diagnose-autonomously-2026-11-04."
+}

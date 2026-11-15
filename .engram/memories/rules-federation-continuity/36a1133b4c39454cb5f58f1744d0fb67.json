@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rules-federation-continuity",
+    "revision_id": "36a1133b4c39454cb5f58f1744d0fb67",
+    "previous": "0af7ce98ed894f2a8738a2a2c415e2cb",
+    "body_sha256": "ecbb66d2f9a3531d3872301f884f7c85c8e38543e107e9042e9ce9bbdb3e73a3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T14:08:12.113339200Z"
+    }
+  },
+  "body": "CANONICAL: federation continuity across build/restart and network-address changes. Required behavior and operating guidance, not a claim that an open incident is fixed. Source: Greg via Engram::Advisor, messages 0b43c1f4-585a-4a9b-bd1f-030441bb0302, 69c9b135-094c-44b5-845f-475dc4682a44 and f92c77cf-35da-4c29-9c05-badc954e6a02, 2026-10-29; the durable-hostname direction was also relayed as TermAl Advisor #2485.\n\nReuse the existing enrolled federation transport, credential ownership, reconnect and mailbox-routing mechanisms. Before changing them, compare with the prior working fix and current contract; do not add a parallel reconnect, pairing or routing implementation.\n\nA compatible binary/build-hash or toolchain change and an ordinary process restart must preserve the enrolled peer relationship and recover the authenticated mailbox link autonomously. A new connection gets fresh authentication and a new fenced link incarnation. Existing host/enrollment identities, credentials, mailbox/session identities and original-operation deduplication survive; an old channel or uncertain operation is never silently promoted or re-executed. Do not require Greg to re-pair hosts merely because a build changed. Ordinary mailbox transport must not inherit executor placement or diagnostic onboarding/requalification prerequisites.\n\nA network address is a locator, not peer identity. Persistent endpoints use the host's stable name (DNS or .local), resolved through the existing SSH transport on each connection, not a literal DHCP IP. DNS/DHCP movement must not replace the enrolled host identity, pinned SSH key or pair capability. A name-resolution failure is a recovery problem, not permission to persist a DHCP IP as the durable fallback. Preserve strict host-key checking and current pair authentication. Changing a stored numeric locator needs an authorized, fenced update and fresh link authentication; do not use re-enrollment, revoke/reset, raw-store edits or relaxed authentication as a disguised address update. If the current API cannot preserve the enrolled relationship for that update, the implementation owner fixes that seam under the existing tracked item rather than asking for routine manual re-pairing.\n\nClassify failures by observed stage: endpoint/name resolution and reachability, credential-read settlement, basis validation, SSH/attestation, current authenticated link and application outcome. A 503, a generic 409 or occurrence after restart alone does not prove a build regression or an address fault. Preserve pending read/OS-operation ownership and the original unknown outcome; reconnect/reconcile through existing recovery rather than starting duplicate work. Real identity/key/protocol incompatibility, revocation and quarantine remain enforced.\n\nThe existing implementation owner records comparison with earlier fixes and tests the affected restart/build and changed-address recovery paths, including unchanged trust and stale-link rejection. The coordinator owns live recovery and any exact configuration request reserved to Greg. Architect3 handles the rule/design correction and adoption evidence, not implementation, tests, scheduling or routine status. Keep incident chronology and discarded hypotheses in the tracked item, not in this current rule."
+}

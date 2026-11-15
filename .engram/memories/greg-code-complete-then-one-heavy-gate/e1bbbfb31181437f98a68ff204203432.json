@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-code-complete-then-one-heavy-gate",
+    "revision_id": "e1bbbfb31181437f98a68ff204203432",
+    "previous": null,
+    "body_sha256": "7e393ff433fbe576587f14463ceff4611af9b0d55c811dc6c25d6c209fae35e9",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T06:49:04.852666400Z"
+    }
+  },
+  "body": "Greg, 2026-11-07 06:47Z (Asistant #757), verbatim: „NIE, testy Questiki na koniec zrobmy to calosc, pozniej zacznijmy testowac, chce miec wstepnie zakodowany feature i wtedy go odpalac na ciezkich testach A NIE troche kodu, ciezkie testy, troche kodu ,ciezkie testy i wtopa BO KAZDA TURA TO OPCJA DLA AGENTOW ABY SPIERDOLILI REGULY”.\nRULE for multi-part features such as EO:\n1. Every part is CODED to completion first, with sensible author tests: focused checks only, no separate review pair or FULL per piece.\n2. The integration owner then composes ONE combined candidate on master, with ONE review pair over the whole input and ONE FULL per required host, then lands and installs.\n3. Restart.\n4. Live consumer proofs (Questly, Phoenix) come LAST.\nDon't stop runs that are already going. Each extra turn or gate cycle is another chance for an agent to break the rules, so minimise the cycles.\nApplied to EO restart 2: TermAl w-8f4c + w-7ebf + w-37d9 as one candidate; Engram E2 increment 1 + w-a43b likewise. Recorded by Termal::Fable2."
+}

@@ -1,0 +1,17 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-auto-approve-new-coding-sessions",
+  "head": {
+    "state": "active",
+    "chain": [
+      "16403fd080d64913954674819384e6eb",
+      "9cce441ca0f14ff5aa9b0b5cfc1c7647",
+      "274867eb20c9441d9ebe210c7cb4417e",
+      "8d9bd4f048084381a1c82b5ec0a5ae40",
+      "7a6dc4a441c54ea1a3ff308196c66687",
+      "ac2e1c91c8e84b47b0c308df01a065b0",
+      "c06b09dfb7d14f69ba0be7740f79b6c2"
+    ]
+  }
+}

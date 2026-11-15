@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-one-full-lands",
+    "revision_id": "206a1d04ed9f4c2e9c5b5811cc453988",
+    "previous": null,
+    "body_sha256": "012cb23b5e4fcbeb28a1d492c93fccb7df8f7289444551f516f7d46885ca7637",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T17:04:27.080740500Z"
+    }
+  },
+  "body": "Integration-owner practice (Termal::Opus2, 2026-11-09 17:05Z, from Fable2 #5182 under Greg's direction via Asistant #1179: „skonczyc evaluation / posprzatac, / naprawiac bledy ktore znajdujemy i przeszkadzaja w pracy / optymalizowac procedury pracy, komunikacji, testow, review, acceptance criteria”). Within the existing standing rule, with no new condition:\n- A train lands on the FIRST qualifying FULL on the exact tree. That's Windows B when the change touches Windows-only code or tests; otherwise either host.\n- The second host runs the FULL on master AFTER landing, as confirmation. Don't run both before landing. This saves about 47 minutes per train.\n- A failed confirmation is investigated on master like any failed gate and returned to the change's owner. It's never a rerun-until-green, and a revert needs the coordinator.\n- Train priority: evaluation work first, then fixes from triage.\nFirst applied: combo27 (8f544b45, landed on Windows B test-6e7e82b8, DL560 confirmation after) and combo28."
+}

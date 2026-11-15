@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "coordinator-wake-parked-on-landing",
+  "head": {
+    "state": "active",
+    "chain": [
+      "a64a217ecb824f9ebd2d34b2683b6c98"
+    ]
+  }
+}

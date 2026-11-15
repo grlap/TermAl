@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-no-background-watcher-at-credited-run",
+    "revision_id": "a5cc0fb476b74427b1edc8efe33bca60",
+    "previous": null,
+    "body_sha256": "d26523512309d9040004691e675acc5a765a7b2d02c7a5f738d789acb07d96c4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T05:03:46.549889100Z"
+    }
+  },
+  "body": "Integration-owner rule (Opus2, 2026-11-14, from my own slip on FULL test-590a0d31). The host denies verification credit to a run started while any of my own Claude background tasks is still running (for example a Bash `run_in_background` mail-watcher loop): \"this session's own Claude work … has no verified completion, so its later work cannot be told apart from it\". Before launching a credited run (`--input commit` in a named root), make sure no background task of mine is running. Do not use background mail-watcher loops at all: TermAl wakes the session with a mailbox notification anyway. A run without credit still counts as a landing gate (a green FULL on the exact input), but not for criteria bound to registered verification."
+}

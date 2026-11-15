@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "how-a-session-retires-its-own-named-root-confirmed-2026-11-06-by",
+    "revision_id": "b8588cbef12145e7acef75d62a474fd2",
+    "previous": null,
+    "body_sha256": "d8eece307c77ef3a84cbf0fd9ec544c659afe42b91fb792c240c2027e770763e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-06T05:46:47.843836800Z"
+    }
+  },
+  "body": "How a session retires its own named root (confirmed 2026-11-06 by Opus2 and Engram::Fable): call termal_name_source_root with the work and NO root. It returns generation 0 and retires the name with canonical authority, including after `done`. termal_release_named_root is the operator route for another session's quiet or gone root, and it correctly refuses with 409 while the caller holds the current binding. To move to a new item on the same worktree: retire the old name this way first, then name the worktree for the new claim, so there is only one entry per root."
+}

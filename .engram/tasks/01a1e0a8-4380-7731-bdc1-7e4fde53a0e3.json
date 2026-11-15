@@ -1,0 +1,39 @@
+{
+  "id": "01a1e0a8-4380-7731-bdc1-7e4fde53a0e3",
+  "external_ref": null,
+  "title": "Central's causal-completion pull and settlement defer remote runs silently or with generic pending instead of naming the deciding guard",
+  "outcome": "When Central cannot pull or settle a remote run's native completion, the original request row and its read surface name the exact deciding guard and its release condition, instead of a silent `continue` or a generic \"pending\".",
+  "acceptance": [
+    "Each deferral in Central's causal-completion pull (current custody, peer or lease, relay timeout or error, completion None, invalid or mismatched completion, post-I/O custody mismatch; test_run_causal_completion_batch.rs ~191-278) records a typed reason that names the deciding check and its release condition, readable through the existing original-row or diagnostics surface, bounded and with no secrets.",
+    "Settlement (causal_test_admission_target and engram_causal_completion_delivery recovery) reports the exact target, capability, transport or receipt failure through the same surface instead of a generic pending string. Batch and settlement errors are no longer discarded. Idempotent saved-completion replay and the landed per-row scan fix are preserved.",
+    "Behavioural tests drive at least the completion-None, relay-error and target-resolution cases and assert the surfaced reason. No test pins message text beyond the typed stage and check.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed tree that lands."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "capacity",
+    "cross-project",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "refusal-reasons",
+    "remote",
+    "remote-credit",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a15bc9-c8a2-71f0-9ac8-48c4a207f226",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

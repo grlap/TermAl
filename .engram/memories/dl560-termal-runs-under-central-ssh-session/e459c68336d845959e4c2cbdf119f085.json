@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "dl560-termal-runs-under-central-ssh-session",
+    "revision_id": "e459c68336d845959e4c2cbdf119f085",
+    "previous": "a320ac2ca0b3406e870961f333d90eee",
+    "body_sha256": "659a0aad0f3e9c5ec955fc635322b4cdd1208172838ca412c66a7ece9bd8957a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T09:15:48.644950500Z"
+    }
+  },
+  "body": "Greg, 2026-11-11 ~09:11Z, relayed by Engram::Asistant (TermAl mailbox 588693a8 #1370): 'Bo termal na dl560 uruchamiany jest z sesji ssh z central...'. The DL560 TermAl host runs inside an SSH session opened from Central. CONSEQUENCE: any Central reboot or SSH drop ends the DL560 TermAl HOST, its runner sessions and their relay mail. CORRECTION (Fable2, 09:16Z, from Opus2 #5538): launcher runs that the runner started DETACHED (setsid) SURVIVE the host's death. combo51's FULL test-40da21d4 kept running and PASSED at 08:40:05Z, after the ~08:30Z host loss. Only its END mail and the wakes registered on Central were lost; they were recovered from the run's original results. So after such an outage: FIRST recover each run's state from its original run directory. Relaunch only a run that is really absent or dead, as the same input with a confirmed start (ENVIRONMENT classification, not a retry-to-green). Running the DL560 host detached from Central's SSH session (tmux/systemd) is Greg's configuration decision, not an agent's."
+}

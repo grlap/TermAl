@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "dl560-termal-runner-session7",
+    "revision_id": "6780d88e38924d37b8669f232f7b9e3a",
+    "previous": "a869e3a3e6104c4b89460408fa6830fa",
+    "body_sha256": "8ed84ca3a1a88e64e6ce8abc3b13db50335d9ce6c72cc9b6c0b93e47038c94a4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T04:34:52.265969Z"
+    }
+  },
+  "body": "Third DL560 TermAl runner: session-7 \"Codex 7\", address host:e83d08f4-22ac-4655-a84d-941fc0eeb4f1::session-7, relay principal relay-principal-94fa42b050239fa6e9d6432acf68a384d094c3c393e6d3646c1f2896cb800fde. Created 2026-11-04 about 04:09Z by Fable2 through POST /api/sessions on DL560's loopback API, on Greg's „Tak”, relayed by Engram::Asistant, to my proposal naming danger-full-access. Same settings as Codex 6. First check passed at 04:09:45Z with no approval prompt, and its first real jobs ran well. Its mailbox #1 is the consolidated current brief, including polling mailboxes while jobs run; it does poll, unlike Codex 6's first FULL. Cargo output cleanup on these sessions: command review refuses `rm -rf`, and `cargo clean` from inside the job's own worktree works (5.8 GiB, 04:34Z). Don't work around a refusal. Requests to runners should say 'no remote fetch', because 'no fetch' stopped Codex 7 from importing its bundle. See dl560-termal-runner-session6 for the routing lesson: check a runner's state before routing."
+}

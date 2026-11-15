@@ -1,0 +1,38 @@
+{
+  "id": "01a1de9e-2dbe-7d41-9d62-f70e278d6e7c",
+  "external_ref": null,
+  "title": "Privacy review of every TermAl project memory and all its revisions before the first public memory export",
+  "outcome": "Privacy review of every TermAl project memory and all its revisions before the first public memory export",
+  "acceptance": [
+    "Every current TermAl project memory and every historical revision is reviewed for secrets, credentials, private personal data (for example email addresses, private people's names or handles, private links such as claude.ai artifact URLs, raw machine ids) before any TermAl memory is exported to the public engram-data branch; the review and its findings are recorded on this item.",
+    "Each finding is resolved the way Engram did on its w-9038889a0806: the affected key is forgotten and its cleaned text re-recorded under a new key (because export publishes every historical revision), and any memory or brief citing the old key is repointed.",
+    "No TermAl memory export to origin happens before this item is completed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "memory-sync",
+    "privacy",
+    "task-sync"
+  ],
+  "assigned_to": "Termal::Sol-03d4",
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Privacy review complete: baseline482keys1128revisionbodies plusone concurrentnewkey reviewed; four approved NEWpublickeys readbackverified before OLDkeysretired; sole affected memory citation repointed; final483currentkeys1120readablerevisions; independentClaude evaluation687b0f1a86e24e5097ab8413207ec7e9 freshPASS3/3. No memoryexport/seed/push occurred beforecompletion.",
+    "completed_at": "2026-11-15T20:51:38.578901500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-2026-10-28-remote-hosts-acceptance-and-worktree-cleanup",
+    "revision_id": "c08deadaf78c443d8a12d8581fa0577f",
+    "previous": "f9333ee2e9ba46909ae90f6b111c5692",
+    "body_sha256": "cf041766004f31d566f275bf043b07767c5cbdffbec1329070ff21d3497fd5e7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-28T01:04:41.858824300Z"
+    }
+  },
+  "body": "Greg's word, relayed by Engram::Advisor (TermAl mailbox b9d13887 #2242, 2026-10-28T00:53:37Z), verbatim: 'Greg zezwala używać Maca i Windows B jako hostów do weryfikacji acceptance criteria i zamykania zadań, gdy dowody są zapisane i spełniają kryteria danego itemu. Jeśli TermAl ma stare nieaktywne worktree’y, można je bezpiecznie posprzątać po dokładnym potwierdzeniu, że nie są przypisane do aktywnej pracy; zachować aktywne worktree’y i artefakty otwartych pozycji.'\n\nConfirmation of the cleanup plan (b9d13887 #2252, 2026-10-28T01:04:32Z). Greg, verbatim: 'Dobrze. Sprzątamy.' Advisor's conditions, verbatim: 'Zgoda na uzgodniony cleanup artefaktów roboczych po obecnym cyklu, zgodnie z Waszym planem. Zachować aktywne worktree’y, dowody/logi otwartych pozycji, dane/store’y, zainstalowany build i wymagane backupy. Przed każdym usunięciem potwierdźcie ścieżkę w repo i brak aktywnego użycia; zapiszcie listę oraz odzyskany rozmiar. Klon Windows B objęty polityką zostawić, chyba że Greg sam go usunie.'\n\nThe plan proposed in #2243:\n1. Remove .tmp worktrees and their target/ only for closed or landed items, after a path and active-use check.\n2. Remove .logs and .evidence files of closed items only.\n3. Keep the current binary plus 2 most recent backups.\n4. On the Mac, remove only the target/ of finished runs.\nTiming: AFTER the current cycle, with no gate or test active. Record the list of removed paths and the bytes recovered.\n\nThis grants no commit, push, install, restart or live-store access."
+}

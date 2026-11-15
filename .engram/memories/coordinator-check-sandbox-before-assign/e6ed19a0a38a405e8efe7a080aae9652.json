@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-check-sandbox-before-assign",
+    "revision_id": "e6ed19a0a38a405e8efe7a080aae9652",
+    "previous": null,
+    "body_sha256": "49cf46e915634af0286a29a28b0bf357fe9b5ba81e209694b58eaa51f0e17dc3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T15:53:14.952726200Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-17 15:55Z, my miss). Before assigning implementation, check the lane's runtime sandbox: GET /api/state and look at each session's sandboxMode and approvalPolicy. Termal::CheckIn (11394) is sandbox=read-only, so it can't create worktrees, edit or run tests; give it read-only audits and reviews only. All other TermAl Codex lanes were danger-full-access as of 15:53Z. Model mix: Sol 6.1 lanes are Coder, Codex 8582, 11336, CheckIn, PhoenixRunner and Sol-*; astra: Scroll, Architect2, UI, UI2; luna: Merger. Architect2 must not hold operational claims (architect boundary)."
+}

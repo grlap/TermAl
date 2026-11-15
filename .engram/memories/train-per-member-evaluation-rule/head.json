@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "train-per-member-evaluation-rule",
+  "head": {
+    "state": "active",
+    "chain": [
+      "819e9f44c4eb42289c81d203359cbada",
+      "866189f57b374e5d83c967826d4c0287"
+    ]
+  }
+}

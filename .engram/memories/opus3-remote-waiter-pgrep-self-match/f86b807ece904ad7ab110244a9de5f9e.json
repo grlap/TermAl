@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-remote-waiter-pgrep-self-match",
+    "revision_id": "f86b807ece904ad7ab110244a9de5f9e",
+    "previous": null,
+    "body_sha256": "63d161fc3f791d5709d5acd429548a4cb489ecb89a6f0ad0bba9e76c870130cd",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T03:38:54.663026900Z"
+    }
+  },
+  "body": "Worker trap (Termal::Opus3, 2026-10-30 03:38Z, my own slip on the DL560 w-2144 probe). A remote waiter of the form `ssh host 'while pgrep -f \"<script-name>\" >/dev/null; do sleep 20; done; …'` never ends. pgrep -f matches the waiter's own `bash -c` command line, which contains the same string. The probe ended at 03:18Z, but my END went out about 20 min late.\nFIX: wait on a log marker the script writes at its end (for example `until grep -q '^POST' LOG; do sleep 20; done`), or on a recorded PID (`while kill -0 $PID`). Never pgrep -f a string that appears in the waiter itself.\nAlso: after a TermAl restart, my local background ssh watchers die but the remote runs continue. Re-attach marker-based waiters, and check status read-only before assuming any run died."
+}

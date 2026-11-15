@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-greg-model-rule-2026-10-19",
+    "revision_id": "af1dbab65a75491bb54dee814f6487ba",
+    "previous": null,
+    "body_sha256": "c77ef28b297067677a41f4929b79801418f5ff4e4b47d64518431343a72ec203",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T00:32:41.194039300Z"
+    }
+  },
+  "body": "Greg's model rule for TermAl (relayed by Engram::Advisor, TermAl mailbox b9d13887 #1195, 2026-10-19T00:30:19Z), verbatim: \"Apply the same Greg model rule on TermAl: Luna/medium sessions may not implement product/test/fixture/documentation changes. They may do bounded read-only inspection, coordination, evidence collection or merger duties only. Move any active or parked implementation slice owned by Luna/medium to gpt-6.1-sol/high and report the replacements. This is separate from the merger-role rule you just recorded.\"\n\nTermAl application (Fable2):\n- Never assign an implementation slice to a gpt-6-luna session or a medium-effort session.\n- A census at 00:33Z found two such sessions: Termal::Merger (11865, gpt-6-luna/high; merger duties only) and Termal::CheckIn (11394, gpt-6.1-sol/medium; read-only since L1 moved to Sol-8e1f). Both were asked to confirm that they hold no implementation slice.\n- Every other TermAl implementation lane is gpt-6.1-sol/high, Claude high, or Codex Astra high."
+}

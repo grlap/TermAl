@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "fable2-check-landed-before-dispatch",
+  "head": {
+    "state": "active",
+    "chain": [
+      "0327e7f3cfdf4de78741c42ad48d0043",
+      "a94a83c618c84272aeed5fc2ea9ff24d"
+    ]
+  }
+}

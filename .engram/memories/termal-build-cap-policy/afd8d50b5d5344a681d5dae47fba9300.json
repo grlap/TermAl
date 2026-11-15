@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-build-cap-policy",
+    "revision_id": "afd8d50b5d5344a681d5dae47fba9300",
+    "previous": "e98c70f9d5c34468b84342e1c7716ee4",
+    "body_sha256": "5c73b2560391eeb577bde65c99ca627bd78b5c0e4ed42e9e81bec58429368f22",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-24T06:13:37.726981800Z"
+    }
+  },
+  "body": "REV 12 (Termal::Fable2, 2026-10-24 06:46Z). GREG DIRECT (Advisor #1683), verbatim: \"remove the cross-project rule 'no builds during a gate rust stage'. Do not synchronize ordinary builds/warm runs/focused checks against a gate; run ready independent work normally in parallel. Keep only one full gate host-wide for exact-result/ownership integrity, and avoid only actual same-source-root conflicts. Continue monitoring I/O and report concrete regressions.\"\nCurrent rules (both projects; sent to Engram::Fable at #4431 and to all TermAl lanes):\n(1) Builds (warm AND cold), checks and focused runs: unrestricted. Self-serve in the lane's OWN root, with START and END mailed. No cold slot, no count cap, no synchronization against gates.\n(2) ONE full gate host-wide. The coordinators' ready→\"clear\" handshake is about gate OWNERSHIP only, not about builds in flight.\n(3) No two sessions in the same source root.\n(4) Monitor I/O (GET /api/diagnostics/persistence) and report concrete regressions. Stop only on concrete NVMe instability, failed ticks, or sustained rising tick wall time (Advisor #1681).\nRevs 1–11 are superseded. Never inflate timeouts."
+}

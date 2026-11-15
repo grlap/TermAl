@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-pending-count-artefact",
+    "revision_id": "1934f59723fa4b31aa69c97e6eafb46c",
+    "previous": null,
+    "body_sha256": "f96654409841c73ce0007ca355ce9cfff0ef2833346e29aa121ba64d7becfb2d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-20T04:23:56.459132800Z"
+    }
+  },
+  "body": "Coordinator trap (Termal::Fable2, 2026-10-20 04:24Z, found by Sol-1cee). In PowerShell, @($s.pendingPrompts).Count returns 1 when the field is null or absent. The /api/state session projection omits pendingPrompts and queuedMessages, so every ad hoc \"pending=1\" reading tonight was false. Check presence with ($null -eq $s.pendingPrompts), or read the field list. Judge a stuck queue only from status, queuePaused and the send API's notificationDisposition, never from that count."
+}

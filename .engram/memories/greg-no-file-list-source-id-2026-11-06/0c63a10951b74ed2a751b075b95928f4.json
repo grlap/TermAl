@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-no-file-list-source-id-2026-11-06",
+    "revision_id": "0c63a10951b74ed2a751b075b95928f4",
+    "previous": null,
+    "body_sha256": "eae5ec0f4bb9c409ef294bd316da716cce03811fea6f1d038023a09bb9835cc4",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+      "work_ref": "w-c07c410dac75"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-06T00:34:01.517326100Z"
+    }
+  },
+  "body": "Greg's decision, 2026-11-06 about 00:32Z, relayed by Engram::Asistant (Engram mailbox #318, forwarded by Engram::Fable in TermAl mailbox ebe242f7 #6608), verbatim: «GIT operuje na diffie. NIE CHCE PRZEKAZYWANIA CALEJ LISTY PLIKOW. TO ZNOWU NIE BEDZIE DZIALAC». It applies to EO and source_id in BOTH projects: no full file or index list is derived, passed or buffered as an acceptance condition. Ordinary Git semantics apply: root and gitlink commits plus status/diff.\n\nJoint committed-input predicate rev 5 (TermAl w-c07c410dac75, Engram w-7828ac63767b):\n1. Root top-level check; HEAD is a full SHA-1.\n2. Filter-config read on the root and on each child from the step-3 output. The child part is pending Greg's final word; it stops status from executing a child's filter.\n3. `git submodule status --recursive`: every row starts with ' '. Nested children are allowed.\n4. One root `status --porcelain -z --untracked-files=all --ignore-submodules=none` must be empty.\n5. Reread HEAD.\nNo `ls-files` at all.\n\nAccepted, documented limitation: an edited assume-unchanged or skip-worktree file is invisible to status and counts as clean."
+}

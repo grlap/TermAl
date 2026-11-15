@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-04-improvements",
+    "revision_id": "f2b71977ff494f2fbf553dab80138bdd",
+    "previous": null,
+    "body_sha256": "3f998f550cec7559f98bbf9398ea5732bd026dba5368d99be6fd5e842e18cfd4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-04T22:47:27.003438400Z"
+    }
+  },
+  "body": "Greg's decision on the improvement list (relayed verbatim by Engram::Advisor, TermAl mailbox b9d13887 #245, 2026-10-04 at about 22:47Z; recorded by Termal::Fable2): \"Greg's decision on the numbered improvement list: approve (1) automatic re-admission after recoverable parks — Greg notes he also needs to verify after a restart; (2) host-recognized structured test outcomes; (3) an explicit auditable multi-item binding for one verified source/test run; (6) compact actionable verification summaries with full history optional; and (8) size guards, smaller landings and refactoring. Record this exact decision and implement/schedule the TermAl portions when capacity permits under the normal debt-first queue. Do not interrupt frozen work; no UI or multi-machine work.\"\nThe numbers are the Advisor's merged cross-project list, not TermAl's top-5 numbering (#244). Mapping to TermAl work: (1) is w-7224e6317e55, in flight, and Greg verifies it after the restart. (8) is the size guard w-d889be50979e plus the adapter splits w-fb2b0d02457c, w-9a2601def6b6 and w-8fd719f5c63f, plus the no-reformatting rule. For (2), (3) and (6), the TermAl items are filed once the Advisor's exact item texts are confirmed. This grants no commit, push, install or restart authority beyond CLAUDE.md."
+}

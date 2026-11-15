@@ -1,0 +1,14 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-h-build-install-warning-2026-11-01",
+  "head": {
+    "state": "active",
+    "chain": [
+      "6f53d2ee757e45958ce36a17d72753ed",
+      "99f42498f70445d78a53b5c15c95de68",
+      "13786bbc23a9474483a88bf1a3fcb0f4",
+      "0950edb926934734add7ab2de56570c6"
+    ]
+  }
+}

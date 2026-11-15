@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-decision-2026-10-11-scope-freeze-state-lock",
+  "head": {
+    "state": "active",
+    "chain": [
+      "575270908c8c424d924bb3bac3bab6e9",
+      "e53104cfded149c4b2887ced41eba7b6"
+    ]
+  }
+}

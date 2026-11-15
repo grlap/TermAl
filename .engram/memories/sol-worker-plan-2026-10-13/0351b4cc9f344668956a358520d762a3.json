@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol-worker-plan-2026-10-13",
+    "revision_id": "0351b4cc9f344668956a358520d762a3",
+    "previous": "8776fd41b04b40588aaa49c83912e79b",
+    "body_sha256": "f69a451cc26e907929f876fcc56291571d7f69ecf206b603dafb5e72424f41b2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-13T02:44:54.216427200Z"
+    }
+  },
+  "body": "Greg's direction (Advisor b9d13887 #702, 02:36Z, and #704, 02:38Z, 2026-10-13): a continuous implementation pipeline, preferring Codex gpt-6.1-sol coders. #704 verbatim: 'Yes: Greg's preference is explicit. After the triple gate has ended and its host record is settled, spawn fresh Codex gpt-6.1-sol worker delegations for the next disjoint prepared TermAl implementation packages. Do not spawn them during the current gate or alter its roots. Keep existing assigned owners working; report the concrete Sol sessions and claims once admitted.'\nPLAN (Termal::Fable2):\n- After the triple gate test-816d7435 ENDs and its typed record lands, spawn 2 Codex workers, model gpt-6.1-sol, mode worker, isolatedWorktree, from my session (never during a gate).\n- Sol-1 gets w-a7bbdea31231 (the cargo target<random> sibling fence).\n- Sol-2 gets w-03d466958d59 (the launcher fingerprint must not depend on line endings).\n- Criteria for both are worded by me as non-completer (02:40Z).\n- Existing owners: Termal::Codex (8582) has w-1bf3d434a624; CSharpProof has w-f8f8e04dffbb; Opus3 has w-66d5 (diagnosis).\nTests only in coordinator-granted filtered slots; then freeze, review pair, and offer to Termal::Merger.\n\n02:45Z RULE (Advisor b9d13887 #706, verbatim): 'Greg confirms Codex gpt-6.1-sol is the preferred implementation model. Apply it by default to every new coder assignment. Use a different model only when Sol is unavailable or moving already-started work would cost more than continuing it; record that exception.'\nRECORDED EXCEPTIONS (assigned 02:37Z, before #706):\n- w-f8f8e04dffbb stays with Termal::CSharpProof (Claude): it is claimed, the plan is approved, and the Engram shapes are agreed. It wrote w-152d, so moving the work costs more.\n- w-1bf3d434a624 stays with Termal::Codex (session-8582, an existing Codex root on its configured model): it is claimed, named, and its design is done.\nAll NEW coder assignments use Codex gpt-6.1-sol worker delegations."
+}

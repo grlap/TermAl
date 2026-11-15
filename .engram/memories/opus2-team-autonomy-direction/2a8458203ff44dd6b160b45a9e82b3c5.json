@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-team-autonomy-direction",
+    "revision_id": "2a8458203ff44dd6b160b45a9e82b3c5",
+    "previous": null,
+    "body_sha256": "d997469c0bc5fc1b57266aa930440e76a885a879b406266c1a481fbfdef40462",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-02T23:30:25.540331500Z"
+    }
+  },
+  "body": "Greg's team direction, 2026-11-02 at about 23:30Z, relayed by Engram::Asistant (588693a8 #19) via Termal::Fable2 #3932, verbatim: „OK. Przekaz zespołowi że celem jest praca autonomiczna. Chyba widac po zmianach jakie robimy.\"\nFable2's operating rules:\n- Decide within existing authority without asking Greg or Fable2 for routine calls.\n- Bring Fable2 only real decisions, with a concrete plan and a recommendation.\n- NEVER route Greg to another session to re-type consent. (Related: Greg via Asistant #4, „Nie bede szukaj jego sesji. Naprawde nie mam czasu na cerominiały.\")\nThe hard limits in CLAUDE.md and AGENTS.md stay until amended. The relayed-word rule change is w-e695378f6405, which Fable2 drafts."
+}

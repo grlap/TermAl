@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus3-unreviewed-diagnostic-patches-need-compile-check",
+  "head": {
+    "state": "active",
+    "chain": [
+      "b5f55ec711f54107867dbdfcc91be975"
+    ]
+  }
+}

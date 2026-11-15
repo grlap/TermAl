@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "lesson-2026-11-06-opus2-a-background-shell-task-started-by-any-r",
+    "revision_id": "b68512e094e146369c4d7155625b714e",
+    "previous": null,
+    "body_sha256": "91f4fa2e39ee20300d1149fd4fff745a60a9cced28f46698157fff7544b93079",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-06T11:45:16.097881600Z"
+    }
+  },
+  "body": "Lesson (2026-11-06, Opus2): a background shell task started by ANY root session with its cwd inside the TermAl repository, even a read-only memory or CPU monitor, counts as background agent work that 'may write in' the TermAl workspace. TermAl's credit guard then refuses credit to OTHER sessions' registered test runs in that repository. Concretely, it would have blocked Sol-03d4's Windows FULL test-5b3d9949. During credited runs, coordinators and integration owners use only foreground spot checks (or a background task whose cwd is outside the repository's worktrees), never a long-running background watcher rooted in the repository."
+}

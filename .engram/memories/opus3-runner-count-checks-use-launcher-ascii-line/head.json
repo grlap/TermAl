@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus3-runner-count-checks-use-launcher-ascii-line",
+  "head": {
+    "state": "active",
+    "chain": [
+      "c110c6164ccc4a05838a9f1dbce7ff04",
+      "5765eda4090c48c494d6996f632aa451"
+    ]
+  }
+}

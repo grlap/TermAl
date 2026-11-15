@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-gate-go-needs-peer-end",
+    "revision_id": "56766ace3c2d4f888a024b3d914ac29e",
+    "previous": null,
+    "body_sha256": "c9660d254d30204250c3efca6e27931defded923b9f9c360ad54a9da784a6df5",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T13:08:36.043180800Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-19 13:08Z, my own miss). Before sending a gate GO, wait for the other side's MAILED END of every warm series it announced. A single passed run in /api/test-runs does not end a series. I sent S1's gate GO at 13:07Z after seeing 8581's third run pass, but the series had a fourth run (test-548b54aa, which ended 13:07:55Z). It was harmless only because S1 was then withdrawn before launch (its own clippy warning). Engram::Fable disclosed it in #3579."
+}

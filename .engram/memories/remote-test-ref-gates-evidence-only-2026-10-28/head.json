@@ -1,0 +1,19 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "remote-test-ref-gates-evidence-only-2026-10-28",
+  "head": {
+    "state": "active",
+    "chain": [
+      "52eb03d0f1c74fb699d4d6ed037917e4",
+      "94ca07b6cb074e7195e51bd6e3688d49",
+      "782edb91488a407bb6747bd9c0710eda",
+      "f1e44b9ee79d4be59e05fa758b64ebb8",
+      "5a498ac0b2404493b64ea95deba5a7c7",
+      "99ded9a1617d48e08dfe5972fd36d07c",
+      "c0fd8cb889a045a4810c8c4a3941ebbf",
+      "e76ce55a68a0449ebd323ad451868861",
+      "d5aa8db6dff545289070e12b17b14a62"
+    ]
+  }
+}

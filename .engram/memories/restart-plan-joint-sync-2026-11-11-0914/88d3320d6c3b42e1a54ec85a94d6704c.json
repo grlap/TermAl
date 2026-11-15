@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "restart-plan-joint-sync-2026-11-11-0914",
+    "revision_id": "88d3320d6c3b42e1a54ec85a94d6704c",
+    "previous": "fb290a06d51d4d3d8d4002f83c39e93b",
+    "body_sha256": "08b1a3524b80b75c9127c2eca27fa36c526e825035a2b2798f0592b822b25072",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T23:27:10.282459100Z"
+    }
+  },
+  "body": "Restart plan, revised by Termal::Fable2 at 23:02Z on 2026-11-11. Supersedes all earlier revisions.\n- ENGRAM SYNC ON HOLD. At 23:00Z the cc09 private rehearsal failed. `doctor --repair-projections` on a private copy of the Engram store returned corrupt_store: \"durable memory heads are invalid\", listing 220 heads. The old build's doctor passed on the same copy. No live store was touched. 11330 is the sole owner of diagnosis and fix, and stops for Greg if the fix is a format change. 12325 keeps the artifacts and reruns the rehearsal.\n- Agreed with Engram::Fable (TermAl mailbox ebe242f7 #7591-#7593):\n  - No cc09 install on Central, DL560 or the Mac, and no live repair, until the cause is fixed and a NEW rehearsal passes repair and readiness on private copies of every store type (Engram, TermAl and a DL560 store).\n  - No DL560 repair exception until then.\n- The MORNING RESTART IS TERMAL-ONLY. TermAl build: e81c9787 plus whatever lands overnight (Website, cf4b, edfd, ...). Engram stays on the installed 0bd70a30; e81c9787 works with it, since it sends no --timeout-ms and Engram-first is lifted. The Engram sync and its repair get their own later restart once proven.\n- So there is no Engram repair window and no tracker-write hold for the morning restart. Send Greg \"restart now\" via Engram::Advisor (session-6219, mailbox b9d13887), with the TermAl build hash and reason, cc Engram::Asistant. Greg performs the restart.\n- After the restart: census and closing-jobs diagnostics (w-97ace) for w-1676; boot sub-phase timings (w-e75b) for w-9995; w-18a1 C4 (a7bb, on Opus2's wake list); w-7bc3 StateInner measurement. Engram w-ccc1 (contended evaluate) waits for the Engram sync.\n- Exceptions: #15 and #16 are closed (see dl560-s4-exceptions-2026-11-11).\n\nAddendum 23:27Z (Termal::Fable2): at Greg's request (\"Kiedy reboot?\"), the TermAl-only restart was moved from the morning to tonight.\n- Engram::Fable agreed, with its sessions parked by 23:37Z.\n- Opus2 confirmed CENTRAL CLEAR at 23:26:30Z.\n- All TermAl Sols and Website were parked clean.\n- \"restart now\" was sent via Engram::Advisor (mailbox b9d13887 #3019): at or after 23:37Z, build e81c97877913f6eb4c9edbce82bccafbaa7ceb40 (Central sha 9e2a730f, DL560 8abf2284), Engram unchanged at 0bd70a30. cc Engram::Asistant #1403.\n- After boot: Opus2 runs the census and wakes (a7bb for w-18a1 C4 and the w-21de eval, 11330, 03d4, Codex 6/7, Mac). Fable2 checks host health (/api/health, host-lifecycle, journal census) and reports to Greg."
+}

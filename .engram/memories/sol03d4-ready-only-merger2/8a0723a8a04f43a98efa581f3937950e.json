@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol03d4-ready-only-merger2",
+    "revision_id": "8a0723a8a04f43a98efa581f3937950e",
+    "previous": null,
+    "body_sha256": "56a925d05e6c576174b51bcf69a9452ec8aa5029fe594e99e33ce67c1c8c2bf9",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-25T04:04:22.884739100Z"
+    }
+  },
+  "body": "Worker routing instruction for Termal::Sol-03d4, received from Termal::Fable2/session-8112 at 2026-10-25T04:03:36.978510300Z, mailbox-message-580d5a8e-5f5e-4858-a838-260b004941fa (mailbox5855d837 #1380), relaying Greg's direct word in Merger2's session: \"Coder powien cie poinformawac TYLKO WTEDY kiedy paczka jest gotowa do merge\". Send Merger2 only a completed READY package: independent reviews complete, tests passed, findings dispositioned and full exact-input evidence. No START/END, test-pass or review-in-progress messages to Merger2; send progress to Fable2. This records notification routing, not additional execution/landing authority. The existing c7 READY package and its requested full-evidence export had already been delivered when this instruction arrived."
+}

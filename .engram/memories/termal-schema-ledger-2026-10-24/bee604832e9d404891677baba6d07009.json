@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-schema-ledger-2026-10-24",
+    "revision_id": "bee604832e9d404891677baba6d07009",
+    "previous": "0cb0374f09eb4a54a362b59c5567849a",
+    "body_sha256": "da241506f8370374f222aed8e69ab7c182f543f91ca1493609d079de70feb54a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-24T06:24:59.102344Z"
+    }
+  },
+  "body": "TermAl SQLite schema ledger as of 2026-10-24 06:57Z (Fable2, from Architect2's rulings; the authoritative copies are on w-feba31b85e17):\n- LANDED: \"2-metadata-units-2\" (w-cce8fff7c62d, master de3bc0cd, 04:53Z).\n- NEXT: \"2-metadata-units-2-handoff-1\" (Sol-a7bb's v3, the w-a108 batch). Ruling be11673f, ledger copy b95ea76d. Two stages: primary2/units1 → validated units2 → an atomic semantic-floor CAS. The primary2-only fallback is kept.\n- THEN: \"2-metadata-units-2-handoff-1-obligations-1\" (the JOINT floor, w-1e85dae945d4 with w-5139). Its predecessor is handoff-1. Ruling 6cd7777d on w-1e85; ledger copy a0e5794a.\n- THEN: the w-4fad42a4ffe7 delegation catalog (record generation, an indexed compact catalog, durable coverage). Its immediate predecessor is the JOINT floor, confirmed to Architect2 at #987. Its marker is not yet allocated.\n- Publication order is STRICT: units2 → handoff → joint → w-4fad catalog. No sibling floors.\n- The FEDERATION profile contract is separate and constant \"2\" (1150c838, via w-efeee). It is never the storage floor.\n- No floor change: w-efeee, and BarA2's chain (an optional queued_prompts JSON field only).\n- UNKNOWN, and the lanes must declare to Architect2 before freezing: w-de6021f4b32f (Sol-d50d) and w-aa7bb4e4e47f (Sol-8e1f). If either needs a floor, re-order explicitly with Architect2.\n- PARKED: directPrompt and b37b. coordination is 5."
+}

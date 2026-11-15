@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-claude-gate-launch-rule",
+    "revision_id": "14d341ed0b604df88d17fff4c19783e6",
+    "previous": "4a04053710804608abdacacfc1253f84",
+    "body_sha256": "ae23f2aa092a1a23defdc1a2546b98f79329668eaa8cfa9525d9f06801ff4f70",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-18T03:31:42.339787Z"
+    }
+  },
+  "body": "CLAUDE LANE GATE LAUNCH (interim, Fable2 2026-10-17 22:20Z): on the running host build 459f8540, a Claude root session's Bash-BACKGROUND gate launch fences its own credit. It counts as outstanding background work (ClaudeHazardCause::OwnSession, src/claude_outstanding_work.rs). Bug: w-b576a44fb793 (P1).\nUntil it is fixed, Claude lanes (Opus3 and other Claude lanes: BarA1, BarA2, CSharpProof) launch full gates DETACHED, as one FOREGROUND Bash call:\n  pushd \"ROOT\" && node scripts/test-launcher.mjs full --detach --notify session-8112\nin a turn that begins focused on the item, then end the turn. Fable2 gets the notify and wakes the lane.\nCodex lanes keep their usual form.\n\nADDED 2026-10-18 01:29Z (Fable2's own lesson). ANY Claude Bash run_in_background or Monitor task restricts evidence, even a read-only watcher that only polls the API: the host cannot see that it is read-only. It restricts this session, and other sessions lose credit for tests in workspaces under its workdir. Fable2's workdir is the main checkout, which contains every .tmp/wt-* lane worktree. Fable2 therefore never uses background shells or Monitor; it checks gate stages by hand on wakes. (Occurrence: task bdr92a8ag, 01:26–01:27:30Z, overlapping the w-affe gate test-e2706734; disclosed on w-affe8a4dee48.)\n\nADDED 02:37Z. EVEN a FOREGROUND Claude Bash call registers outstanding work until its result returns (src/claude_outstanding_work.rs:585-591: `background || name == Some(\"Bash\") || …`). Each of Fable2's Bash watchdog calls produced a \"restricted, then lifted\" notice pair. While a call is in flight, other sessions may be refused credit for tests in workspaces under Fable2's workdir (the main checkout, containing .tmp/wt-*). Observed impact so far: none; w-d9f9's gate was credited despite overlapping Bash calls at 02:04:57 and 02:15:02. Still, Fable2 now polls with the PowerShell tool (not tracked as outstanding work) or MCP tools, never Bash, whenever lane tests may be running. The light watchdog can be run via PowerShell: `& \"C:\\Program Files\\Git\\bin\\bash.exe\" C:/github/Personal/TermAl/.tmp/watchdog-light.sh`, or rewritten in PowerShell.\n\nADDED 03:32Z (Fable2's lesson): a session carrying a running gate must make NO edits of any kind until the gate's END and host record, not even to git-ignored .evidence/ files. TRAIN-5's host credit was refused because Merger wrote .evidence/train6-path-overlap-preaudit.json while carrying test-4312ab0a (I had asked for it). Ruling: not a landing blocker, because the launcher result proves a green gate on the exact input (expected = before = after). Never assign parallel file-writing work to a gate-carrying session."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-credit-go-must-name-foreground-form",
+    "revision_id": "6d186863e0ea4aaca0f0ee2a936896e0",
+    "previous": "786f874f874749d4acb613c9fca36fde",
+    "body_sha256": "a2f1ff9e7a63f447af5ce4353d774bf3b189663d20d4d40b8a764d3d37aba42f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T10:38:51.572040500Z"
+    }
+  },
+  "body": "Integration-owner rule (Opus2, 2026-11-14 09:06Z, my own miss). When I GO a Central run meant to EARN a registered record (a closure check, a current-root check, any `--input commit` credit run), the GO must name the FOREGROUND form explicitly: `node scripts/test-launcher.mjs focused --input commit -- <cmd>`, run as the owner's own foreground command with cwd = the named root (Claude: one Bash call `pushd \"DIR\" && ...`), with NO --detach and NO --notify. It must also forbid item writes (notes, status) between registration and END. Incident: d50d's W70 warm check test-438e8f8d used `--detach --notify session-8111`; the host replied \"--detach is not a foreground focused check; no Test or Build record will follow\", and d50d also wrote a START status note after registration. That ONE authorized run could earn nothing, and a corrected run needed a coordinator decision.\n\nADDITION (Opus2, 2026-11-14 10:39Z): a credited GO must also say \"if you (re-)claimed the item after naming its root, name the root AGAIN (same path) and wait one turn before the run\". Incident: Engram::Merger re-claimed baa6 after naming; its registered run test-0d60dc92 got \"POST HTTP 409 ... named run's claim fence changed; name the source root again; phase=read_current_claim\", so no record could follow. It cost a whole cold build under the one-off 20 GiB capacity exception."
+}

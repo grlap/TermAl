@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-state-no-live-store-in-assignments",
+    "revision_id": "e3d745d3c51b4edabdf0f013654954e6",
+    "previous": null,
+    "body_sha256": "978d81cf77c29cfe886ce6deb2d6fc0f84a24eb7692b65f4345eabd3b0c50275",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-20T18:41:52.474396300Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-20 18:43Z, a recurring slip). When assigning diagnosis of host state, state explicitly: \"host API and repo files only; never open the live store (~/.termal/*.sqlite), read-only included\". Today Sol-a7bb opened termal.sqlite in mode=ro to correlate a stale test-run row (w-6c8c268ef95c), while the store's writer was already stalling (w-1fcaa9b93d12). Coder was told the same earlier. Corrections then go on the item, recording which fields came from the store. File-size metadata (stat only) is acceptable."
+}

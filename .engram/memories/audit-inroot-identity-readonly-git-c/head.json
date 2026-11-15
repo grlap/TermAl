@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "audit-inroot-identity-readonly-git-c",
+  "head": {
+    "state": "active",
+    "chain": [
+      "c5e9591bc22c40f1949ee753c37d6b95"
+    ]
+  }
+}

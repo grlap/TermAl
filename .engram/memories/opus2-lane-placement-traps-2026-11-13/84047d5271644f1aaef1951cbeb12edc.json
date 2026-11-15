@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-lane-placement-traps-2026-11-13",
+    "revision_id": "84047d5271644f1aaef1951cbeb12edc",
+    "previous": null,
+    "body_sha256": "a48857e334a573215c8a885bd8e7d2259a711fe5892b08c8d616df4747059e08",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T12:02:27.257323500Z"
+    }
+  },
+  "body": "Integration-owner placement traps (Opus2, 2026-11-13; my own misses):\n1. Windows B (host 932a546b, the Engram Runner session-9) is OUT under the rustc ICE/AV host hold w-1d9aea727864. Fable2 reconfirmed it stays out on 2026-11-13. Never route a job there unless that hold is explicitly lifted. The only eligible Windows host is Central, under the 24 GiB cold floor.\n2. DL560 hostless author jobs with a private HOME must keep CARGO_HOME=/home/greg/.cargo (read only). Without it, the launcher resolves the source owner at $HOME/.cargo/bin/engram, fails with ENOENT, and the stage never runs. Keep ENGRAM_SOURCE_BINARY unset and TERMAL_* stripped. (492e-8, test-a8f5fd0d.)\n3. A Cargo target dir that a job never let Cargo create has no CACHEDIR.TAG, and `cargo clean` then refuses. Leave such targets for the coordinated sweep; never force-delete them.\n4. Coders' bundles sometimes prefix the base64 with `bundle_base64=`. Strip it before decoding, and always check the size and SHA-256 against the coder's stated values.\n5. The mailbox wake gap of 10:01-11:55Z: an idle root session got no wakes for about 2 h. After any long silence while jobs are running, run `mailbox list` and check unread counts instead of assuming quiet."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-gate-has-no-clippy-stage",
+    "revision_id": "ebf2921e14ad4b70afdba0a0d2687793",
+    "previous": null,
+    "body_sha256": "61dde7a8e2ee5e312b51b388cf225f532fee0ffbf863bdb72b9e0e6cad3c4f7d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T13:10:28.184895200Z"
+    }
+  },
+  "body": "Fact (Termal::Fable2, 2026-10-19 13:10Z, corrected by Sol-license #691). TermAl's maintained full gate (scripts/test-launcher.mjs requiredStages, lines 183-210) runs cargo-check, typescript, fingerprint-tests, rust-tests (scripts/test-rust.sh) and vitest. It has NO clippy -D warnings stage; Engram's gate does (fmt, check, clippy, rust, rust-scale-*…). A rustc warning in TermAl code does not fail TermAl's gate. It's still owned cleanup, because CLAUDE.md asks for `cargo check` clean. Don't claim a TermAl gate will fail at clippy."
+}

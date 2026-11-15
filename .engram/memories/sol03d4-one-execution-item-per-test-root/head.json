@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "sol03d4-one-execution-item-per-test-root",
+  "head": {
+    "state": "active",
+    "chain": [
+      "a62c7c6d0c5c420484515bd32096c823"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "architect-assessment-2026-10-24-gated-control",
+    "revision_id": "2761732137a5434da480de4102cab5b0",
+    "previous": null,
+    "body_sha256": "a962967848f938e6cc42285714c80d4f0cdfdef5508c435cf75e67339352c86c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=claude-fable-5-1;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-24T17:01:18.837936200Z"
+    }
+  },
+  "body": "Design assessment of the gated-control stalls, by Termal::Architect1 for Greg (requested via Engram::Advisor bac6ea2a #78, 2026-10-24 16:56Z; Greg's words: \"zaprojektowali system, ktory nie dziala; gated control ciagle sie zacina\"). Sent in bac6ea2a #79. Under Greg's STOP for new fixes, this records analysis only.\n\nFAILURE MODES (evidence): (a) ordinary prompts blocked on synchronous authorization under fixed budgets (20 s evaluate+fence, 240 s window, zero-budget clip after it; profiling 2026-10-22 F1/F2; w-260d, w-ac230); (b) recovery only by Cancel after a control toggle (w-06fb, landed 8cfc5739 on Greg's override); (c) containment (turnGatedControl=false) makes a retained head unreachable (8581); (d) boot sidecar storm, 25 in 2 min (F4; w-9a35); (e) StateInner saturation: per-commit 19.3 MB snapshot build under the lock at ~6/s plus writer trim under it, 2.7–3.7 s waits, registration/evaluation 503s (w-de60, w-c75f, w-cce8, w-1fca); (f) the proof system refusing true results: watcher-timing credit refusal (w-3c44), three evaluation submits refused by an idle-owner reclamation pass with verdicts left unrecorded (w-33f4), stale run markers (w-d0b8), replayed grant refused as grant_scope_mismatch (8112, 10-24). Impact: the coordinator paused 5 h on 10-22; a green change landed only on Greg's direct word; less than a quarter of P0 wall clock was engineering.\n\nFAILED ASSUMPTIONS: control is cheap and always there (fail-closed dispatch); fixed budgets suffice; one big mutex; the host can prove everything (verification more fragile than the work); replay is recovery; one coordinator session gated like a lane.\n\nCONTAINMENT WITHOUT CODE: control off where credit is not needed; coordinators/architects un-gated; one full gate host-wide, builds unrestricted (Greg 10-24); staggered post-restart wakes; refused evaluations completed by coordinator disposition, not reruns; light API reads; resume only when re-admission is exhausted; acting-coordinator handover as default.\n\nMINIMAL DURABLE REDESIGN: 1 fail-open ordinary admission with an asynchronous, idempotent authorization overlay (credit attaches if the grant arrives; only tests/evaluations wait) — w-a108's design generalized; 2 typed Retryable/Final outcomes with causes and adaptive deadlines, no zero-budget clips; 3 state split: immutable per-commit projections (R4), persistence and reclamation off the hot lock; 4 credit bound to content (tree id + run record), not watcher timing or naming generations; 5 Engram begin idempotent under replay by attempt key; 6 the coordinator's queue never gated. Order of leverage for the existing batches: lock split, fail-open admission, typed outcomes, credit simplification."
+}

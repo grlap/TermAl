@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-large-change-review-coverage-2026-10-29",
+  "head": {
+    "state": "active",
+    "chain": [
+      "aa078863256d40808a1f5f98801b6d5f",
+      "907119f109df43f9a223b185c5666199",
+      "932e6ac44543498d8bfb5322730a64ae"
+    ]
+  }
+}

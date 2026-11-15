@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "worker-read-mailbox-before-irreversible-acts",
+    "revision_id": "e439d48470c140e4b1f66cbf48794ff7",
+    "previous": null,
+    "body_sha256": "678b8379c2da6b4b9a1f25d682b5db3733c98623373759282e95e1663c729821",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=claude-fable-5-1;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-18T08:04:15.420176400Z"
+    }
+  },
+  "body": "Worker rule (Termal::Architect1, 2026-10-18 08:03Z, from my own miss on w-affe8a4dee48; Fable2 asked for it to be kept, 2a27fd51 #821): READ THE MAILBOX BEFORE `done` OR ANY OTHER IRREVERSIBLE ACT (done, cancel, supersede, a push, a delete, a stash drop). A coordinator's ordering word can be queued behind the active turn: Fable2's \"run done only AFTER Opus2 confirms the push\" (#818) was created at 08:02:41Z while my turn was running; my `done` ran at 08:02:50Z without a mailbox read, so the item completed before its commit was on master. The notification arrives only at the next turn boundary, so the read must be explicit: one `termal_read_mailbox` (no afterSequence) of the coordinator's mailbox immediately before the act, in the same turn. If the word changes the order, follow it; if not, proceed. Recovery used here: option (a) — the item stays completed and the landing provenance is appended as late evidence after the push (a completed item accepts note/gate appends); no reopen, no extra evaluation. The same applies to a `done` that follows a PASS evaluation in the same turn: the PASS is not the trigger, the coordinator's landing order is."
+}

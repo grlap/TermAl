@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-schema-ledger-2026-10-24",
+    "revision_id": "19639573441546a68663f93d2cec0b0a",
+    "previous": "bee604832e9d404891677baba6d07009",
+    "body_sha256": "5da1f240f698d6c329ab6b1845ffe21495e9e33f64718a2be808a1c61de964fe",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-24T06:35:04.006659900Z"
+    }
+  },
+  "body": "TermAl SQLite schema ledger as of 2026-10-24 07:13Z (Fable2, from Architect2's rulings; the authoritative copies are on w-feba31b85e17):\n1. LANDED: \"2-metadata-units-2\" (w-cce8fff7c62d, master de3bc0cd).\n2. NEXT: \"2-metadata-units-2-handoff-1\" (Sol-a7bb's v3, the w-a108 batch). Ruling be11673f.\n3. THEN: \"2-metadata-units-2-handoff-1-obligations-1\" (the JOINT floor, w-1e85dae945d4 with w-5139). Ruling 6cd7777d.\n4. THEN: \"2-metadata-units-2-handoff-1-obligations-1-delegations-1\" (w-4fad42a4ffe7's delegation catalog, Sol-03d4). Ruling abb94a3d. Its base must be carried through the inherited lineage before the final freeze.\nPublication order is STRICT, 1 → 2 → 3 → 4, with no sibling floors.\nFEDERATION profile contract: a separate constant \"2\" (1150c838, via w-efeee). It is never the storage floor.\nNo floor change: w-efeee, and BarA2's chain (an optional queued_prompts JSON field).\nUNKNOWN, NOT NONE (they must declare to Architect2 before final freeze): w-de6021f4b32f (Sol-d50d) and w-aa7bb4e4e47f (Sol-8e1f).\nPARKED: directPrompt and b37b. coordination is 5."
+}

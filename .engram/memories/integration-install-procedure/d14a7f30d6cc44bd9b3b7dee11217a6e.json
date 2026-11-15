@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "integration-install-procedure",
+    "revision_id": "d14a7f30d6cc44bd9b3b7dee11217a6e",
+    "previous": null,
+    "body_sha256": "6244452aca5c8a64426316797b9dac4e5b70c1bdc7b49a2148efffedf5679ca6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-09T05:38:18.350390900Z"
+    }
+  },
+  "body": "Integration owner's install procedure (Termal::Opus2, agreed with Termal::Fable2 in #2041, 2026-10-09), in force until w-5798a85f3f4b is fixed. The host's review checker spawns target/release/termal.exe, so the live path must never be absent for long.\n1. On the landed tree, from the master checkout: `CARGO_TARGET_DIR=.tmp/install-target cargo build --release`. Never `cargo build --release` into target/ after renaming the live binary: that left the path missing for 2-3 minutes per install and broke reviewers with HTTP 500 os error 2.\n2. Check termal_list_delegations for running reviewer delegations in both projects (TermAl and Engram); hold the install while any are running.\n3. `cp .tmp/install-target/release/termal.exe target/release/termal.exe.new`, verify its sha256, then in ONE command: `mv target/release/termal.exe target/release/termal.exe.<old8>.bak && mv target/release/termal.exe.new target/release/termal.exe`. <old8> is the first 8 hex characters of the CURRENT termal.exe's sha256, measured at install time. Never assume it: restarts via cargo run rebuild it.\n4. Report the swap's start and end times and the new hash in the landing report.\nNever move or delete the running host's image (.bak) before the restart."
+}

@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "hold-cc09-engram-installs-2026-11-11",
+  "head": {
+    "state": "active",
+    "chain": [
+      "96770e7fb40049798e1b72cf7bd10b74",
+      "a7d7989d3bad4da9be53038e3547fa7c"
+    ]
+  }
+}

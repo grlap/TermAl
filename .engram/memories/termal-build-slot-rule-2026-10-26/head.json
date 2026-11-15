@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-build-slot-rule-2026-10-26",
+  "head": {
+    "state": "active",
+    "chain": [
+      "f926227fb91f491aac4ff21b4d797b0c",
+      "467a9cd42207404986842bc4c2957d7c"
+    ]
+  }
+}

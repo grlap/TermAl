@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-watchdog-light-reads",
+    "revision_id": "ffa85f386f4044ee919f0f921be1ad8f",
+    "previous": null,
+    "body_sha256": "a8a420a9c5a9053a71b7061528f32cf62bc703ef58cbe5fccdec91d3e40380e3",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a147c0-22a0-7983-8bb2-b17b985f5dbc",
+      "work_ref": "w-b17b985f5dbc"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T20:14:04.460635200Z"
+    }
+  },
+  "body": "WATCHDOG READ RULE (Fable2, 2026-10-17 20:15Z): GET /api/state returns about 18.7 MB (state flood, w-b17b985f5dbc). Watchdog ticks must NOT read the full /api/state. Instead, read GET /api/sessions/{id} for the known lane ids:\n- Termal: 5651, 6721, 7422, 8111, 8582, 8982, 8983, 9474, 11336, 11394, 11410, 11465, 11466, 11519, 11865, 11881, 12095, 12326, 12327, 12328, 12415;\n- plus Engram::Fable 5135 and Advisor 6219.\nCheck status, queuePaused and pendingPrompts. /api/test-runs (one bounded page) is fine. Do this until w-b17b lands."
+}

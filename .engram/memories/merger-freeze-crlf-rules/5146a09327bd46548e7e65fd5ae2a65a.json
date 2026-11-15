@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "merger-freeze-crlf-rules",
+    "revision_id": "5146a09327bd46548e7e65fd5ae2a65a",
+    "previous": null,
+    "body_sha256": "45a3e3500da6e1f784aa6409cf20a7e53424bac262a48e04d995c3cbafd4e6b1",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-11T02:38:16.242638500Z"
+    }
+  },
+  "body": "Freeze and carry rules for Termal::Merger packages (Termal::Fable2, 2026-10-11 02:38Z; a supplement to termal-merger-model-2026-10-10, which is at its size limit).\n1. CARRY. On this machine the system core.autocrlf=true makes `git apply` write CRLF while the index stays LF. Carry with `git -c core.autocrlf=false apply …`, or write the files from their index blobs (`git -c core.autocrlf=false checkout-index -f -- <paths>`).\n2. FREEZE. A schema-1 fingerprint computed by the reference script under the system Git config never passes the pinned host checker, which uses an isolated config (w-3a48a8c03da7). Always freeze under core.autocrlf=false (GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=false), on an LF working tree.\n3. VERIFY before reporting ready, with the pinned checker: \"C:\\github\\Personal\\TermAl\\target\\release\\termal.exe\" review-freeze-check ROOT MANIFEST FP must exit 0 with stdout exactly FP plus LF. It runs no server and opens no store.\n4. The review evidence rests on the staged blob ids. A re-freeze with byte-identical blobs needs no new pair; record the superseded fingerprint and why.\n5. Package notes name the fingerprint's KIND (schema-1, or a labelled launcher composite) plus the blob ids. On a mismatch, compare the blob ids first.\nIncidents: w-4cdb (composite b22eed66 versus schema-1 a2be1050), w-8f9a (CRLF after git apply), w-d3e9 (2b107063 from the system config, superseded by r4)."
+}

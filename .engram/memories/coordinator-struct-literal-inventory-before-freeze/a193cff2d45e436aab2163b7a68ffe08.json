@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-struct-literal-inventory-before-freeze",
+    "revision_id": "a193cff2d45e436aab2163b7a68ffe08",
+    "previous": null,
+    "body_sha256": "01f4541f28290cb21d446042e3cf37798770ffbe373da5301a370a185766e509",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-18T22:24:20.618921700Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-18 22:29Z, from four compile-only misses in one day: Coder m5 RED E0308, Sol-8e1f A1 green1 E0063, Sol-a7bb M4 E0596, Codex-WorkspaceLookupsFresh observer E0063, the last caught by its review pair). Before a worker freezes source that ADDS a field to a struct, or changes a type or signature, require a source-read inventory with rg (no cargo) of EVERY struct-literal construction and every call site of the changed item across src/, including src/tests/. The READY lists each site with its file, line and status. Struct-update syntax and Default sites count as covered. Launching the review pair before the run is also worth it: it catches compile blockers without spending a run slot. Each compile-only failure wastes a cold slot of about 3-4 min while gates are the bottleneck."
+}

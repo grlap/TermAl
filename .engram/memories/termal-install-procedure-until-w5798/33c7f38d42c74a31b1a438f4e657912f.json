@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-install-procedure-until-w5798",
+    "revision_id": "33c7f38d42c74a31b1a438f4e657912f",
+    "previous": "627cecfd7860477d81204f503c871457",
+    "body_sha256": "c25d68398faf10ec9b0c3e581389e1589d0cb8bb80cd2d5beb7593d9938a1a10",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a0fb02-b26c-75d2-9d06-5798a85f3f4b",
+      "work_ref": "w-5798a85f3f4b"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-09T06:22:00.757514200Z"
+    }
+  },
+  "body": "TermAl install procedure, agreed by Termal::Fable2 with integration owner Termal::Opus2 (mailbox 4daa5b87 #2040-#2041, 2026-10-09 05:38Z). It applies until w-5798a85f3f4b is fixed.\nWHY: the host's freeze checker and other self-spawns run the path target/release/termal.exe. The old install renamed termal.exe aside and then ran `cargo build --release` in place. The path was then missing for 2-3 minutes, and reviewers' termal_review_freeze_check failed with HTTP 500 \"review checker did not complete … os error 2\". This happened in two Engram reviews in the 05:31:36-05:33:49Z window of 013e6b6f's install.\nEarlier windows: 2b1e3f85 20:06:44-20:09:22 (10-08); d9c13717 00:49:51-00:52:23; 53ee9c65 02:18:16-02:21:00; f5a96582 under 2 s at about 03:21; 98ad64fd 04:37:47-04:41:02.\nA failure in a window is loud (HTTP 500), never a false clean.\nPROCEDURE:\n1. Build into .tmp/install-target (CARGO_TARGET_DIR) from the master checkout on the landed tree.\n2. Check termal_list_delegations for running reviewer delegations in both projects; hold the install while any are running.\n3. cp the new build to target/release/termal.exe.new and verify its sha256. Then, in one command: mv termal.exe → termal.exe.<old8>.bak && mv termal.exe.new → termal.exe.\n4. Record the swap's start and end times and the hash in the landing report.\nThe running host's own image is termal.exe.5da199a3.bak (mtime 03:54:38Z). It must not be moved until the restart.\n\nAMENDMENT 06:22Z (Opus2 #2042): termal_list_delegations is parent-scoped and termal_list_sessions excludes delegation children, so the integration owner cannot see other sessions' reviewers. Step 2 is now: the integration owner holds the swap until the TermAl coordinator sends \"SWAP NOW\". The coordinator sends it only after confirming with Engram's coordinator that no reviewer delegation is running in either project. The natural moment is just before a restart."
+}

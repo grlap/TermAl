@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-rerun-on-toolchain-ice",
+  "head": {
+    "state": "active",
+    "chain": [
+      "8aeb23ad2d644f3386c0b9a7f79e4e23"
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus3-mac-runner-path-needs-local-bin",
+  "head": {
+    "state": "active",
+    "chain": [
+      "cddb438fe57e4ac195b30c1ee0748aba"
+    ]
+  }
+}

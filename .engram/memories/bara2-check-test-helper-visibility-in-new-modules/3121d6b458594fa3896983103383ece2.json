@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara2-check-test-helper-visibility-in-new-modules",
+    "revision_id": "3121d6b458594fa3896983103383ece2",
+    "previous": null,
+    "body_sha256": "e3fb99cf5696d13f58a6e5f5f65a9dbf465fee01a7e6323082853173ead53be4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T13:03:33.241096400Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA2, 2026-10-29; my own miss on w-c205 slice C round 1, freeze ae3c2c1a, precheck test-89634859 exit 101).\n\n**The rule.** Before freezing a NEW test module, check where it is mounted and the definition and visibility of EVERY fixture helper it calls. For each one, grep `fn <name>` and its `pub(super)` / `pub(crate)` qualifier, and confirm it is reachable from the new module's path.\n\n**Why it bites.** TermAl's test helpers live in different modules:\n- `tests::delegation_support` has `pub(super)` helpers, such as test_app_state_with_drained_delegation_codex_runtime. Those are visible in `tests` but NOT in `tests::engram_host_adapter::<child>`.\n- `tests::engram_host_adapter` has private helpers such as grant_reply, test_control_work_binding and queue_test_engram_prompt. Its children see those.\n- The safest pattern is to copy exactly what the PARENT module's own tests call.\n\n**What it cost.** An E0425 is a name-resolution error, so rustc stops BEFORE type checking. The resolution error therefore hides any type errors behind it. That spent a named Cargo GO slot and forced refreeze 40e50ecd.\n\nCompanion memory: bara2-grep-uses-before-changing-derives."
+}

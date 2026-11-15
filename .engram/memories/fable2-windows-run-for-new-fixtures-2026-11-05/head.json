@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "fable2-windows-run-for-new-fixtures-2026-11-05",
+  "head": {
+    "state": "active",
+    "chain": [
+      "835b99c2718e4447b7184b903ce95af8",
+      "b945c96b80be42e7b378ead4ae558be5"
+    ]
+  }
+}

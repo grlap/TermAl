@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "workaround-revise-then-rename-until-w1d8a",
+    "revision_id": "c0f506a24e01497c8da89db4e808fe9f",
+    "previous": "feac34778f3d496d814ace2124b1abe6",
+    "body_sha256": "5fb18393fdefda5dfcbb9879c433c5e5c20644b39b171b070c31a609fe50086c",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1c1ae-9b67-76a3-bf05-1d8a8991b237",
+      "work_ref": "w-1d8a8991b237"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T19:08:51.283061800Z"
+    }
+  },
+  "body": "Workaround until w-1d8a8991b237's fix is live on the running host. After any `update … revise` on an item you hold (criteria, outcome, title), the host's binding keeps the old work revision. Later turns then go uncaptured or refuse, done refuses `unconfirmed_declaration`, and the host shows runtime_observation_scope_changed. Fix: re-name the same source root with termal_name_source_root at the same path, end the turn, and continue on the next turn; the naming turn itself stays uncaptured. Confirmed from source on 8f544b45 by Sol-8e1f (mailbox f62b0593 #2512). Side effect, seen live on 778f (mailbox ebe242f7 #7314): the first capture after the re-name records `assumed_missing_baseline` as a source change even on an unchanged commit (w-4c0e2500b010). So if an evaluation already ran, request ONE fresh evaluation after the re-name, then done. Better still, revise criteria before evaluating. Retire this memory when w-1d8a's fix is live."
+}

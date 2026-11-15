@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "coordinator-post-restart-wake-all-lanes",
+  "head": {
+    "state": "active",
+    "chain": [
+      "4828b52f25184121b8117757c481e581"
+    ]
+  }
+}

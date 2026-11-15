@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-post-landing-uidist-rebuild",
+  "head": {
+    "state": "active",
+    "chain": [
+      "6d70928a85d746c89bd5cac34387f911",
+      "2ad4f6ec53d64c2780930b14eada9ca5"
+    ]
+  }
+}

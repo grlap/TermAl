@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rule-no-tests-of-instruction-files",
+    "revision_id": "c324915c6f8c42a4a07ac7b49634d73b",
+    "previous": null,
+    "body_sha256": "77d1f2fdf20472e15d0f97f9ac797fa5288132e267820dc7d2816f978e18e7b4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T00:56:06.297241500Z"
+    }
+  },
+  "body": "Greg's standing rule (2026-11-07 00:54Z, relayed by Engram::Asistant, TermAl mailbox 588693a8 #652), verbatim: „USUNAC TESTY sprawdzajace claud.md czy agents.md Natychmiast!! Nigdy ich niedodawac”. Never add tests that read, check or pin the content of AGENTS.md, CLAUDE.md or other agent instruction files (.claude/commands, .claude/reviewers, skills), in any of the team's projects. The instruction files themselves stay. Product tests that create temporary AGENTS.md fixtures to exercise TermAl features are not covered. Deletion of the existing TermAl pins is tracked as w-7dafeeae3cfe (owner Opus3). Such pins had just blocked the w-52ef rule change's FULL."
+}

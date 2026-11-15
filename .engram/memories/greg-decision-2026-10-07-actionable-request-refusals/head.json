@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-decision-2026-10-07-actionable-request-refusals",
+  "head": {
+    "state": "active",
+    "chain": [
+      "b42aef2c68bc40cb8234528da6cb5e3a",
+      "badfb4f2772e436c989904ff4773c334",
+      "5dabe3c87b1c43f88a5f0b9215882c37",
+      "72e2f50659eb4357adf7a42cc66e4662",
+      "092a6fee605c420295d31c4eee0a5669"
+    ]
+  }
+}

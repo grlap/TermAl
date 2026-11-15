@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-quiet-during-other-gate",
+    "revision_id": "f94eb5a677aa4b71b5abc891abad9619",
+    "previous": "d0ef27a66d5d40c6ac73391f99defefb",
+    "body_sha256": "e2be6fb14d05fa1aa48f68e0fbb599400dba4c8d1a0d896afeaf91bd4a5daf32",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-15T22:20:47.468736Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-15 22:20Z, agreed with Engram::Fable after TermAl load caused an Engram gate failure). During the OTHER project's FULL GATE, TermAl runs NOTHING CPU- or IO-heavy: no npm ci, vitest (even focused), tsc, fixture generation, measurement runs or cargo. Allowed: reads, mail, edits, a single-file rustfmt --check, git-only steps and read-only reviewer pairs. Engram follows the same rule.\n\nCause: Engram's w-f9368 gate test-93f1a2fc (21:42-22:17Z) failed on host contention: its freeze stage took 646 s against a normal 105-230 s, and a launcher test hit its 60 s timeout. In that window I had approved Sol-a7bb's npm ci, repeated focused vitest runs, and a 1,356-item Engram fixture build plus a 136-page `ls` measurement, all during Engram's gate. Engram's w-c47d failure at 20:37Z overlapped similar UI work and a reviewer pair.\n\nPractice: before granting ANY run, check whether a gate is running on either side. If one is, the run waits for that gate's END, then goes in an agreed build window.\n\n22:21Z, the same evening, a crossing miss. Engram::Fable offered a window (#2202) while I offered its re-gate first (#2203); it took my offer and launched (#2205, #2206). Meanwhile I accepted its earlier #2202 and sent four GOs at 22:19Z. I revoked them at 22:20Z, but Opus3's cold cargo build (test-a75ff97c) had already started and overlapped Engram's quiet gate. RULE: when messages with the other coordinator cross, send NO worker GO until the other coordinator has explicitly confirmed the slot in a message that replies to my latest. If messages cross again, the other side's latest decision wins."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-nvme-stall-observation-2026-10-16",
+    "revision_id": "526e582e2e6a41e083ab96ada43db7f8",
+    "previous": "5b9a5f2fac8a445c9abc15186951b2a6",
+    "body_sha256": "ef20d3746fa3155837ebc6077783eef58d8705f6e0944e5e38ecdcba7627af62",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T20:29:22.962834Z"
+    }
+  },
+  "body": "Greg's operator observation, relayed by Engram::Advisor in TermAl mailbox b9d13887 #912 (2026-10-16 20:27:30Z), verbatim: \"Greg's operator observation relevant to host test runs: observed stalls correlate with NVM activity. No other user workload is running; the machine is otherwise only TermAl and Engram. Treat this as an unconfirmed but relevant host interaction, not generic load. Direction: code and runner behavior must be resilient to such stalls; do not rely on an assumption that the machine is otherwise idle. Greg may later install a second NVM, but this is not authorization to install or change NVM now. Record as attributed evidence where relevant.\" How to apply: when diagnosing a timeout, stall or a timing-sensitive test or gate failure, consider disk (NVMe) I/O stalls as a candidate cause. Fixes must make code and tests resilient to stalls, never inflate timeouts and never assume an idle machine. Agents change no hardware or drivers. Cite this entry on the relevant stall or timeout items.\n\nCORRECTION, Engram::Advisor #913 (2026-10-16 20:29:06Z), verbatim: \"Correction to my prior stall observation: Greg meant NVMe storage activity, not NVM. Treat the correlation as unconfirmed storage-I/O evidence. No NVMe change is authorized now; Greg may later add a second NVMe. Please attach this correction to any related TermAl diagnosis and retain the resilience-to-storage-stalls direction.\""
+}

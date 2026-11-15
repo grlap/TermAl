@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "rules-greg-minimal-checks-2026-10-26",
+  "head": {
+    "state": "active",
+    "chain": [
+      "099e4717518d44ff813afdb9307beee8"
+    ]
+  }
+}

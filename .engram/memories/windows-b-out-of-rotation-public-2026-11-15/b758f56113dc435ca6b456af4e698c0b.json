@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "windows-b-out-of-rotation-public-2026-11-15",
+    "revision_id": "b758f56113dc435ca6b456af4e698c0b",
+    "previous": null,
+    "body_sha256": "cd87764d818a6f2945beb3218c203e003862423a87ba53fc2d46c754103d22f3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-15T17:45:54.388687500Z"
+    }
+  },
+  "body": "Windows B (host 932a546b) is OUT of every build, test and gate rotation from 2026-11-10 19:24Z (Opus2's disposition; Fable2 #298). The trigger was a third rustc ICE plus STATUS_ACCESS_VIOLATION (w-1d9aea727864 note ad166a9a). The cause is undiagnosed (lowered RAM clock, hardware or toolchain), and any system-level step needs Greg's direction. No retry, canary, repair, toolchain or config change.\nTRAP (Fable2's own miss, 2026-11-13 10:02Z): federation status shows it enrolled, authenticated and idle (53 GB free, CPU <1%). That is NOT availability. I recommended it for Engram's ab27 and had to retract; session-9 correctly held. Check this memory before suggesting Windows B for anything."
+}

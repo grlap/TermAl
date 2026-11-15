@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-stack-sibling-landings",
+    "revision_id": "856ae8bd8f8e423ebe87018f6a629f34",
+    "previous": null,
+    "body_sha256": "3eba00b8f47a133370d02f3316a1c78b86c6daec6f023e7f78434f4b47e7b846",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T16:14:19.720710Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-16 16:15Z, my own sequencing miss). Two independent changes frozen on the SAME master base can't both land as fast-forwards with their own gates: the second must be carried onto the first's commit, and its gate must run on that carried tree, because the commit rule wants the full gate on exactly the landing input. Tonight w-33c3 and w-b201 were both on dae4bfd9. I launched w-b201's gate (test-a01f390a) right after w-33c3's passed, so that run became diagnostic only. RULE: before launching the 2nd, 3rd, … gate for the same base, decide the LANDING ORDER, then carry each later change onto the previous change's commit (byte-identical if disjoint) and gate THAT tree. Or gate them together as one train with per-member credit."
+}

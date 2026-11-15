@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-eo-no-refusing-correct-checks-2026-11-04",
+    "revision_id": "28be8374ea8a468798be6319e5b97032",
+    "previous": "44807c5789d64be48b8732e61c9d2f42",
+    "body_sha256": "82ffad0aead642533fbe1fe1cd05581483e89263279a0d6b8e4d7955dd8bcead",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T16:08:12.834610900Z"
+    }
+  },
+  "body": "Greg, verbatim, via Engram::Asistant 588693a8 #332, 2026-11-04 16:05Z, after both evaluation windows were refused: „To nie moze tak byc. Znowu bedziemy odrzucac poprawne testy.” Task as relayed: priority; with Engram establish the actual source of both refusals and fix automatic distinction of correct evidence from a real source change, with no empty turns, silence or special manual procedures and without weakening protection; positive and negative regressions plus a simple end-to-end under normal work; do not change old evaluations; give plan and status. A silence rule or a form rule for holders is not an acceptable answer. Tracked by the p0 item titled 'Execution Observability must not refuse a correct check'.\n\nGreg, verbatim, via Engram::Asistant 588693a8 #334, 16:06Z: „Bez workaround i skomplikowanych procedur.” As relayed: usuńcie przyczynę w produkcie, tak aby normalny cykl pracy działał automatycznie; bez tymczasowych obejść, pustych tur, ręcznego porządku ani nowych procedur dla agentów; zachowajcie ochronę przed prawdziwą zmianą źródła."
+}

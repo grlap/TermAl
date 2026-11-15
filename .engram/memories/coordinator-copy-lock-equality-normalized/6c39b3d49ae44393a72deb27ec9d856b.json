@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-copy-lock-equality-normalized",
+    "revision_id": "6c39b3d49ae44393a72deb27ec9d856b",
+    "previous": null,
+    "body_sha256": "4b51e6ef8d4af8f51af068b66d404a39dd03bf4f29f0079633638ec472363022",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-21T00:24:53.036536400Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-21 00:25Z, found by Sol-d50d). Worktrees on the same commit can hold Cargo.lock with DIFFERENT line endings: some checkouts are CRLF (3201 CR, 82382 bytes, raw sha 77ba7cce…), others LF (79181 bytes, raw sha a9277ae5…), with identical content (git blob a8fda1f1… = 8077d3b3:Cargo.lock). Raw SHA-256 equality then FAILS even though Cargo resolves the two identically.\n\nFor the COPY-warm rule, compare LF-normalized content (strip CR in memory) or `git hash-object --no-filters` against the commit blob, and report both the raw and the normalized results. Never copy when the normalized content differs."
+}

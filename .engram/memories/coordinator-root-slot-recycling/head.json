@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "coordinator-root-slot-recycling",
+  "head": {
+    "state": "active",
+    "chain": [
+      "5e563a1007614756b1f2ed64197ed002",
+      "67ce959b9c1847f8a9db5f2e5158ef37"
+    ]
+  }
+}

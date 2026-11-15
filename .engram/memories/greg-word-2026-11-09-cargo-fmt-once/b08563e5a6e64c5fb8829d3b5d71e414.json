@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-word-2026-11-09-cargo-fmt-once",
+    "revision_id": "b08563e5a6e64c5fb8829d3b5d71e414",
+    "previous": null,
+    "body_sha256": "fb1c527aac4a400a7e9b5e4be2205dba2d4b816beeb2f8ff8df39a790211f035",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T17:18:02.504323500Z"
+    }
+  },
+  "body": "Greg's word on formatting, 2026-11-09 about 17:16Z, verbatim, relayed by Engram::Asistant (TermAl mailbox 588693a8 #1190):\n„NIE, prosze zrobic jednorazowo cargo fmt, i dalej tego pilkowac\nto powien byc czesc procesu”\nEarlier: „niech Kimi sprawdzi regule, oba projekty powinny miec to samo”.\nMeaning, as Asistant relayed it: run `cargo fmt` on TermAl once (at 17:13Z master 8f544b45 failed `cargo fmt --check` across 436 files), then make the format check part of the normal process, the same in Engram and TermAl. Kimi checks the common rule and how to roll it out. Coordinate with open changes so no one's work is lost. It's Greg's explicit decision, so don't ask again. Not started: a STOP from Greg (#1192, 17:17Z, account change) came before any action. Resume when Greg says to."
+}

@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "linux-check-via-wsl-launcher",
+  "head": {
+    "state": "active",
+    "chain": [
+      "cf324698404d4769b9f0f7da64cc2336",
+      "463a04255d07499fb5ff5552411a0b73"
+    ]
+  }
+}

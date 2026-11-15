@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "coordinator-never-ask-greg-blocking-questions",
+  "head": {
+    "state": "active",
+    "chain": [
+      "5ccccd0ccfc04d7984a77040d3650e02"
+    ]
+  }
+}

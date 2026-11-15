@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-remote-read-no-tmp",
+    "revision_id": "ba468f4513d24e39b84b9f23b8a71086",
+    "previous": null,
+    "body_sha256": "0706bcae12c62b6455069025226caf71eaf8599bd80d722c454eed2ba9ad1623",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-20T04:19:45.926798300Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-20 04:20Z, my own slip). In a read-only SSH check on the Mac (pilot-mac), I wrote a temporary JSON file to /tmp/.fable2-state-<pid>.json and removed it in the same command. That is a write to a system temp folder outside the repository, which the \"Work only in the repository folder\" rule forbids even remotely. Rule: remote read-only checks must stream output only (pipe `curl … | python3 -c …`) and write no files at all, temporary ones included."
+}

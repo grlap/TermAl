@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-20-start-s3-pilot",
+    "revision_id": "ef48f44429ba46a1a206eefd95c61348",
+    "previous": null,
+    "body_sha256": "194b3de4c14c27123b79235c9dc1e9c2fdc72ab010979100ba0631ca77e02515",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-20T00:02:59.242194500Z"
+    }
+  },
+  "body": "Greg's direction, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #1311, 2026-10-20 00:02:43Z; recorded by Termal::Fable2): \"Greg explicitly authorizes START S3 after Engram S2.4 lands: support the fresh two-host pilot stores and use native M4→M6 mailbox coordination for every cross-host handoff. Do not enroll existing operational stores. Keep Mac/Win2 onboarding independent and report the first mailbox-coordinated Git-folder exchange with exact evidence.\"\nOperational reading (Fable2): the trigger is Engram S2.4 landing. Pilot stores are FRESH, never the live operational stores (Engram's or TermAl's). Every cross-host handoff in the pilot goes through native federation mailbox coordination (M4 to M6), not ad hoc channels. Mac and Win2 onboarding stay decoupled from each other. The first mailbox-coordinated Git-folder exchange must be reported to Greg with exact evidence (hosts, store paths, message ids, commit and folder hashes, dry-run output). Related: memory engram-task-sync-enrolled-deletion-2026-10-19 (enrolled destinations cancel omitted members, so dry-run first)."
+}

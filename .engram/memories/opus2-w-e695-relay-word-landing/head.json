@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-w-e695-relay-word-landing",
+  "head": {
+    "state": "active",
+    "chain": [
+      "f1bd63d5a1b946e7a50ca814e4ec6dd9",
+      "cad8f7764a8d427ba97ece835ebd2374"
+    ]
+  }
+}

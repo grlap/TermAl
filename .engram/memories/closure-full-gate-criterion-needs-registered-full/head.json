@@ -1,0 +1,22 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "closure-full-gate-criterion-needs-registered-full",
+  "head": {
+    "state": "active",
+    "chain": [
+      "b5616e2df1ae487388c79f388fe7563e",
+      "3f43e021bf4949059cf32c0fc02e9527",
+      "ae40a95af4134e2288d8818e4155f669",
+      "556d181c723942c0be1b8453b54daf5b",
+      "d04601387db4495ca9f3d22739632628",
+      "3b470db5073c4c2789f67fed1441e046",
+      "28e10eb6448b42e09f72357f141b041b",
+      "ad9d62b5c9cb4d66ba28e0b9d26d46c4",
+      "a48fa526b63d4a3abd86501f1071de79",
+      "1e8972c54b314c29af4b8a8c61322cc7",
+      "c0343281fcd4443885aded932f1ddb04",
+      "e2cd9ccd5ea64edf80ea6185b5375011"
+    ]
+  }
+}

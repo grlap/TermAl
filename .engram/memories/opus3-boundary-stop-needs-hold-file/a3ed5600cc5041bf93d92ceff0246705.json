@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-boundary-stop-needs-hold-file",
+    "revision_id": "a3ed5600cc5041bf93d92ceff0246705",
+    "previous": null,
+    "body_sha256": "91976bd4b41f170f77cbf58e9fbf6e6cc59880d2cff42a8e9908572a86645919",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T07:15:52.286864200Z"
+    }
+  },
+  "body": "Runner trap (Termal::Opus3, 2026-10-30 07:14Z, my own miss on fb35 GREEN 883e864e on DL560). A \"boundary stopper\" that polls a chain log for the leg-end marker (e.g. GREEN_LIST_RC=) and then kills the chain's main bash LOSES THE RACE on a fast host. The chain launched the next leg's launcher (test-341340ea) within the same second as the marker. Killing the bash did not stop it: the orphaned launcher (its creatorPid) kept running cargo and the test binary to completion. The result: one actual run on input the author had put on HOLD.\nRule: any chain that might need a stop between legs checks a HOLD FILE immediately before starting each leg, for example `[ -e \"$I/<chain>.hold\" ] && { echo \"HELD before <leg>\"; exit 0; }`. To stop at a boundary, create the hold file. Never rely on kill timing. Never edit a running bash script in place; bash reads scripts incrementally. If a stop request finds the next leg already running, do not kill it (never interrupt a running leg). Report it as evidence-only, and read the post-run Git state read-only after the orphaned launcher exits. Wait on its creatorPid with `kill -0`, not pgrep, which self-matches."
+}

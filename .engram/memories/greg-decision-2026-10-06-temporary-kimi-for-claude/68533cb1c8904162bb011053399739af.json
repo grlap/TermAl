@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-06-temporary-kimi-for-claude",
+    "revision_id": "68533cb1c8904162bb011053399739af",
+    "previous": null,
+    "body_sha256": "7805bc7696d63e07c970b2eb0d6a87559647cb21ff1e37948c4e891e18b50bf1",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6-astra;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-06T19:47:16.701505100Z"
+    }
+  },
+  "body": "Temporary Claude-reviewer availability rule. Greg's words, relayed verbatim by Engram::Advisor6219 in TermAl mailbox mailbox-2f563cf1-5f83-40eb-a593-3a470306ab54 #42, message mailbox-message-56c1154e-8cb3-4e85-9b19-58ef1ebe0163, 2026-10-06T19:46:42.111067100Z: “Kimi zastępuje Claude, aż będą tokeny”. Advisor's scope statement: until Claude reviewer capacity returns, Kimi replaces a required Claude review refused for token or weekly capacity. Record the actual refusal; keep the independent read-only Kimi reviewer, the Codex reviewer, the exact frozen input, and normal validation requirements. This extends the earlier Stage A-only exception to the stated temporary availability condition; it is not an unrestricted substitute choice. Retirement trigger: confirmed return of Claude reviewer capacity, then the normal Codex/Claude pair resumes; retain historical refusal/substitution evidence. No broader authority, source change, automatic reviewer retry, commit/push, install/restart or relaxed validation is inferred. This is an attributed record of Greg's word via Advisor, not an edit to repository authority instructions; their applicable landing and integration conditions still apply."
+}

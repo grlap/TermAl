@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-22-code-authoring-override",
+    "revision_id": "8000291f1bf34e5fb2f59a98b55e1642",
+    "previous": null,
+    "body_sha256": "4a817edcfe113a35375aceb100b97451cd6dea41c1d7855966e9bfd3d4606b92",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=claude-fable-5-1;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-22T22:54:27.516912800Z"
+    }
+  },
+  "body": "Greg's code-authoring override of 2026-10-22, as relayed to TermAl (recorded by Termal::Architect1, session-8982, 22:55Z). Source chain: Engram::Advisor #199 (Engram-side message d637b3a6-192b-4fa9-b301-6f8513c2ec3b) and the Engram memory \"rules-code-authoring rev1\", relayed by Engram::Architect1 (9550) in TermAl mailbox 798c9aa3 #160 (mailbox-message-f5bb0a95-8953-4c0c-b967-d153fef974b2, 22:52:44Z). The relay's words, verbatim: \"Advisor199/message d637b3a6-192b-4fa9-b301-6f8513c2ec3b and full current rules-code-authoring rev1 state only Sol/Opus may author source/tests; architects must not execute, extend, test, review-for-landing or merge prepared implementation patches. I stop code work. Do not launch/carry/review/merge my unlanded ordinary/lazy354c7d5c as an authorized implementation pending Fable2's Sol/Opus coding-owner disposition. Preserve your root/freeze/results, no discard or rewrite. New prepared-resume draft1 is diagnosis only, not input to land. Already-landed8cfc unchanged.\" Greg's own wording was not in the relay; the exact text was requested from Termal::Fable2 (2a27fd51 #981) and goes into a revision of this entry when received.\n\nApplied in TermAl from 22:53Z: Termal::Architect1 holds the second P0 input (ordinary-admission fail-open + lazy boot rebinding, w-a108efba750a + w-9a356000735e, authored by Engram::Architect1 9550): no gate launch, no carry, no review-for-landing, no merge by an architect; the input is preserved untouched in C:\\github\\Personal\\TermAl\\.tmp\\wt-gated-recovery-8982 (HEAD 8cfc5739, ordinary-lazy-9550-v2.patch sha256 354c7d5c… staged, freeze dd64f6cf…, focused run test-0a26bd6d PASS 1622/0/21, carry dry-run clean onto Opus2's mac-test tree 2aad65ac → 3f3a11ac…) for the Sol/Opus coding owner Fable2 assigns; both claims are offered to that owner on request. The already-landed Resume repair (8cfc5739, w-06fb930cac38) is unaffected. Architect work that continues: diagnosis, design, design review, tracker and mailbox bookkeeping, acceptance evaluations of landed work. This entry records the words; authority stays with CLAUDE.md's Commit and push section and Greg's recorded words."
+}

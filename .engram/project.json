@@ -10,7 +10,8 @@
   "folder_exchange": {
     "complete": true,
     "export_basis": {
-      "inventory_fingerprint": "66ad6796e5eb201b0662cd8084fd063ffcd41c9174212190dac5381708bab861"
+      "inventory_fingerprint": "86fbe028553c7a7e542742dc2bbeff2217d68da98df24dd1f6bf2d74b86a5eb8"
     }
-  }
+  },
+  "memory_profile": "engram-project-memories-v1"
 }

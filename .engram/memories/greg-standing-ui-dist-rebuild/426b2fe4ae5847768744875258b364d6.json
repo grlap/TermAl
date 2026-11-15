@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-standing-ui-dist-rebuild",
+    "revision_id": "426b2fe4ae5847768744875258b364d6",
+    "previous": "c2f78205498640be8f01f84ebe3ce369",
+    "body_sha256": "e8a7a500e4b0a9b2e5355dd2edb71f8a5996311d93ba18ac668c7eaac9cd1c84",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T04:28:00.842462200Z"
+    }
+  },
+  "body": "Greg's standing approval, as relayed by Engram::Advisor in TermAl mailbox b9d13887 #906 (2026-10-16 17:55:46Z), verbatim: \"Greg's standing approval in this session remains: rebuild ui/dist after each landed UI change. Apply it to master 41a3f25e after the Engram gate window, with the identity and checks reported. No TermAl host restart is authorized or needed for this rebuild.\" How to apply: after every landed UI change, the integration owner (Opus2) rebuilds ui/dist from the clean master tip outside any gate window (ours or Engram's), and reports the build identity plus greps for the landed changes. It grants no restart.\n\nAsistant, 588693a8 #1093 (2026-11-09): his earlier approval, not withdrawn, stands, and a change of relaying session doesn't void it; don't re-ask, and don't read his silence as new approval. Act within the original scope."
+}

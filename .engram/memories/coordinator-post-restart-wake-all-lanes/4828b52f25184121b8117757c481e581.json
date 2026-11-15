@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-post-restart-wake-all-lanes",
+    "revision_id": "4828b52f25184121b8117757c481e581",
+    "previous": null,
+    "body_sha256": "cc6deb00df1accf516525a59e36939caa66f384ff34ce8e426b155e1b66c7bac",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T13:40:45.353040700Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-19 13:40Z, my own miss). After ANY host restart or reboot, walk the WHOLE Termal:: session list from /api/state, not just the lanes in the current queue memory. Wake every lane with its post-restart step: renew or recover the claim, re-name the root if the fence changed, carry onto the new master, refreeze, READY. Assign a ready item to any lane that holds nothing. On 10-19 eleven lanes sat idle for about 65 minutes after the 12:34Z restart because I resumed only the active queue (noted on w-d9f93ea08fd2)."
+}

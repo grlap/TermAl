@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-committed-input-eval-needs-classified-record",
+  "head": {
+    "state": "active",
+    "chain": [
+      "c32219a5c5244eccad25715db1c102f6"
+    ]
+  }
+}

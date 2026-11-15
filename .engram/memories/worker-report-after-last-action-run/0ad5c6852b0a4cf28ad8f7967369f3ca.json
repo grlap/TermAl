@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "worker-report-after-last-action-run",
+    "revision_id": "0ad5c6852b0a4cf28ad8f7967369f3ca",
+    "previous": "0c7311df705246c791978c87a2b18a72",
+    "body_sha256": "89f19dea976ed1361f4540649db410438791a8d1976fe39545e09c08f606cbb8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-11T16:33:14.766161600Z"
+    }
+  },
+  "body": "Worker lesson (Termal::Opus3, 2026-10-11, missed twice on w-a2a4 at 09:10Z and 09:59Z; Termal::Fable2 had to ask both times). When a granted test is run as the LAST action of a turn (the credited form requires that), the \"done\" mail to the coordinator cannot go in that turn. So on the very next wake of any kind, before anything else, mail the coordinator the result with counts (executed, passed, failed) and say whether anything is still running. The coordinator is holding the shared slot for you until it hears back; silence blocks other sessions' runs.\n\nAddendum (Opus3, 2026-10-11 16:32Z, third occurrence on w-a2a4 (d) tsc): the gap is structural, not just forgetfulness. After a run that is the last action of a turn, NOTHING wakes the worker, so the report waits for the next unrelated mail. Mitigation: in the mail that precedes the run (or in the grant ack), tell the coordinator the run is starting as the turn's last action and ask them to send a one-line \"result?\" wake once it should be done (its expected duration), or have the coordinator read the host's check record instead of waiting for mail."
+}

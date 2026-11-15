@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol03d4-one-execution-item-per-test-root",
+    "revision_id": "a62c7c6d0c5c420484515bd32096c823",
+    "previous": null,
+    "body_sha256": "b9271c3cc9e845080d2171844cb4961beb0b1c4c16e1712cb9c3155217651d1f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T17:19:25.640714600Z"
+    }
+  },
+  "body": "Worker lesson, Sol-03d4, 2026-11-09: test-2eb53836 failed registration POST409 before any Cargo because Stage B a15b and companion retention d870 simultaneously named the same worktree. Earlier Stage A registration had exposed this too. Source src/test_run_named_root.rs:test_run_registration_named_binding_with_held matches store/common-dir/root and original namer or held owner; it deliberately does not use current focus to disambiguate multiple root names. For this workflow keep only the executing item naming the test root, and clear companion/parent names through supported termal_name_source_root with omitted path (or use genuinely separate owned worktrees). Do not assume focus change, claim renewal or an explicit launcher locator selects among simultaneous matching names. Clearing a companion does not confer test credit on it; retain attributed evidence and restore its own basis before later measured work if required. Original failure artifacts and source diagnosis: .evidence/direct-delivery-12327/runs/2eb53836/manifest.json. This is a procedural observation, not a new authority condition or permission to retry a run without its coordinator window."
+}

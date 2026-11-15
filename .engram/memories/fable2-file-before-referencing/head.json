@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "fable2-file-before-referencing",
+  "head": {
+    "state": "active",
+    "chain": [
+      "f5b41848ded44e36822ffd43b832f640",
+      "b77dfb4e26674b19892af65d6f0e728b"
+    ]
+  }
+}

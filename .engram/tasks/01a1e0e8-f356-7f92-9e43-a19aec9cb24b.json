@@ -1,0 +1,32 @@
+{
+  "id": "01a1e0e8-f356-7f92-9e43-a19aec9cb24b",
+  "external_ref": "engram:w-f67c6b3c3f04",
+  "title": "Durable READY integration queue keyed by the exact package, with wake and restart recovery (no expiring custody offers or repeated evidence assembly)",
+  "outcome": "Durable READY integration queue keyed by the exact package, with wake and restart recovery (no expiring custody offers or repeated evidence assembly)",
+  "acceptance": [
+    "A READY package (exact commit, gate, review and task evidence) enters a durable integration queue keyed by that exact package, and survives wakes and restarts. There are no expiring custody offers or re-offers, and the evidence is not assembled again by hand.",
+    "Every existing landing check stays: fast-forward only, master and origin verified, the gated commit, the audit for authority files, and the install from the exact tree. A held package reports its release condition, and a refusal names its check, the observed values and a remedy.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed tree that lands."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "integration",
+    "process-simplification",
+    "refusal-reasons",
+    "remote-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e0b1-c86c-79c3-bb16-6831e8936a44",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

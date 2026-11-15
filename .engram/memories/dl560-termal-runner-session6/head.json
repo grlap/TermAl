@@ -1,0 +1,16 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "dl560-termal-runner-session6",
+  "head": {
+    "state": "active",
+    "chain": [
+      "a9a164a026314b35bf2b528b0aa6e175",
+      "0f0755666f764d3ca96bdb5fffef093e",
+      "92b6f3d3ef2048b69d23ec7eddb51161",
+      "f8d16589b0cf430d9648a2431003e027",
+      "5f3ddb888ab4441f89b3641e0e715dc4",
+      "22e4fefa05c841f78f4185a1fade09eb"
+    ]
+  }
+}

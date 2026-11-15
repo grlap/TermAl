@@ -1,0 +1,18 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "rules-handoff-continuity-2026-11-13",
+  "head": {
+    "state": "active",
+    "chain": [
+      "31c82a441f354cf097dad34577a78532",
+      "d7c2bb82847f4a66b11ff5dd0dadac0d",
+      "1c7c0895d40f423b8f2e4da1519f93bc",
+      "e032dea4361b492a9b8e7ede84f91b90",
+      "3b565460b6004939bdb9a28415a10b01",
+      "f6acdb9a4b69434383f3c10773c8c98b",
+      "0e71faa2f633435390779a6a7b004071",
+      "401a3256c342484f81adebfd0da31dc3"
+    ]
+  }
+}

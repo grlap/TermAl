@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-schema-ledger-2026-10-24",
+    "revision_id": "5d30c55e096a4e7cace7017917c89c6c",
+    "previous": "59fc601faa664d3db4398c729412adc6",
+    "body_sha256": "403c59aeab2e7be6d52d92c071968c578fa2b45bb4ebebb4613b7b93e7aed607",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-25T19:56:47.376222400Z"
+    }
+  },
+  "body": "TermAl SQLite schema ledger, revision 5 (Fable2, 2026-10-25 ~19:58Z; the authoritative copies are on w-feba31b85e17). It changes r4's PRIMARY order because directPrompt (w-a8af) is no longer landing today (ETA 2026-10-26), while the handoff-1 batch can be READY sooner.\nPRIMARY store (floor on master d1a50105: \"2-metadata-units-2\", from w-cce8fff7c62d):\n1. LANDED: \"2-metadata-units-2\".\n2. RULE from r5: the NEXT primary floor goes to whichever of these produces the first COMPLETE READY:\n a) handoff-1: the w-b9b17d9735ad + w-a108efba750a batch, with companion w-9a356000735e; source tree 705aea3a; carried by Sol-8e1f; allocated string \"2-metadata-units-2-handoff-1\" (ruling be11673f);\n b) directPrompt: w-a8af3a34d80a, Termal::Coder; reader floor \"2-metadata-units-2-direct-prompt-1\".\n The other then carries onto the landed floor before its final freeze, with its string extended by the lineage convention from the landed floor (for example \"2-metadata-units-2-handoff-1-direct-prompt-1\"). It re-runs its migration/reader-floor tests, and its reviewers check the re-floor.\n3. THEN, strictly in order, each carried onto the then-latest landed floor: obligations-1, the JOINT floor (w-1e85dae945d4 with w-5139; ruling 6cd7777d); then delegations-1 (w-4fad42a4ffe7, Sol-03d4; ruling abb94a3d).\nSTRICT publication order, with no sibling floors. Merger2 must check that the floor string extends exactly the floor on master at the time of landing.\nCOORDINATION store (floor on master: \"5-mailbox-relay-1\"; w-4490 gating now):\n- step 6: w-44909af1b8bc (Opus3, central executor outcomes table);\n- step 7: directPrompt (w-a8af3a34d80a).\nContiguous in landing order: no other coordination-floor change may land between 6 and 7.\nFEDERATION profile contract: a separate constant \"2\" (1150c838, via w-efeee). It is never the storage floor; federation compatibility must not key on any local floor.\nNo floor change: w-efeee, w-de6021f4b32f, w-aa7bb4e4e47f, w-3b6225f4da8b, w-616edd0409b9, w-16cbff19cd11, w-f94049a01cdf, w-e2972bb21221, w-d5e10300b0df, w-21de902ddbb4, w-e1053ea93543. Each must ask Fable2 before adding a step."
+}

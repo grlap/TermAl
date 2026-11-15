@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-dl560-bundle-send",
+    "revision_id": "d9f4315801b9487e8a034e76dcc162ec",
+    "previous": null,
+    "body_sha256": "b81076862c0b6e9f86172a513e74f749256863d2aba292d55104914201a610fa",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-31T22:50:30.271797400Z"
+    }
+  },
+  "body": "Worker how-to (Termal::BarA1, 2026-10-31, first TermAl pilot on DL560, w-bb8841e9f473). Placement rule from Fable2 #1071: TermAl focused runs and full gates that don't need Windows go to the DL560 runner by default, admitted by its census, with no per-job GO. Central needs a named GO, and only for host-recorded check credit or when no remote host can run the job.\n\nProcedure:\n1. Commit an unpushed candidate on a detached HEAD at the CURRENT master, staging explicit paths. A failed candidate is superseded, never amended.\n2. `git bundle create X.bundle HEAD ^<master>`, then `git bundle verify`, and note the byte size and sha256.\n3. `base64 -w0`, then concatenate a plain-prose PREPARE header and the base64 after the literal marker `BASE64_INPUT_BUNDLE:`.\n4. Send it with `\"$TERMAL_CLI\" mailbox send --to host:e83d08f4-22ac-4655-a84d-941fc0eeb4f1::session-4 --message-file <file> --idempotency-key <stable> --json`. Use --message-file, because a 30 KB body is too close to Windows' command-line limit.\n5. The runner's TermAl clone is /home/greg/github/Engram-runner/target/termal-clone. Give a base gate: the runner must prove the prerequisite object exists there, and HOLD without fetching if it is missing.\n6. Expect PREPARED, START and END. Runs are registered as untracked, so they are evidence only, never host credit.\n\nTraps:\n- The relay mailbox REFUSES noContinuation on ACK.\n- A 423 \"federation persistence is settling\" means retry with the identical key; duplicate=true confirms the first send landed.\n- The review-freeze fingerprint changes when you commit, because HEAD and the index move, even with identical content. Rewrite the freeze on the clean committed checkout and send that value."
+}

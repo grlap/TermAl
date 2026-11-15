@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-perf-gate-change-approved-2026-11-04",
+    "revision_id": "f75e9aeb886c46b08df5bbd624694c46",
+    "previous": null,
+    "body_sha256": "6c04bef8c919e61861b4e68230068ed08ebecbbe6ebc8673d192b3bc4b67a1aa",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T06:28:53.453984400Z"
+    }
+  },
+  "body": "Greg's word on the state_lock_parallel gate, relayed by Engram::Asistant, mailbox 588693a8 #302, 2026-11-04 06:28Z: „Do testów się zgadzam. Raportowac limity czasowe, sprawadzac inne rzeczy.” As relayed: approved option: keep the test and its functional checks; the four time measurements report rather than assert; protection rests on deterministic work and ordering tests; the missing test is designed and reviewed; the loss of automatic detection of slowdowns without a change in work is acknowledged. The product task on snapshots and the lock stays. EO stays first. This supersedes the hard-gate word of 2026-10-27 and greg-hang-limits-own-judgement-2026-11-04 on this gate only."
+}

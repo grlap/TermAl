@@ -1,0 +1,14 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "closure-fulls-filler-only-2026-11-13",
+  "head": {
+    "state": "active",
+    "chain": [
+      "e03ddbd4bce641b09580b96f84c0e1fa",
+      "3ac5aa1d87fb45fe88944c6a11f6856e",
+      "0cf62a5ec4b34d8b8706adc0e5bba5a5",
+      "a10bb6704a13476a962330ee7a31b0b9"
+    ]
+  }
+}

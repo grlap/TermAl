@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rules-handoff-continuity-2026-11-13",
+    "revision_id": "d7c2bb82847f4a66b11ff5dd0dadac0d",
+    "previous": "31c82a441f354cf097dad34577a78532",
+    "body_sha256": "ddfda677cf742fcb03fdd98c729205065c1ac2d8ca19d903c7bf747ea008e059",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T03:37:15.088591Z"
+    }
+  },
+  "body": "Handoff and continuity rules for TermAl (Termal::Fable2, 2026-11-13 at about 03:40Z, rev 2). They answer Greg (Asistant 588693a8 #1497/#1498/#1500): „reguly przekazywania dalej sesji musza byc precyzyjne”.\nCAUSE (corrected with Opus2 #5804): the landing train was NOT stalled. FULLs were running on runners that the session list doesn't show as active: DL560 Codex 6, Central and s4, with landings every ~40 min. The real gaps were these. (a) The coordinator left free Sol/Opus coders without assignments. (b) c593's R1 request never reached Opus2. (c) Mail sent to a listed display name routes to a domain mailbox and doesn't wake the recipient (w-ee0454f76b19).\nRULES, with no new gates:\n1. WHO to WHOM. Coordinator → coder: assignment. Coder → Opus2: READY or a placement request. Opus2 → coder: GO or a result. Coder → coordinator: done or blocked. Coordinator → Greg: only via Asistant.\n2. TRIGGER. Every message ends with \"NEXT: <owner> <action>\". Whoever finishes a step starts or requests the next in the same turn. When a coder finishes an item, the coordinator assigns the next ready item in that turn.\n3. DELIVERY (rev 2, after Asistant #1503). Address by the exact native id from the start: session-N, or host:UUID::session-N for remote roots, NEVER a display name. A receipt isn't delivery, and durableButNotWoken alone doesn't prove a missed wake: check the exact messageId's current status with termal_read_mailbox_message. If it's still unresolved, retry only with the IDENTICAL message, key and route. Never switch the route or mint a new intent to replay it. If a message went to a wrong route, leave it there. Tell the recipient natively that it exists, by mailbox and message id, without restating its content. Then the recipient reads and answers it.\n4. NO REACTION. After 20 min, ping once natively. After 40 min, the coordinator reassigns or takes it over and records why.\n5. PARALLELISM. A running FULL never blocks reviews, author runs on other runners, or code writing. Opus2 places them alongside, within the Central budget. Opus2 confirmed this as in force (#5806).\n6. WATCHDOG. Fable2 runs a 30-min cron at :13 and :43 that checks every coder has work or a named next owner, and assigns from the ready Greg-reported backlog."
+}

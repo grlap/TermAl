@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "windows-b-termal-runner-address-public-2026-11-15",
+    "revision_id": "6995df6e8bde41f1a8d6c9418d77bc07",
+    "previous": null,
+    "body_sha256": "64a71a0c8b87dd49f398d210988e296045b59c7d3232f304efc1fb3152476cb8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-15T17:45:54.460653400Z"
+    }
+  },
+  "body": "The Windows B native runner for TermAl jobs is \"Engram Runner (Codex)\", session-9 on host 932a546b-4ab2-49a7-a5cb-499cbfac2eab. Workers send to it as host:932a546b-4ab2-49a7-a5cb-499cbfac2eab::session-9; its relay principal 0c7cba9c… works as a send target only for Termal::Fable2 (other callers get 404). CLONE (since 2026-11-01 ~00:01Z, w-3551b1d9102f): F:/GitHub/Personal/Engram-runner/t, with jobs t/j/<8> and scratch t/.tmp/<x>/{h,a,l,t}. Excluded through Engram-runner .git/info/exclude (/t/), core.longpaths=true, push disabled, retention in .evidence/termal-short-clone-retention.json. The OLD clone F:/GitHub/Personal/Engram-runner/target/termal-runner-clone is INVALID for gates: Windows path-length limits plus the 'target' ancestor that the workspace watcher ignores (w-a259a47bb144) gave 1273 environment failures in the decd run test-4d0311df. Launches MUST be standalone: the child environment has TERMAL_BASE_URL, TERMAL_SESSION_ID and TERMAL_CLI removed, giving UNTRACKED (docs/test.md:355); otherwise the host refuses with a 400 (w-5e2f3fba987a). The fingerprint is root-bound, so use the runner's LOCAL fingerprint with commit+tree as the cross-host identity. Limits: 1 full alone, or 2 focused."
+}

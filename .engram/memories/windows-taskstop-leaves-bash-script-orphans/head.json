@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "windows-taskstop-leaves-bash-script-orphans",
+  "head": {
+    "state": "active",
+    "chain": [
+      "9701b6d75e0843cc98c74a75b0922b28"
+    ]
+  }
+}

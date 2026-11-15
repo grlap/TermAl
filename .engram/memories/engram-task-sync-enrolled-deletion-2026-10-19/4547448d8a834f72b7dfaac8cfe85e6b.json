@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "engram-task-sync-enrolled-deletion-2026-10-19",
+    "revision_id": "4547448d8a834f72b7dfaac8cfe85e6b",
+    "previous": null,
+    "body_sha256": "8109ccc41870cf8314984c490c8d83ed2397f0b39a82255880c3fa2323587ee7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T23:58:03.325184200Z"
+    }
+  },
+  "body": "Engram cross-host task sync, a behaviour change noted for TermAl's pilot (Engram::Fable to Termal::Fable2, TermAl mailbox ebe242f7 #3835, 2026-10-19 23:57Z; Engram S2.3 r4 docs edit, freeze b9e1ceee). From S2.3 (folder deletions), \"missing task files are not deletion\" holds ONLY on a first import into an empty, unenrolled store. On an ENROLLED destination, omitting an eligible member from the folder CANCELS it and PERMANENTLY retires its id from the exchange. So a task file lost in a merge on an enrolled host is not harmless: always review with `--dry-run` before applying a folder import on an enrolled TermAl host. Cancelled or superseded tasks carried in the folder remain explicit documents. Reference: Engram docs/features/cross-host-task-sync.md and task-planning-text.md#edits-on-an-enrolled-destination."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "closure-full-gate-criterion-needs-registered-full",
+    "revision_id": "3b470db5073c4c2789f67fed1441e046",
+    "previous": "d04601387db4495ca9f3d22739632628",
+    "body_sha256": "c05aec6e595fb5affcf609591baaf4d38a5b27c30d759fa515886e68037afc92",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T07:07:02.608210900Z"
+    }
+  },
+  "body": "REV 4 (Termal::Fable2, 2026-11-13 ~07:00Z). CURRENT RULE. Revisions 2-3 (the binding-drop workaround) are WITHDRAWN. Kimi::Consultant objected (TermAl mailbox 852a55c9 #235), and I had committed that an objection stops it.\nWhy: Greg's „Tak. Zdalny test jest równowazny.” (Asistant 588693a8 #1527, citing #1414) makes a remote FULL equal when it is ASSOCIATED, as host-minted verification, with the exact code and criterion. It does not license removing a test binding. A quoted holder note is asserted text, and dropping a binding after the evidence arrived is a waiver needing Greg's explicit word on the exact case. Engram also treats a binding drop as weakening (acceptance-evaluation.md:589-600).\nRULE for a landed item whose test-bound full-gate criterion has only a remote or legacy landing FULL as evidence:\n- Keep its criteria and bindings unchanged.\n- Do not rerun a Central FULL just for credit.\n- PARK the criterion until Engram's remote_verification_record association (Engram item w-180d6f507470, use landing_gate) is live and credits that FULL.\n- Before relying on it, verify the association path in the actual build and store.\n- Credit requires: FULL mode, standard launcher, terminal PASS on all stages, no newer non-pass, complete equal before/after source_id, exact landed identity, and every required platform leg.\nRev 1's \"run a second registered Central FULL\" also stays withdrawn.\nAffected 2026-11-13: w-e1053ea93543 C4, w-aa7bb4e4e47f C5, w-70ed4ca2bb12 C2. Each has my withdrawal note and the bindings restored.\n\nREV 5 addendum (07:02Z). Remote credit needs BOTH pieces live:\n- Engram w-180d6f507470: sealed, not landed; at the front of Engram's train, ETA installed around 10:30-11:30Z.\n- TermAl K3 w-48c4a207f226 (P0): sends remote_verification_record. Its reviewed candidate e45d6639 is on an old base. c593 re-claims it and carries it, then Opus2 lands it next after combo87.\nBoth must be running on the sending and receiving hosts, which means the coordinated all-host restart.\nK3 criterion 6 says old runs are NOT credited retroactively. So each parked item (e105, aa7b, w-70ed) needs ONE fresh DL560 FULL with the association after both are live, and none on Central. I've asked Engram::Fable whether w-180d agrees.\n\nREV 6 correction (07:08Z), from c593 #1821. K3's reviewed candidate e45d is only the S2b slice (test-request custody plus a reader-floor raise). Actually SENDING remote_verification_record is separate, later K3 work; c593 is mapping its remaining scope. So remote closure credit is NOT near 11:30Z. Parked closures wait longer, and still with no Central rerun.\nS2b's landing is held by Opus2 until Engram::Fable concurs on this plan (proposed in ebe242f7 #7783): land and install after \"rollback hold ended\"; the floor raise goes live at the coordinated all-host restart as its Greg-act window."
+}

@@ -1,0 +1,33 @@
+{
+  "id": "01a1deae-9856-7c90-aa5c-5d6c9d348c2e",
+  "external_ref": null,
+  "title": "Preserve unfinished evidence cause when an evaluator child session is missing",
+  "outcome": "A missing evaluator child publishes both the missing-child outcome and the already captured unfinished-evidence infrastructure cause, without inventing a criterion verdict.",
+  "acceptance": [
+    "When recovery is unfinished and the child outcome is Missing, result.summary preserves the phase/cause together with the missing-child outcome.",
+    "Unknown or retired tracker writes and active submission ownership retain their current precedence and no verdict is fabricated.",
+    "An observable terminal-publication regression covers the Missing outcome, bounded output and parent-visible result."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "blocks-engram-memory-sync",
+    "cross-project",
+    "design-rule",
+    "evaluator",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1de3a-abf6-7512-a7b5-27e5e342bba4",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

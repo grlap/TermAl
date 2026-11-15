@@ -1,0 +1,35 @@
+{
+  "id": "01a1dea7-9e8f-7af0-9c45-742a654d4cf5",
+  "external_ref": null,
+  "title": "Make the malformed-identity-after-shutdown test reach SourceId::validate",
+  "outcome": "The shutdown regression for malformed observation identities includes a case that passes the early shape checks and fails only inside SourceId::validate, so a regression that accepted or relabelled a malformed identity under a cleared or cancelled capture scope would be caught.",
+  "acceptance": [
+    "capture_shutdown_regressions::a_malformed_observation_identity_stays_malformed_after_host_shutdown (or a sibling test) adds at least one identity that reaches SourceId::validate and fails there, for example a tree that is not 40 lowercase hex, an invalid change status or unordered submodules, for both a sighting and a source-change baseline, with and without a stopped capture, and asserts the malformed refusal.",
+    "The focused capture_shutdown_regressions tests pass."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

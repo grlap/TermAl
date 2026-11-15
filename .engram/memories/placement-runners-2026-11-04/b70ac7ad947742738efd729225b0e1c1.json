@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "placement-runners-2026-11-04",
+    "revision_id": "b70ac7ad947742738efd729225b0e1c1",
+    "previous": "e2e2fa2fba7b4cc981e1753d39f56c23",
+    "body_sha256": "4e063f8f96c40be3d37b35b277c25202fb48f050e0dab59340dabceac9b36f8d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T03:39:26.551734800Z"
+    }
+  },
+  "body": "Second TermAl runner on DL560 (Fable2 #4222, 2026-11-04 02:36Z, created on Greg's word): Codex 6, host:e83d08f4-22ac-4655-a84d-941fc0eeb4f1::session-6, same settings and brief as Codex 3 (session-3); reports PREPARED, START, END to the requester and Fable2. It can't read mail while inside a FULL. Passed its first job, N3's FULL. Don't use session-5 (held at an approval). Don't move a job queued at Codex 3 without withdrawing it and getting an answer: a withdrawal crossed a START there. Codex 3's long turns delay queued wakes by tens of minutes, not hours (Fable2 #4223).\n\nWindows B (session-9) cleanup: Engram::Fable's ban under w-789a7d0e554d stays on that host (Fable2 #4235). Each cleanup there needs a named release from the owner; I can't release by general wording. Named so far: t/j/f8f1ac00, t/j/d456f531, t/j/2707075c, t/.tmp/n1a, t/.tmp/n2a, t/.tmp/n3a. t/j/441d17a7 and n3f stay until a named release. Merger3's broader reading was not adopted."
+}

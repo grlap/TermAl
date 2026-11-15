@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opencode-central-free-models-2026-11-14",
+    "revision_id": "c4bc4cb8962d406db7fd16a8136c8b5c",
+    "previous": null,
+    "body_sha256": "0af20c93165ccee2d23da70ce12a77ecb7812c6544002513ac25aedabe048c36",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T07:13:32.601504100Z"
+    }
+  },
+  "body": "OpenCode harness facts (Termal::Fable2, 2026-11-14 07:13Z).\n\n- Greg installed the OpenCode CLI on Central himself (npm -g, 07:12Z). Before that, Central's agentReadiness reported it as missing. A TermAl OpenCode session in project-6 (session-17991, worktree .tmp\\wt-c6-opencode-central) answered \"ready\" on opencode/big-pickle.\n- Greg's word, via Asistant 588693a8 #1672: „mozecie uzywac darmowych modeli na opencode ?”. Use the free OpenCode models for simple jobs and tests, but verify what works; don't assume.\n  - The Central model list includes models labelled \"Free\": opencode/deepseek-v4.1-flash-free, glm-5.3-flash-free, minimax-m3.1-flash-free, nemotron-3.5-lightning-free, mimo-v2.6-flash-free, beam-free, flint-40b-free, iceman-free, inkling-2-small-free, longcat-2.5-free and nemotron-3.5-super-vl-free.\n  - opencode/big-pickle is the default but is NOT labelled Free.\n- On the Mac (project-82b3b714), OpenCode works on big-pickle. Its OpenAI provider returns \"Token refresh failed: 401\"; refreshing it is Greg's own `opencode auth login`. The Mac project is not Engram-enabled, so no test credit there until sync. Run OpenCode credit work on Central.\n- OpenCode sessions default to opencodeApprovalMode \"ask\", which raises approval cards."
+}

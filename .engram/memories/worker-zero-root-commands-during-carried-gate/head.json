@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "worker-zero-root-commands-during-carried-gate",
+  "head": {
+    "state": "active",
+    "chain": [
+      "d2620266ca434172b08d9d261f4d9d5d",
+      "e29c0e9f86db4bb582623bda68f327e5"
+    ]
+  }
+}

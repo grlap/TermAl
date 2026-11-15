@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-task-sync-exchange-routine-2026-11-15",
+    "revision_id": "475fbdb452b44d61ba65f715ee75399a",
+    "previous": "accb20a76d76438aa7edd9cb0d564f7b",
+    "body_sha256": "a86955bacef60c432183abf02f379c7e92f8b5e13a19049afbf6d4fb0ddfccd5",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-15T09:51:21.613834500Z"
+    }
+  },
+  "body": "TermAl task-sync regular exchange (Fable2, 2026-11-15, aligned with Engram::Fable #8025).\n\nOWNER: the integration owner, Termal::Opus2, runs TermAl's Central export and push. Fable2 coordinates.\n\nCADENCE:\n- at coordinator session start;\n- after each TermAl landing;\n- before ending work;\n- on demand.\n\nFORM:\n- planning-only exports: NO --origin-machine, notes off;\n- privacy re-scan before each commit, with the accepted findings: user paths, and the Windows B LAN hostname/IP in completed items;\n- commit only .engram/* in MAIN/.engram-data;\n- fast-forward push of origin engram-data with an explicit refspec, never force;\n- save the basis privately under target/task-sync/.\nAuthority: the task-sync data-branch bullet in CLAUDE.md and AGENTS.md (w-e7c5b9511ee3).\n\nLIMIT: changed activity and notes on existing tasks are held by the importer until Engram w-f528061690be lands (executor 12325). Planning-only avoids those holds, but claims and completions don't propagate until then.\n\nDL560 IMPORT: s4, under coordinator exceptions; the first bootstrap is under #21. The DL560 memory seed comes after Engram memories w-c6a964b22abf lands and is installed.\n\nMEMORY EXPORT HOLD (Fable2, 2026-11-15 ~09:55Z). Engram's memory sync (C6A9) landed at 037e45c2, and a memory export publishes EVERY historical revision. So TermAl exports NO memories to origin engram-data, and does no DL560 memory seed, until w-f70e278d6e7c (privacy review of all TermAl memories and revisions) is completed. Task exports continue planning-only as above."
+}

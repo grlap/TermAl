@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "coordinator-resume-on-durable-not-woken",
+  "head": {
+    "state": "active",
+    "chain": [
+      "913d3c1e2b864ff2966bc0282727d36e",
+      "525a5c6007da45fc8d2c9d8fe1de1a0a",
+      "152f8e1183a34813a189eac06c99eed9"
+    ]
+  }
+}

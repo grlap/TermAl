@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-ready-before-launch",
+    "revision_id": "ca92c782be244c50ab7293695a9ebdad",
+    "previous": null,
+    "body_sha256": "1acf88b822a38fb1ed4ecb98b0680fd9a911fefc342c80a0a59b507552ce29d6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-11T20:47:38.909346Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-11 20:46Z, learned from my own miss). Send Engram::Fable READY (or START) BEFORE telling the Merger \"LAUNCH NOW\" for any TermAl full gate, and wait for its ack or check that no Engram full gate has started. At 20:45:44Z TermAl's w-cfcf gate and Engram's w-30c2 gate nearly launched together, because I had sent the Merger LAUNCH NOW at 20:43Z without a READY to Engram. Engram held its gate in time. First launch wins; announce before launching."
+}

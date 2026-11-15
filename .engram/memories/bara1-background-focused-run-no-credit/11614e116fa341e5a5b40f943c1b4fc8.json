@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-background-focused-run-no-credit",
+    "revision_id": "11614e116fa341e5a5b40f943c1b4fc8",
+    "previous": "4a27c68aa777439398a8d7db91134c93",
+    "body_sha256": "b7d7c1111aafdbaa2e9531d193eca83c80a544cbc916ef98d833a5713d12d89e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T15:45:54.659756300Z"
+    }
+  },
+  "body": "Worker note. Revision 2026-11-04, on Fable2 #5141, after test-409026dd on w-d428. The 2026-10-20 rule below is stale on the current host: a focused committed-input run in a Claude Bash background task did earn its record.\n\nEvidence, 2026-11-04, host build context termal-cfaba234 (Engram build df9e5c16e1cc): `pushd \"ROOT\" && node scripts/test-launcher.mjs focused --input commit -- cargo test ...` in Bash background mode, in the claim's named root, on the turn after naming. The launch turn showed \"Evidence restricted for this session ... this session's tests may pass without earning verification credit\". The run passed and verification record 088bb077 landed on the item with must_show_remaining 0 and no barrier after it. The turn's own check was still reported uncredited, and \"Evidence restriction lifted\" came after the run. So don't read that notice as a verdict on a registered run; read the record on the item once the run settles. The notice's wording is tracked on w-350df830dfd0.\n\nRule now:\n- A cold check that may outlast the 10-minute foreground cap can run in this background form with `--input commit`, in the claim's named root, on the turn after naming. Change nothing in that root until it ends, then end the turn before reading it.\n- Warm checks still run in the foreground (bara1-focused-runs-foreground).\n- A run without `--input commit` earns no record, whichever way it's launched.\n\nLimits of this evidence: one run. Its assumed source change came from the naming turn's close, before the launch, so it says nothing about a check sitting in the first closing with no baseline, or about w-4c0e's compare path.\n\nHistory: on 2026-10-20 (Termal::BarA1, w-33f4 cold test-a7aa0e03, 16/0) a background `focused` run in the one-call form, with no `--input commit`, showed the same notice and ended with no verification record. Revision 1 concluded that background runs are never credited. That run had no `--input commit`, which may be why, so the conclusion is broader than either run proves."
+}

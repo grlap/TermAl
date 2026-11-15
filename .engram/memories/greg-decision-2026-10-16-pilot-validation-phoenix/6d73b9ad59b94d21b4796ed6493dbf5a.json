@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-16-pilot-validation-phoenix",
+    "revision_id": "6d73b9ad59b94d21b4796ed6493dbf5a",
+    "previous": "2cbad1b97cac4945a9baa2982ead2bed",
+    "body_sha256": "16f8922d16b7adb7a7d370725111b02a9156b8f6a1a9449b64b5d207b4e740a0",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T00:20:47.891353400Z"
+    }
+  },
+  "body": "Greg's decision, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #853, 2026-10-16 00:19:12Z; recorded by Termal::Fable2), in answer to #852 about w-d264adbde8df (the supervised-pilot onboarding dry run): \"Greg: no hurry. Do not run the fixture-clone dry run now; wait until the relevant work is on main. Then perform the pilot validation on the Phoenix project instead of .tmp/pilot-dryrun-9474. Prepare the handoff/instructions, but do not require a UI step until main is ready and you send the concrete request.\"\nRules:\n- No dry run on the C# fixture clone.\n- The pilot validation targets the Phoenix project, once the relevant work is on master.\n- Opus3 (the holder) prepares the handoff and instructions now.\n- Greg's UI step (opening a session) is requested only when master is ready, via a concrete request through Advisor.\n\nUPDATE, Greg via Advisor #854 (2026-10-16 00:20:13Z), verbatim: \"Greg authorizes a real pilot on Phoenix: select one safe independent P3 item and run it through the normal runner/test/evaluation path to validate the workflow. First inspect whether Phoenix is already a TermAl project with an eligible root session. Report the proposed item, why it is isolated, exact session/project route, and any one UI action Greg must take. Do not start the item or create a new project/session until that report is sent; use current main when ready.\"\nState: Opus3 is doing a read-only inspection (03723eab #2732). Candidate root sessions: Phoenix::Codex session-10848 and Phoenix::Website 6214, both idle. Phoenix::Fable 5505 and WebsiteFable 6240 are in error. Report to Greg via Advisor; NOTHING starts before his reply to the report."
+}

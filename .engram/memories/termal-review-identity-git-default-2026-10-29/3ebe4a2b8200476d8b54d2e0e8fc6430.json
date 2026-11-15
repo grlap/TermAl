@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-review-identity-git-default-2026-10-29",
+    "revision_id": "3ebe4a2b8200476d8b54d2e0e8fc6430",
+    "previous": null,
+    "body_sha256": "2e9d5459993c12d1be001b2bc1de4b601eff0c708e928b2a33642b9b30593b3e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T01:10:15.499510700Z"
+    }
+  },
+  "body": "Greg's decision, Advisor #2425 at 01:09:31Z on 2026-10-29, verbatim: \"Greg: „Sugeruję nie używać tego. Polegamy głównie na Git.” Traktujcie Git identity jako domyślny zwykły przepływ i nie wymagajcie review identity capture. Doprecyzujcie tylko nieliczne wyjątki o rzeczywistej potrzebie raw-byte; przygotujcie małą zmianę procedury/narzędzi zgodnie ze wspólną rekomendacją.\" This answers the joint TermAl and Engram recommendation of Advisor #2423 and Engram::Fable's copy.\nTermAl RULE (coordinator Termal::Fable2):\n1. Review identity capture (`termal_review_identity`, the raw-capture engine) is NOT required anywhere: not in reviews, freezes, intake or landing.\n2. DEFAULT input identity is Git. Freeze a FULLY STAGED index, check `git diff --quiet` (worktree equals index), `git ls-files --others --exclude-standard` is empty, and record `git write-tree`, the tree id, on the item. Every reviewer reports that tree id at the start and end of its review. The landing tree must equal it. Remote gates follow joint record revision 4 (remote-test-ref-gates-evidence-only-2026-10-28).\n3. The launcher's own automatic before/after fingerprint stays (CLAUDE.md test-ref bullet and launcher behaviour); nobody computes or compares it by hand.\n4. EXCEPTIONS, where raw identity MAY be used: only when the change touches (a) files whose bytes depend on Git normalisation (eol attributes, clean or smudge filters), (b) executable bits or file modes, (c) symlinks, or (d) nested repositories. The owner states the reason on the item.\nNote: TermAl's .claude/commands/review-changes.md does not mention review identity capture; its use was lane practice. So no command-file change is needed on the TermAl side."
+}

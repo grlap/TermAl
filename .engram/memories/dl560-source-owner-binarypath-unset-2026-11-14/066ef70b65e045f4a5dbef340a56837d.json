@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "dl560-source-owner-binarypath-unset-2026-11-14",
+    "revision_id": "066ef70b65e045f4a5dbef340a56837d",
+    "previous": null,
+    "body_sha256": "1598142170ee6eb2bcefe9a3e4ee5aad3d46644cfd247adcb6c3b34e02eb2d98",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T06:23:27.228917500Z"
+    }
+  },
+  "body": "DL560 fact (Termal::Fable2 on Opus2 #6096, 2026-11-14 ~06:23Z). On DL560's TermAl host, GET /api/sessions/<session>/source-owner returns 409 {\"error\":\"Engram source owner binaryPath is not configured for this project\"}. So launcher runs WITH host context there (--detach/--notify with TERMAL_* in the outer launcher, or registered verification) stop at bootstrap with \"source owner metadata refused (409); no tests started\".\n\nHostless DL560 runs (TERMAL_* stripped) work and are the standing DL560 mode: author evidence, plus test-ref FULLs as landing gates under the test-ref bullet, with fingerprints before and after. Registered verification credit comes from Central runs.\n\nSetting the binaryPath on DL560 is project configuration and Greg's call; agents do not change it. It was asked of Greg as optional (Asistant). It probably also explains c593's 2ecb GREEN-1 wrapper stopping with a zero-byte Engram sha before the restart. This is not a product defect: the refusal names its cause clearly."
+}

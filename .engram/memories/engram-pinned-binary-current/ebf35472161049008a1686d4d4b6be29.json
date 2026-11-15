@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "engram-pinned-binary-current",
+    "revision_id": "ebf35472161049008a1686d4d4b6be29",
+    "previous": "f91abc1f9fb84c20b4f90c77629a591d",
+    "body_sha256": "1428bcf8906b6ecfe8cc7147681b4a1169be398bf8498e3eac1a807966838bd2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-06T05:55:17.616567700Z"
+    }
+  },
+  "body": "Current Engram binary for pinned TermAl live runs, and the latest Engram install (Termal::Fable2; condensed at revision 14, 2026-10-06 05:05Z; full history in revisions 1-13).\n\nPIN RULE. A `live --engram-binary --engram-sha256` run uses the pinned binary until a run needs a newer one. The pin is still Engram 08a04e0 (w-63757ebca393): exe sha256 bcec822ae785fc97a16fcb66efae3f4205ded4f6cd6c60d33a29f008b7c23c13, build_fingerprint 081842231d48c5f4adac88d847e6098dc2b46ad5a66775171d07719327ca1eff (install notice: Engram::Fable, ebe242f7 #668). Its backup file is engram-20261005T183302Z-081842231d48.exe. Re-pin only when a TermAl check needs newer behaviour (for example w-5bfb41017302 needing verification_bind). Any check pinned to an intermediate build must re-pin when that build is replaced.\n\nLATEST INSTALL. 2026-10-06 05:04Z (ebe242f7 #806). Engram master 7306ac3 (w-228b9d786330). Installed C:\\Users\\grzeg\\.cargo\\bin\\engram.exe sha256 38504e342eca5768d1ec29f1e34002e08447a794a9588153a4686a99add670c1, build 1588ee00a191. Backup: engram-20261006T050249Z-3824e40b61b8.exe. New behaviour: a bare CLI `engram work core complete` with no --work-ref is refused while the session holds more than one claim, or holds other work beside an unheld focus, the same as bare done and evaluate. TermAl calls neither core complete nor work_complete. No strict-reader change, and no restart needed.\n\nRUNNING MCP SERVERS. They are 3824e40b61b8 (rev 1f1514f, sha256 591abc80…d684) since the TermAl restart at 04:49Z on 2026-10-06; they pick up newer installs at the next TermAl restart.\n\nBEHAVIOUR HISTORY SINCE THE PIN (each a fast-forward, with no store-format change unless noted):\n- 92fc3d0: atomic new-store open; a cold store gives typed busy.\n- 321b80a: verification_bind.\n- 47f3cff: ancestor .engram-project search. TermAl passes --project-file explicitly, so it is unaffected.\n- 835c846: bare done/evaluate is refused with several live claims. The TermAl host always passes work_ref.\n- d8ec5a4: the marker must be a regular file of at most 4096 bytes.\n- 7b8d87e: status-grouped verification view. TermAl's reader tolerates both shapes.\n- 496ab34: the ambiguity refusal lists up to 3 refs.\n- 9e3c26c: test fixtures only.\n- 86c82c8: citation refusal names the mismatch.\n- 581bf6c: extended-length store paths.\n- 8ca2538: a typed refusal above 1024 prerequisites.\n- 1f1514f: docs only.\n- 7306ac3: the bare core-complete guard.\n\nReport any reader mismatch on real records to Engram::Fable.\n\nUPDATE 05:31Z (ebe242f7 #812): Engram 73c0f8d (w-86dff02b8674, test doc comments only) installed, sha256 65ccd6baaa8b758f73c78e2754ffaa329e9c394e96c8e9540bd5fc5d22e2b6c6, build ca8a56871983; backup engram-20261006T053014Z-1588ee00a191.exe. No behaviour change, no restart. Pins unaffected.\n\nUPDATE 05:55Z (ebe242f7 #813): Engram 7340a47 (graph snapshot restore counts open descendants per root in one pass; enforces the per-item prerequisite bound on load; docs) installed, sha256 29ec899ee953…f992, build c1f7f82e2853; backup engram-20261006T055332Z-ca8a56871983.exe. No schema/row/projection change, no restart. Pins unaffected."
+}

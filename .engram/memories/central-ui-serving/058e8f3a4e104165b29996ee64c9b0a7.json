@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-ui-serving",
+    "revision_id": "058e8f3a4e104165b29996ee64c9b0a7",
+    "previous": null,
+    "body_sha256": "b6a5bcf159748f4cd987cc2815995ddf69bbff4f5566b482b3e6744b0e7c9033",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-03T02:45:48.860729500Z"
+    }
+  },
+  "body": "How Greg's main TermAl UI is served on Central, checked read-only on 2026-11-03 by Termal::Opus2:\n- :4173 is the Vite DEV server (node pid 41336 at the time), running C:\\github\\Personal\\TermAl\\ui\\node_modules\\.bin\\..\\vite\\bin\\vite.js from the MASTER checkout's ui/.\n- A landed UI change (ff of master in the master checkout) is therefore live immediately through HMR or a page reload. It needs NO TermAl restart.\n- The backend on :8787 also serves ui/dist (ServeDir fallback in src/main.rs) as a production build that agents do not rebuild (the launcher never builds production UI).\n- A change to ui/package.json dependencies would need `npm install` in the master checkout, which is outside agent authority, so flag it.\n- Other Vite processes seen: a preview on :4174 (Sol previews) and a vite.switch-performance config."
+}

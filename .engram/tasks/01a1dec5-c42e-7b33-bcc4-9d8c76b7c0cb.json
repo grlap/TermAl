@@ -1,0 +1,31 @@
+{
+  "id": "01a1dec5-c42e-7b33-bcc4-9d8c76b7c0cb",
+  "external_ref": null,
+  "title": "Cover reset and exceptional-close settlement of named-selection holds",
+  "outcome": "Behaviour tests cover reset-before-capture, generation mismatch, closing-scope failure and the pending focus notice.",
+  "acceptance": [
+    "Deterministic tests exercise reset-before-capture, generation mismatch and closing-scope failure, checking each exact no-report reason, retained facts, released hold and subsequent queued dispatch.",
+    "A canonical-focus regression asserts the visible PENDING reason and exact release condition while the older predecessor remains unresolved."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "criteria-proposed",
+    "execution-observability",
+    "named-roots",
+    "review-low",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d6bd-7cb5-7f60-9b9f-4093c33dc14e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

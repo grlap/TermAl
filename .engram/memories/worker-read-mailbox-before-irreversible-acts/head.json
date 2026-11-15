@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "worker-read-mailbox-before-irreversible-acts",
+  "head": {
+    "state": "active",
+    "chain": [
+      "e439d48470c140e4b1f66cbf48794ff7"
+    ]
+  }
+}

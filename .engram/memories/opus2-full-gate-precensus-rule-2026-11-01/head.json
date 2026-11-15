@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-full-gate-precensus-rule-2026-11-01",
+  "head": {
+    "state": "active",
+    "chain": [
+      "09953706baaa44a296fa4f6e525b6352",
+      "182b6fc56a9f4a4bbaa53f329689ebae",
+      "43d64429a5c84d2788b961d727eda1c7"
+    ]
+  }
+}

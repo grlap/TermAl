@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-roles",
+  "head": {
+    "state": "active",
+    "chain": [
+      "072cd98c3520418799799ac075fe79c8",
+      "0f57c830c0a44a978ed11a24a923c83b"
+    ]
+  }
+}

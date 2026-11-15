@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol-worker-plan-2026-10-13",
+    "revision_id": "c1e15078781544e4b83eb3badd547f71",
+    "previous": "0351b4cc9f344668956a358520d762a3",
+    "body_sha256": "80348f9bbf8476c8ca3c8ad892164918e505a547c7911dc19e19d24e6e8c9e0a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-13T02:51:04.184533200Z"
+    }
+  },
+  "body": "Greg's direction (Advisor b9d13887 #702, 02:36Z, and #704, 02:38Z, 2026-10-13): a continuous implementation pipeline, preferring Codex gpt-6.1-sol coders. #704 verbatim: 'Yes: Greg's preference is explicit. After the triple gate has ended and its host record is settled, spawn fresh Codex gpt-6.1-sol worker delegations for the next disjoint prepared TermAl implementation packages. Do not spawn them during the current gate or alter its roots. Keep existing assigned owners working; report the concrete Sol sessions and claims once admitted.'\nPLAN (Termal::Fable2):\n- After the triple gate test-816d7435 ENDs and its typed record lands, spawn 2 Codex workers, model gpt-6.1-sol, mode worker, isolatedWorktree, from my session (never during a gate).\n- Sol-1 gets w-a7bbdea31231 (the cargo target<random> sibling fence).\n- Sol-2 gets w-03d466958d59 (the launcher fingerprint must not depend on line endings).\n- Criteria for both are worded by me as non-completer (02:40Z).\n- Existing owners: Termal::Codex (8582) has w-1bf3d434a624; CSharpProof has w-f8f8e04dffbb; Opus3 has w-66d5 (diagnosis).\nTests only in coordinator-granted filtered slots; then freeze, review pair, and offer to Termal::Merger.\n\n02:45Z RULE (Advisor b9d13887 #706, verbatim): 'Greg confirms Codex gpt-6.1-sol is the preferred implementation model. Apply it by default to every new coder assignment. Use a different model only when Sol is unavailable or moving already-started work would cost more than continuing it; record that exception.'\nRECORDED EXCEPTIONS (assigned 02:37Z, before #706):\n- w-f8f8e04dffbb stays with Termal::CSharpProof (Claude): it is claimed, the plan is approved, and the Engram shapes are agreed. It wrote w-152d, so moving the work costs more.\n- w-1bf3d434a624 stays with Termal::Codex (session-8582, an existing Codex root on its configured model): it is claimed, named, and its design is done.\nAll NEW coder assignments use Codex gpt-6.1-sol worker delegations.\n\n02:53Z CHANGE OF ROUTE (Greg, Advisor #708: POST /api/sessions approved, with a recorded contract). Instead of child delegations, I created ROOT Codex gpt-6.1-sol sessions, workdir C:/github/Personal/TermAl, project-6, approvalPolicy never, sandboxMode danger-full-access, reasoningEffort high:\n- session-12326 Termal::Sol-a7bb for w-a7bbdea31231;\n- session-12327 Termal::Sol-03d4 for w-03d466958d59;\n- session-12328 Termal::Sol-edfd for w-edfd8d76c6c0 (docs for this procedure).\nEach receipt is recorded on its item. The Git Bash gotcha: the JSON workdir must use forward slashes.\nCORRECTION: Termal::Codex (session-8582) is ALREADY gpt-6.1-sol, so it is not an exception. The only exception is CSharpProof (Claude) on w-f8f8e04dffbb.\nSession-to-item map:\n- 8582: w-1bf3d434a624\n- 11519: w-f8f8e04dffbb\n- 12326: w-a7bb\n- 12327: w-03d4\n- 12328: w-edfd\n- Merger 11865: the triple, then w-d82e, then w-9b3a\n- Opus3 9474: w-66d5 (diagnosis)"
+}

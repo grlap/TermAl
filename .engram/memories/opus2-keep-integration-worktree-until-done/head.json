@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-keep-integration-worktree-until-done",
+  "head": {
+    "state": "active",
+    "chain": [
+      "f8418ba852d04c25b8428f90a4d51429"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-census-before-every-spawn",
+    "revision_id": "209954ccb41148e28de93c73da0ad8d8",
+    "previous": null,
+    "body_sha256": "1c5cf7a032acae6ba698be2d710d72e07b8807505d28e317ee3126897510180f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T15:50:15.358352200Z"
+    }
+  },
+  "body": "Worker rule (Termal::Opus3, from Opus2 #723, 2026-11-13; my own miss on the w-152c review pair). On Central, take the census before EVERY spawn, including read-only review pairs, not only evaluations: raw FreeVirtualMemory at least 16 GiB and no rustc above 5 GB private. If a cold build's rustc is large, hold the spawn until its END. Launcher runs (even node-only focused runs) also need Opus2's GO, because the launcher spawns git."
+}

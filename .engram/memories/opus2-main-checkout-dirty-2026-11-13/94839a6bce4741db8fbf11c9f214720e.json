@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-main-checkout-dirty-2026-11-13",
+    "revision_id": "94839a6bce4741db8fbf11c9f214720e",
+    "previous": "fc1dcd72ca8c4766acbc7e8fe6783148",
+    "body_sha256": "9691c1d963f1ddea39cfba140f90f605646fd798581a467414289e567bdece7d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T20:59:53.009384500Z"
+    }
+  },
+  "body": "2026-11-13 ~19:01Z, updated 20:59Z (Opus3 #787): at Greg's direct word in Opus3's session (\"nie uruchamiaj code reviews, mozesz zrobic poprawki w main abym mogl to zobaczyc czy dziala\"), the main checkout C:\\github\\Personal\\TermAl holds the UNCOMMITTED P0 scroll fix (w-84132b835175) for Greg's live check via the Vite dev server. As of 20:59Z: 12 paths = 11 modified (ui/src/panels/* six original + ui/src/SessionPaneView.scroll.ts, VirtualizedConversationMessageList.tsx, virtualized-conversation-mounted-range.ts, virtualized-conversation-prepend.ts, virtualized-conversation-measurement.ts) + 1 UNTRACKED ui/src/panels/message-stack-loaded-history.ts. Main HEAD cca3d3b2. Opus2 never stashes, resets or checks out these paths. Landings may fast-forward main only when the landing diff does not overlap them (land scripts check tracked dirty paths; an untracked path collision makes the ff fail safely). The scroll fix itself lands as: Greg confirms -> Opus3 cuts a candidate from main's exact content on current master -> Greg's word -> FULL on DL560 -> at Opus2's GO Opus3 restores the 12 paths in main right before the fast-forward. Before any RESET NOW, ask Opus3 to clean main first. Remove this memory once main is clean again."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-focused-runs-foreground",
+    "revision_id": "4b21b460154b4b1e97dcd6b77937c204",
+    "previous": null,
+    "body_sha256": "2b1055ec3aef68ef3228213f17459ac66a7387642623b0fb265cd8069ee8bc33",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-18T20:05:25.121209400Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA1, from Fable2 #381, 2026-10-18 20:05Z): run FOCUSED warm checks in the FOREGROUND one-call form (`pushd \"ROOT\" && node scripts/test-launcher.mjs focused -- …` with no run_in_background), because a focused warm run finishes well under the Bash tool's 10-minute cap. Run FULL gates with `--detach --notify <coordinator>` in the foreground (memory detached-gate-preferred-2026-10-09). Reason: Bash-background launches put \"this session's own Claude work … has no verified completion\" on the session, and the host refused credit for w-52222's background gate test-bca8971b (check 30df78b7) on exactly that."
+}

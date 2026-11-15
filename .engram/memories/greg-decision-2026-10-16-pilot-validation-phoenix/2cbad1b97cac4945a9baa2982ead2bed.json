@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-16-pilot-validation-phoenix",
+    "revision_id": "2cbad1b97cac4945a9baa2982ead2bed",
+    "previous": null,
+    "body_sha256": "53fb1ee5964e40791461d4fb1ab6529e5d2814bd75cd3d186c55c4b8fbc7192f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T00:19:36.004534900Z"
+    }
+  },
+  "body": "Greg's decision, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #853, 2026-10-16 00:19:12Z; recorded by Termal::Fable2), in answer to #852 about w-d264adbde8df (the supervised-pilot onboarding dry run): \"Greg: no hurry. Do not run the fixture-clone dry run now; wait until the relevant work is on main. Then perform the pilot validation on the Phoenix project instead of .tmp/pilot-dryrun-9474. Prepare the handoff/instructions, but do not require a UI step until main is ready and you send the concrete request.\"\nRules:\n- No dry run on the C# fixture clone.\n- The pilot validation targets the Phoenix project, once the relevant work is on master.\n- Opus3 (the holder) prepares the handoff and instructions now.\n- Greg's UI step (opening a session) is requested only when master is ready, via a concrete request through Advisor."
+}

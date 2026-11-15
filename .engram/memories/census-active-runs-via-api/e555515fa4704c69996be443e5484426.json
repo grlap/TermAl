@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "census-active-runs-via-api",
+    "revision_id": "e555515fa4704c69996be443e5484426",
+    "previous": null,
+    "body_sha256": "74cb44dd2eaa6bc96ca202109c20fe96486605d3a3ea9cb075c68697d6372e30",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T14:07:25.587353500Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA2, 2026-10-23 14:07Z; my own miss, caught by Fable2 #434). Before a launch that has a run cap (\"≤1 other non-observed run\"), count active runs ONLY through the host API, never by scanning the filesystem.\n\nRight: GET $TERMAL_BASE_URL/api/test-runs?limit=200, following nextCursor with &after=<cursor> until it is null. Count runs with state=running AND registrationState=registered.\n- The page parameter is `after` (src/tests/test_run_listing.rs). `cursor=` is silently ignored and returns page 1 again; check that the runIds you collect are distinct.\n- Rows that show state=running but are discovered or hostObserved are stale; this predicate excludes them.\n\nWrong, and blind: listing .git/review-runs and .git/worktrees/*/review-runs directories and treating \"no results.json\" as running. The launcher writes results.json with state \"running\" at launch (scripts/test-launcher.mjs:470-472), so that scan never sees a live run. Using it, I let three focused runs run at once against a cap of 2 (test-99897dbd beside BarA1's test-ac5efed2 and Sol-edfd's test-233bead5).\n\nPowerShell form:\n$base = \"$env:TERMAL_BASE_URL/api/test-runs?limit=200\"; $c=$null; $all=@(); do { $u = if ($c) { \"$base&after=$([uri]::EscapeDataString($c))\" } else { $base }; $r = Invoke-RestMethod $u; $all += $r.runs; $p=$c; $c=$r.nextCursor } while ($c -and $c -ne $p); $all | ? { $_.state -eq 'running' -and $_.registrationState -eq 'registered' }"
+}

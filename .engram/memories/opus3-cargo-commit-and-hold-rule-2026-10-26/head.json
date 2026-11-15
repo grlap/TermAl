@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus3-cargo-commit-and-hold-rule-2026-10-26",
+  "head": {
+    "state": "active",
+    "chain": [
+      "d008faf8d88f4d58b521f83ef411be0b",
+      "f79e60522a544d1abb577ed35007eb0b"
+    ]
+  }
+}

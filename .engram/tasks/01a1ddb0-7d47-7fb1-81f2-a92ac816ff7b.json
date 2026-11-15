@@ -1,0 +1,29 @@
+{
+  "id": "01a1ddb0-7d47-7fb1-81f2-a92ac816ff7b",
+  "external_ref": null,
+  "title": "Cover executeRun parallel wiring and stage-isolation cleanup through behavioral tests",
+  "outcome": "Tests exercise actual parallel execution wiring and guarded isolation cleanup without broadening production host admission.",
+  "acceptance": [
+    "Use a function-level test seam without CLI/environment allowlist overrides to exercise executeRun sibling ownership, reservation, fatal cancellation, aggregate facts, target setup and cleanup; cover removeStageIsolation success and path/link refusals plus CLI admission/refusal cases."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "dl560",
+    "performance",
+    "review-follow-up",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dae9-ede6-7e10-a850-06f3c0e4467d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

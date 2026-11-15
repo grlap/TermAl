@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "coordinator-final-diff-audit-checker-runs",
+  "head": {
+    "state": "active",
+    "chain": [
+      "72673a63f0d7434bb761467433b18794"
+    ]
+  }
+}

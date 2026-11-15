@@ -1,0 +1,21 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "coordinator-silent-worker-check",
+  "head": {
+    "state": "active",
+    "chain": [
+      "2306a1db5f854743ab4e589b6a84fabc",
+      "f9a1d4d5887942cbb0d97915a9da8165",
+      "b588a2a79c0b4ec9861574b615849072",
+      "9034f8adf3034bf3954ed2ec0025b7e4",
+      "b6a03398990546b49355b88b47ecbb35",
+      "bbb0bee7f0ac40f1ab99f3fb31e91c58",
+      "7bdd4ce2aa1e4a388d419222a5ba3a75",
+      "77da5b17435544eabbbb356dd470ef39",
+      "0ff99250e63147fc9c823cafad1ab34a",
+      "b633f80b48f948bd9ad5dde7fb6b1be2",
+      "4881ee4da9174c9183cfd5122447928e"
+    ]
+  }
+}

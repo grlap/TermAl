@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "workaround-revise-then-rename-until-w1d8a",
+    "revision_id": "7ab5a0a4478d43c6ac90ada996043168",
+    "previous": "c0f506a24e01497c8da89db4e808fe9f",
+    "body_sha256": "d985a212a574d7bb063e13fb0fb6e6d7783845476292a066ba07e617f817ea1d",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1c1ae-9b67-76a3-bf05-1d8a8991b237",
+      "work_ref": "w-1d8a8991b237"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-10T08:06:28.416060900Z"
+    }
+  },
+  "body": "UPDATE 2026-11-10 08:07Z (Termal::Fable2): w-1d8a8991b237's fix (the revision-only binding refresh, landed in combo30 d6a359fc) is LIVE on every host since the 2026-11-10 restarts. All hosts run a6978c03 or later.\n\nDo NOT use the rename workaround after an `update … revise` any more. Two live revisions (Sol-a7bb on w-6cbc, Sol-edfd on w-c26c) caused no scope change. The rename also has a side effect: the first capture after it records `assumed_missing_baseline` (w-4c0e2500b010).\n\nIf after a revise the host still shows runtime_observation_scope_changed, or `done` refuses `unconfirmed_declaration`, report it to Termal::Fable2 as w-1d8a counter-evidence instead of renaming.\n\nThis memory is kept only until w-1d8a's criterion 3 live case (a done without re-evaluation after a revise) is recorded; then delete it.\n\nPrevious text (superseded): after any revise, re-name the same source root, end the turn and continue next turn."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "placement-runners-2026-11-04",
+    "revision_id": "cc0c79690dba4ad8a11bf9425dffb502",
+    "previous": "b70ac7ad947742738efd729225b0e1c1",
+    "body_sha256": "cf956d572a99a395b76564451327e8e17922a1dd62d01a7f35411aa70ec3044f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T05:19:07.313536200Z"
+    }
+  },
+  "body": "Runner custody lessons and Windows B cleanup constraint from Fable2 #4222/#4223/#4235 (Nov4), not a current queue or availability census. A queued job is not moved from one runner by silence: withdraw the original exact request and receive the answer before placing another; a withdrawal can cross START. A runner inside a FULL may be unable to read mail, so delayed wakes do not establish lost delivery. Use the current session listing and coordinator's named GO for actual runner identity and availability; historic session5 approval status and first-job results remain only in revisions1–3.\n\nWindows B cleanup remains subject to Engram::Fable's owner release under w-789a7d0e554d: no general cleanup wording lifts that host's ban. Every actual path needs the current named release and ownership/path checks. The old Nov4 allowlist was for those exact windows only and is retained in revision3, not new deletion authority. In particular t/j/441d17a7 and n3f were expressly retained until their named release; this consolidation neither declares that release nor touches them. No queued job, source tree, runtime or artifact is changed."
+}

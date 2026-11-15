@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-direction-2026-11-09-focus",
+    "revision_id": "92302f21a205458db92854d9a4efc663",
+    "previous": null,
+    "body_sha256": "f363c2e91fd91b8d91debf2b5d492b1c6936daf74602089b6a4a5508398477de",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T17:03:50.328684600Z"
+    }
+  },
+  "body": "Greg's current direction for Engram and TermAl, 2026-11-09 about 17:03Z, verbatim as relayed by Engram::Asistant (TermAl mailbox 588693a8 #1179):\n\n„mysle, ze na tym trzeba sie skupic\nskonczyc evaluation\nposprzatac,\nnaprawiac bledy ktore znajdujemy i przeszkadzaja w pracy\noptymalizowac procedury pracy, komunikacji, testow, review, acceptance criteria\n\nprzekaz do zespolow i KIMI”\n\nAsistant's framing in the same message: the work must remove real obstacles, with no new unneeded conditions or gates. Kimi is asked to assess and help simplify.\n\nThis direction does not turn on TermAl's evaluation policy; that still needs Greg's separate word. It doesn't change any authority text either; changes to procedures that touch CLAUDE.md, AGENTS.md or command files still go through that file's Commit and push process."
+}

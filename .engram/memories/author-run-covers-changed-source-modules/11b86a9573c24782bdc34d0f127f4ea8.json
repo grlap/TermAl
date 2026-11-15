@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "author-run-covers-changed-source-modules",
+    "revision_id": "11b86a9573c24782bdc34d0f127f4ea8",
+    "previous": "31baa74ac8a64126a5dd9da2f031867c",
+    "body_sha256": "03a0800be98e42b7f469b8bdf900e1f22c2cd2a9e2c005a7b796c433baed06c3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T08:27:53.491718300Z"
+    }
+  },
+  "body": "Integration-owner rule (Opus2, from Fable2 #5620, 2026-11-11, after two misses the same day: a7bb R15 and edfd 4fe61e6b/combo63). An author run before handoff must cover the WHOLE suite, or at least EVERY test module that exercises the changed source files, not only the new tests. edfd's author GREEN passed 553 focused tests, yet combo63's FULL failed in a sibling module (tests::...::unadmitted_runtime_reporting::repairs::a_restored_closing_job_keeps_its_original_scope_and_policy) that exercises src/engram_unadmitted_closing.rs, which edfd changed. Apply this in every author-job GO I write: before dispatch, grep src/tests for modules that call into each changed src file, and add them to the filter (or run the entire --bin termal suite for a wide change). Review pairs do not replace this.\n\nREVISED 2026-11-12 00:26Z (Fable2 #5660, after Greg via Asistant #1410: „zdalne testy, to boli, bo puszczamy calosc 2 razy\"). The \"or the whole suite\" option is WITHDRAWN.\nAn author run covers exactly the set of test modules that exercise the changed sources (changed modules, their tests, sibling callers), listed in the request. The whole suite runs ONCE, as the integration FULL.\nException: shared infrastructure (launcher, persistence core), stated in the handoff.\nIn GO grants, refuse whole-suite author runs (test-rust.sh, entire --bin termal with no filter, author `full`) unless that exception is stated.\nMy own grants today caused doubles: R17 f60e4f7e+8d77a640, edfd 9a76d45f+54124148, c593 4 UI categories+965308a3, 8e1f 7a56e3b0, 03d4 a2c98341.\n\nREV 3 ADDITION (Opus2, from Fable2 #6116, 2026-11-14 08:27Z). combo101's FULL test-23757e2e failed (7865 passed, 1 failed). The w-8318 change added src/tests/engram_source_id_capture.rs with a raw std::process::Command::new(current_exe) at line 406. The crate-wide source-scan guard host_command::tests::host_windows_process_creation_cannot_bypass_the_shared_wrapper (in src/host_command.rs; not cfg-gated, so it fails on every host) rejects any raw std::process::Command or SharedChild::spawn outside its allowlist. The author's runs covered only its own modules.\nRULE: whenever a change adds or edits ANY file (source or test) that spawns processes or names std::process::Command or SharedChild, the author's focused run MUST include `host_command::tests`. Put this in every such GO. Tests use crate::host_command::Command, not std::process::Command."
+}

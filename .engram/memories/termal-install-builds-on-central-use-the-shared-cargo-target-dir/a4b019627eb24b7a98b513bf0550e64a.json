@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-install-builds-on-central-use-the-shared-cargo-target-dir",
+    "revision_id": "a4b019627eb24b7a98b513bf0550e64a",
+    "previous": null,
+    "body_sha256": "408fe46867bc9daa1d0b14ae642f1bf6471dfda6a056eb1718427f112717e845",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T05:53:12.714701500Z"
+    }
+  },
+  "body": "TermAl install builds on Central use the shared CARGO_TARGET_DIR target/install-target. Cargo judges freshness of path sources by mtime. A gate worktree checked out BEFORE the previous install build therefore looks \"Fresh\", and cargo silently reproduces the previous binary. This happened on 2026-11-07: w-24a7 finished in 0.99s and gave the same sha as M1, 752ecad6. ALWAYS run `cargo clean --release -p termal --target-dir <install-target>` from the gate worktree before the install build. Then confirm the log has exactly one \"Compiling termal v0.1.0 (<gate worktree>)\" and that the sha differs from the installed one before copying."
+}

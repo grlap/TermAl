@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "carry-checkout-stat-size-trap",
+    "revision_id": "cbfe507db1104a5388fd9963cbf7b1a9",
+    "previous": null,
+    "body_sha256": "dcde5ff854a564ca6a4d12cd321b1911b94072a40c01879fa99f0ac120e461a8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T23:38:37.738386700Z"
+    }
+  },
+  "body": "Worker trap (Termal::BarA1, 2026-10-19 23:45Z, met carrying w-33f4 from 9c698380 to 476c45c7). A carry by `git checkout --detach NEW` with the change staged can abort with \"Your local changes to the following files would be overwritten\" for dozens of paths you never touched, even under `-c core.autocrlf=false`, while `git hash-object --no-filters F` equals the index blob and `git diff --raw` is empty.\n\nCause: those files were last checked out under the repository's core.autocrlf=true, so the index recorded the CRLF size (e.g. 20145). Then they were LF-normalized for the freeze (19824 bytes). When the recorded size differs, Git treats the entry as modified without rehashing (ie_modified returns DATA_CHANGED for a nonzero ce_size), and `update-index --really-refresh` prints \"needs update\".\n\nFix, index-only, with no content change:\n1. List the paths with `git -c core.autocrlf=false diff-files --name-only`.\n2. Confirm none of them is one of your staged change paths.\n3. Re-add them with `git -c core.autocrlf=false add -- <those explicit paths>`; the same blobs get fresh stat data.\n4. Verify `git write-tree` is unchanged and `diff-files` is empty.\n5. Then run `git -c core.autocrlf=false checkout --detach NEW`, which writes LF files that match the blobs, so the freeze sees no CRLF churn.\n6. Verify your staged blob ids (`git ls-files -s -- <your paths>`) are identical before and after.\n\nRelated: freeze-crlf-working-files-trap."
+}

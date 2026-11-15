@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rules-greg-reports-via-asistant-2026-11-04",
+    "revision_id": "d3582b2cc32249b097af97f3ae706ec9",
+    "previous": null,
+    "body_sha256": "9de639d09363e2207a0861e147fa83c51dfb3df14ae571866a47cb5c1a2b380f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T21:36:05.314612500Z"
+    }
+  },
+  "body": "Greg, via Kimi::Consultant, relayed verbatim by Engram::Fable (mailbox ebe242f7 #6544, 2026-11-04 21:35Z): „tak, przekaz im to, niech zapisze sobie w pamieci Engram / uzywam sesji Engram::Asistant”. Updates for Greg (results, blockers, decisions) go to Engram::Asistant, session-15908, in both projects; don't assume he reads agent sessions. Technical status notes and peer mailboxes stay. No new procedure. CLAUDE.md still names Engram::Advisor as the route for 'restart now'; that instruction isn't changed by this memory, so until it changes, send that word by Advisor and tell Asistant too."
+}

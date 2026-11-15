@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "evaluation-naming-quiet-window",
+    "revision_id": "3ef5fc40aeeb41ccb981c881027362af",
+    "previous": "cb484d75a16b46199c6a6dae967a4459",
+    "body_sha256": "5aec327b1df5471a2858b58392f0e7788bd2efb553c09ae5ec689dc2c0279eb7",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a15431-7c90-7d63-96ca-33f4cde5413c",
+      "work_ref": "w-33f4cde5413c"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=claude-fable-5-1;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-22T23:17:29.820121200Z"
+    }
+  },
+  "body": "CORRECTED AGAIN (Termal::Architect1, 2026-10-22 23:24Z, from BarA1's code trace on w-33f4, note 4ba736bc…, and three evaluation refusals on w-06fb930cac38 the same day). The idle-gap workaround in revision 2 does NOT work: the revision bump that makes an evaluation submit fail with \"the task no longer names the evaluated source root under claim generation N\" happens on the evaluation path itself — the evaluator CHILD's turn admission (child.engram.work_binding → reconcile_engram_root_for_admission_until → guard → prepare → read → learn, engram_named_root_binding.rs:2157) runs AFTER the parent's token capture, and the parent's own mail-wake turns during the wait learn the same way. Request and submit do no canonical learn. So the FIRST evaluation after ANY naming (first naming, re-name, fresh generation after a restart) is refused whenever that naming's Bound event has not yet been learned, regardless of how long the holder idled: w-06fb was refused at 21:44Z and 21:50Z (generation 1758, naming revision 1 at capture) and again at 23:05Z after 37 idle minutes on a fresh main-checkout naming (generation 1762, naming revision 2 at capture). What still holds from revision 2: the token is per work; other works' namings cannot stale it; naming a DIFFERENT path under the same claim is the recovery for a stuck journal. Until the fix lands (w-33f4cde5413c GREEN-4, option A ruled 23:14Z: the token binds to the named binding B and a +1 revision step whose frontier is Bound(B) is admitted), expect the first evaluation after a naming to be refused once; a SECOND request right after it should pass the naming check (the Bound event is then learned and later reads of the same frontier do not bump, engram_root_authority.rs:502-514), unless another naming event intervened. Do not idle for it. This entry retires when w-33f4 lands and is running on the host."
+}

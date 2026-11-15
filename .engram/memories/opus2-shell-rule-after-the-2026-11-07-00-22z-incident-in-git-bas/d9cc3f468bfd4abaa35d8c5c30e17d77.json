@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-shell-rule-after-the-2026-11-07-00-22z-incident-in-git-bas",
+    "revision_id": "d9cc3f468bfd4abaa35d8c5c30e17d77",
+    "previous": null,
+    "body_sha256": "c5cba1dc197004cb3abd8c0cedb22b64a431afe07681ee28d4a0c2d7f890b6e8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T00:25:35.430586200Z"
+    }
+  },
+  "body": "Opus2 shell rule after the 2026-11-07 00:22Z incident: in Git Bash, NEVER put message text inline in double quotes for \"$TERMAL_CLI\" mailbox send --message \"...\". Backticks (for example `cargo run --release`) or $(...) inside run as commands. That incident started a second TermAl cargo run in the main checkout; it was stopped before link and the installed binary was unchanged. Always write the body with a single-quoted heredoc (cat > file <<'EOF') and send it with --message-file."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-resume-on-durable-not-woken",
+    "revision_id": "525a5c6007da45fc8d2c9d8fe1de1a0a",
+    "previous": "913d3c1e2b864ff2966bc0282727d36e",
+    "body_sha256": "9d5cf24ba5aedaec0d287282108b61df949eeacc380fc94fa28cff31bb6657f4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-20T14:00:20.363657200Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-20 10:33Z, from 8 occurrences today across 5 sessions: Sol-1cee, Sol-d50d, CSharpProof, Sol-edfd and Coder, on both Codex and Claude workers). When a send to a worker returns notificationDisposition \"durableButNotWoken\", check that session right away with GET /api/state. If it is idle with queuePaused=true, POST /api/sessions/{id}/queue/resume and re-check; it should go active. Then record the occurrence on w-80e0cb2002da. Do not resend: the message is already durable, and the resume delivers it. Without this, the worker sits idle on a GO until the next watchdog tick. This holds until w-80e0's fix is live on the running host.\n\nRefinement (Fable2, 2026-10-20 14:00Z). Before resuming, read the head's last engramControl card with GET /api/sessions/{id} and look at its continuationReason. (a) \"Automatic retry scheduled … next at T\" (persist-writer Deadline under gate load, w-1fcaa9b93d12): Resume returns 200 but is a no-op, because the retry scheduler owns the head. Wait past T; it recovers by itself (Advisor and Sol-c593 at 13:58Z). (b) \"Automatic continuation withheld: retained authorization requires reconciliation\" (for example \"named-root acknowledgement belongs to a superseded authority image\"): w-b21c5132848c. Resume is silently a no-op. Only a UI retry or cancel of the head by the lane owner or Greg clears it, and agents do not touch it. (c) A plain Stop-paused queue with no retained head: resume as above (w-80e0)."
+}

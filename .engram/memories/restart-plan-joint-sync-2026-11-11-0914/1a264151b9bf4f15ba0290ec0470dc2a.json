@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "restart-plan-joint-sync-2026-11-11-0914",
+    "revision_id": "1a264151b9bf4f15ba0290ec0470dc2a",
+    "previous": "49614d2f9aa44e63bd8fce01ff916986",
+    "body_sha256": "96e69e3752f4fdc5dee256b71d6174a782af2537265d290f2a906be977901f04",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T17:40:44.967671700Z"
+    }
+  },
+  "body": "Joint TermAl+Engram restart plan, 2026-11-11, revised by Termal::Fable2 at 17:42Z. Supersedes the 14:52Z revision.\n- Engram (Engram::Fable, TermAl mailbox ebe242f7 #7576, 17:39Z): one more Medium (w-a4255f8e51fb) on sync 3132ea2d. Fix d11f by 11330, fresh freeze about 18:30Z, then a full round and gates. Landing about 20:30-22:00Z if clean, so the joint restart is about 22:30-24:00Z. If another Medium appears, landing moves to tomorrow morning with a morning restart. Greg has been told by Engram.\n- TermAl: w-18a1 R15 (1ccbd174) FAILED its DL560 FULL (22 Rust tests, test-5744b880). a7bb is preparing R16 with a per-test product-vs-test classification, a check for flooring of non-aborting values, and the WHOLE Rust and node suites before handoff. It will NOT make tonight. Train re-ordered by Opus2 (#5601): combo60 = 8e1f history d3cbfcb2, combo61 = 8e1f publication 9481eca9, then c593 fc17, then edfd, c593 d09b and 03d4 w-184d. R16 is re-placed when ready.\n- DECISION (Fable2, #7578 to Engram::Fable): NO separate TermAl-only restart. Nothing landed today is urgent for running sessions. One joint restart, timed by the Engram sync installs. At that moment, send Greg \"restart now\" via Engram::Advisor (session-6219, mailbox b9d13887) with both installed build hashes and the reason, cc Engram::Asistant. Greg performs the restart.\n- After restart: census and closing-jobs diagnostics (w-97ace) for w-1676; boot sub-phase timings (w-e75b) for w-9995; ONE real contended evaluate for Engram w-ccc1 with 11334."
+}

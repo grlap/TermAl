@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-p0-overlap-rule-2026-11-01",
+    "revision_id": "856c7cad0062445da1e65710f2e80dab",
+    "previous": null,
+    "body_sha256": "14e4143520d83a51e39570c41ecddfc42accfcc9025e142632a2ff547da2c251",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-01T07:30:40.547356200Z"
+    }
+  },
+  "body": "Fable2 #3567 (2026-11-01 07:29Z), STANDING until both P0s (w-8ec0f56d9976, w-135181fe8685) land: a P0 FOCUSED check may overlap a non-P0 FULL gate on Central, with a census first, CARGO_BUILD_JOBS=1, overlap start and end times recorded, and one run per input. If the full gate shows a timing failure in an overlap window it's still RED, classified with the contention noted. P0 FULL gates never overlap other full gates; Opus2 sequences full gates: w-8ec0 → w-135181 → BATCH14b, each once READY. Fable2 told the P0 coders directly."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "closure-fulls-filler-only-2026-11-13",
+    "revision_id": "0cf62a5ec4b34d8b8706adc0e5bba5a5",
+    "previous": "3ac5aa1d87fb45fe88944c6a11f6856e",
+    "body_sha256": "2ef5ad4e5b1c67d82b670985e963cf20d23d136610144bd908f20f504596fbcd",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T06:52:25.820358800Z"
+    }
+  },
+  "body": "SUPERSEDED rev 1 (Fable2 #5841) by Fable2 #5842 (2026-11-13 06:49Z): Greg already ruled \"Tak. Zdalny test jest równowazny.\" (Asistant #1527, citing #1414): a remote (DL560) test is equivalent. So NO registered closure FULL is queued for landed items; the e105, aa7b and w-70ed Central closure FULLs were DEQUEUED by Opus2 at 06:50Z.\nRule for closure of landed items (TermAl):\n1. The item's holder quotes exactly into a holder note the landing FULL's run id, host, commit, tree id, before/after fingerprints or sourceIds, counts and eligibility (from the integration item's CRIT2/landing record), and confirms that tree id equals the landed master commit's tree.\n2. With Fable2's concurrence note on the exact list, the holder revises ONLY the bindings, dropping the full-gate criterion's test binding; the acceptance text stays unchanged.\n3. Evaluation in a later turn (evaluation slot one at a time, via Opus2).\nApplies to Opus2's own combo integration items too (un-parked). Exceptions go to Fable2: a criterion whose text names Central or a registered record, or a Windows-only change whose Windows leg wasn't run. If an evaluator still refuses with the quoted evidence in place, tell Fable2 before anything is requeued.\n\nADDENDUM (Fable2 #5844, Engram::Fable #7776, 2026-11-13 06:50Z): the binding drop is an interim WORKAROUND, with two conditions for every item, Opus2's combos included: (1) note on each item that the drop is a workaround pending Engram's remote_verification_record (Engram item w-180d6f507470, after w-5f56 in their train); once installed, new items keep the test binding and cite the remote record. (2) If an item already has a non-passing evaluation, the binding change carries it: the new evaluation must name that record as superseded and pass the criterion, citing the holder note with the quoted run facts."
+}

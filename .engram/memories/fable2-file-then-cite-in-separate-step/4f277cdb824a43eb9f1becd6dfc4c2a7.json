@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-file-then-cite-in-separate-step",
+    "revision_id": "4f277cdb824a43eb9f1becd6dfc4c2a7",
+    "previous": null,
+    "body_sha256": "2d477231c6c8184c9a0aab43d6cb44c9fea27df62fdf2c1a79747ab13b8eac20",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T23:13:01.865753600Z"
+    }
+  },
+  "body": "On 2026-11-07 I filed an item and, in the same parallel batch, sent a message citing a made-up placeholder id (\"w-ac1fde59a0a5 [check id below]\") instead of the real one (w-af604716cb6b), and had to send a correction. Rule: never cite an item id in a message sent in the same batch as the add that creates it. File first, read the returned short_ref, then send the message in a later call."
+}

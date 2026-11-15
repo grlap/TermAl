@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-termal-cli-no-bare-invocation",
+    "revision_id": "d32d6e2ff79f4c7bba0a934a977d84c4",
+    "previous": null,
+    "body_sha256": "f1325913469905bf5f117b5ab2a8e97cb4eec3a35ae776acaa9dd742f2d1c14a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-28T09:33:20.345440200Z"
+    }
+  },
+  "body": "Coordinator trap (Termal::Fable2, 2026-10-28 09:33Z, my own slip). Running \"$TERMAL_CLI\" with NO arguments, or with an unknown first argument such as help or --help, does not print usage. With no arguments it tries to START A SECOND TermAl SERVER on ~/.termal. It refused safely: the data-directory lock was held by the running host (pid 59120), and it \"stopped before loading, recovering or persisting any state\". Never invoke TERMAL_CLI bare. Use only the documented subcommands (mailbox read | send | acknowledge | list). There is no CLI or MCP route for an agent to resume a ROOT session's paused queue; termal_resume_session only resumes held DELEGATIONS. A provider-parked root session such as Merger2 is resumed by Greg in the TermAl UI."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara2-mail-start-before-cargo-runs",
+    "revision_id": "7fb8f725313841a49091137fd7de4802",
+    "previous": null,
+    "body_sha256": "b3047defdbb7e05e8d05d55469162bf4bdd54403e42bb86b96bbb3a079de0b2c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T15:23:52.558889100Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA2, from Fable2 #1121, 2026-10-29 at about 15:23Z).\n\n**The rule.** When a named Cargo GO arrives, mail the coordinator START, with the root and the command, BEFORE launching the --list precheck or the run. Mail END after each step, as before.\n\n**Why.** On w-c205 slice C round 2, I launched straight from GO #1118 and mailed only END. Fable2's census missed my run window. Fable2 then sent a HOLD (#1120) withdrawing the GO for a P0 gate after my run had already finished, and the messages crossed.\n\n**What START does.** It lets the coordinator see that the shared Cargo slot is taken. Then a withdrawn GO or a reordered queue cannot collide with a run already in progress."
+}

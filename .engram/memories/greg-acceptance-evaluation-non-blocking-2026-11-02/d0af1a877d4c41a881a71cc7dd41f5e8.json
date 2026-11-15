@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-acceptance-evaluation-non-blocking-2026-11-02",
+    "revision_id": "d0af1a877d4c41a881a71cc7dd41f5e8",
+    "previous": "e99ccf552fc749afa26dbcbc246e15c3",
+    "body_sha256": "0eb073830164cde4ae6becfd415b59d4d0dc511d01777a1b9dcb72e6c122cfc3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-02T00:33:29.712717200Z"
+    }
+  },
+  "body": "REVISION 5 (2026-11-02 ~00:30Z). Greg's final rules, relayed verbatim by Engram::Fable (TermAl mailbox ebe242f7 #5848 and #5849; Engram memory rules-greg-control revision 25):\n(1) Gated control is REPLACED BY Execution Observability. The gating code is physically deleted (TermAl w-3fe8, Engram w-5b17).\n(2) 'NIE MA LEGACY, nigdy nie trzymamy legacy'.\n(3) 'EWALUACJA jest tymczasowo wylaczona do czasu implementacji Execution Observability'. Acceptance evaluation is NOT removed from code or docs; it is only switched off as a blocker. Both stores run allowed_modes=[] with mechanical_basis=asserted (epoch 3); TermAl's policy is e83a04e5.\nNobody requests or waits for an evaluation as a delivery step. No verdict is fabricated, and an item stays open only for criteria it has not actually met. CLAUDE.md condition 3's independent-evaluation clause is not applied while this lasts; every other standing condition still applies.\nMaking evaluation work again through Execution Observability is TermAl w-fdbb4fb85a50: P1, non-blocking, after w-3fe8.\nEarlier withdrawn readings, recorded so they are not repeated: 'replace or delete the evaluation feature' (Engram::Fable #5841, withdrawn in #5846); 'retired; legacy code remains' (Architect3 #471, reversed).\nGreg's STOP of 00:18Z ('ZATRZYMAJ WSZYSTKIE PRACE') was lifted at about 00:28Z: 'TermAl w-3fe8 wznow, mozemy to przyspieszyc ? Engram w-5b17 tak samo tez tez / WZNOW PRACE'."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "agy-usage-greg-ok-2026-11-14",
+    "revision_id": "6fa7fb9a7711463caf6382409031c424",
+    "previous": null,
+    "body_sha256": "c943eac5a6ae8dcaa077bf784c54623f02b0e2c89ffb88aec54b9a0743207c31",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T06:20:47.180974300Z"
+    }
+  },
+  "body": "Greg's word on agy (Antigravity, the Gemini harness), 2026-11-14 ~06:20Z, relayed verbatim by Engram::Asistant (TermAl mailbox 588693a8 #1653): „Tak. Mogą używac ile chcą. Sugeruje prosty model.”\n\nIt supersedes the earlier \"minimal load, one harmless prompt, ask before more\" restriction of 2026-11-13. Agents may use agy as much as a task needs.\n- Prefer a simple or cheap model, e.g. a flash or lite tier.\n- Still no `agy --login`, no config or subscription changes, and no retry loops.\n\nRecorded by Termal::Fable2."
+}

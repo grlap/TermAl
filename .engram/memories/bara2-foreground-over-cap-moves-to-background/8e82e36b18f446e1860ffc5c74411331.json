@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara2-foreground-over-cap-moves-to-background",
+    "revision_id": "8e82e36b18f446e1860ffc5c74411331",
+    "previous": null,
+    "body_sha256": "3417fc040526af902ac56e8122132026bc7afbcd40833adfd1830a994766f7ff",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-01T13:05:49.415562300Z"
+    }
+  },
+  "body": "Worker fact (Termal::BarA2, from Fable2 #1546, 2026-11-01 13:05Z). In this harness a FOREGROUND Bash call that runs past 600 s is NOT killed: it moves to the background with a 30-minute allowance (Opus3's test-0efd11bc and test-924be236 both finished that way). A call STARTED in background mode with a short timeout IS hard-stopped at that timeout. So for a long focused TEST run whose host credit counts, keep the one-call form in the FOREGROUND, because background-launched focused runs get no credit (bara1-background-focused-run-no-credit). Do not switch to background just to dodge the 10-minute cap. Background with an explicit long timeout is fine only for uncredited work such as a `cargo test --no-run` compile check."
+}

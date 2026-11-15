@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-decision-2026-10-22-code-authoring-override",
+  "head": {
+    "state": "active",
+    "chain": [
+      "8000291f1bf34e5fb2f59a98b55e1642",
+      "91316bd704254b0a9c643b91ac50ccbe"
+    ]
+  }
+}

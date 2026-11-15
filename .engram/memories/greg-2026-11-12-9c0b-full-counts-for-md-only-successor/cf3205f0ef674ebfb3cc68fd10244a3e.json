@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-2026-11-12-9c0b-full-counts-for-md-only-successor",
+    "revision_id": "cf3205f0ef674ebfb3cc68fd10244a3e",
+    "previous": null,
+    "body_sha256": "219a2737f94cc1742d5a3a0972af08555b44ac4976b2b2d85d046ffaa53d0c23",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-12T14:40:08.110111200Z"
+    }
+  },
+  "body": "Greg said \"Tak\" (Asistant 588693a8 #1441, about 14:39Z on 2026-11-12) to Engram proposal #992, relayed by Fable2 #5730. The full tests of Engram sync candidate 9c0be7f6 (s4 FULL test-18be1591) COUNT as the landing gate for a successor that differs from 9c0be7f6 ONLY in .md paths, provided the successor has its own link check and two doc reviews. This is a ONE-TIME decision for this landing. For the gate record, the integration owner records a diff check (git diff --name-only 9c0be7f6 <landed> shows only .md paths) when the successor lands. The sync window is about 16:30-17:00Z; Engram::Fable confirms the exact time."
+}

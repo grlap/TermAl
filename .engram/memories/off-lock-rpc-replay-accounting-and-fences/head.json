@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "off-lock-rpc-replay-accounting-and-fences",
+  "head": {
+    "state": "active",
+    "chain": [
+      "88705e98c4a04b7a9c05f2dae0dc1658",
+      "cfe8d52b0a5545ee99b17fc4d155cf2d"
+    ]
+  }
+}

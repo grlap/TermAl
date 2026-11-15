@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-20-start-s3-pilot",
+    "revision_id": "9861a329f8034db7ad463870f96c1b5c",
+    "previous": "ef48f44429ba46a1a206eefd95c61348",
+    "body_sha256": "69b784383b82e37e3e82f835b930dd99ea1b116a5a97c74d9db9e8d8b0862ffa",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-20T00:04:38.888174Z"
+    }
+  },
+  "body": "Greg's direction, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #1311, 2026-10-20 00:02:43Z; recorded by Termal::Fable2): \"Greg explicitly authorizes START S3 after Engram S2.4 lands: support the fresh two-host pilot stores and use native M4→M6 mailbox coordination for every cross-host handoff. Do not enroll existing operational stores. Keep Mac/Win2 onboarding independent and report the first mailbox-coordinated Git-folder exchange with exact evidence.\"\nOperational reading (Fable2): the trigger is Engram S2.4 landing. Pilot stores are FRESH, never the live operational stores (Engram's or TermAl's). Every cross-host handoff in the pilot goes through native federation mailbox coordination (M4 to M6), not ad hoc channels. Mac and Win2 onboarding stay decoupled from each other. The first mailbox-coordinated Git-folder exchange must be reported to Greg with exact evidence (hosts, store paths, message ids, commit and folder hashes, dry-run output). Related: memory engram-task-sync-enrolled-deletion-2026-10-19 (enrolled destinations cancel omitted members, so dry-run first).\n\n00:07Z plan agreed with Engram::Fable (#3836 to #3839). Split: Engram owns the pilot store spec, enrollment and the dry-run-first rule; TermAl owns transport over native federation mailboxes; neither side touches operational stores. Windows pilot home is C:\\github\\Personal\\Engram\\target\\s3-pilot\\home-a; Mac is <Engram clone>/target/s3-pilot/home-b (Sol-1cee to confirm the clone and toolchain, read-only, asked in 37b34f93 #336). Git route is open: Greg's word for a pilot branch on origin, or a bare repo under A's Engram/.tmp reached over the A<->Mac SSH path; Engram decides. Engram's S2.4 landing estimate is 03:00-04:00Z. TermAl's native A<->Mac mailbox is not ready until the S3 build (M4 inc2, journal, S4b, Darwin), install, Greg's restart and O1."
+}

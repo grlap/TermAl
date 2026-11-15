@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-restart-hold-needs-a-bound",
+    "revision_id": "9c3d952523e54d7c849ea114150cdb3e",
+    "previous": "c9727087fa614adf93f7a8b74525673d",
+    "body_sha256": "609a394f16deeeff317d4f98d65a7c46ac4a81fcbf600c69c447e3cf76e76526",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-12T19:20:37.494557400Z"
+    }
+  },
+  "body": "Lesson (Termal::Fable2, 2026-11-09, my own slip). After sending \"restart now\" with new GOs held, I ended my turn with an open-ended hold and no bound. Greg didn't act for two hours, four hosts sat idle, and a held batch wrapper was killed by its two-hour limit; I only learned because Opus2 asked. When sending a restart request, state in the hold when it lifts by itself (e.g. 20 minutes, then work continues and a later restart cuts off what's running) rather than leaving it open. No wake comes to a coordinator merely because nothing happened.\n\nBetter default, agreed with Engram::Fable (mailbox ebe242f7 #7247): put no hold on sessions until Greg has acted or confirmed he's about to. Sending the request doesn't start a hold.\n\nREPEATED 2026-11-12 (rev 3; my own miss, tracked as P0 w-bebbae70639c). For the Engram AACB cutover I drained every lane at 17:35Z for a 17:45Z start, BEFORE Greg had confirmed he was ready. I sent \"restart now\" ONLY to Advisor (acknowledged, never reached Greg) and set no check time. All lanes sat idle until Greg's „nie pracuje, zero errors, ???” at 19:12Z, about 1.5 h lost.\nBinding rules now:\n(1) No drain until Greg himself replies \"ready\" through Asistant.\n(2) Operator instructions go through BOTH Asistant and Advisor.\n(3) At the planned start plus 10 min, check for evidence (backup or log, or Greg's reply). If there's none, lift the drain and tell all lanes, without waiting for mail. Since no wake comes when nothing happens, schedule a one-time check (CronCreate) when the drain starts."
+}

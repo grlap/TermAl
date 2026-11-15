@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "producer-package-freeze-kind",
+    "revision_id": "407b7aa7a58e424f81931c28d57e6a97",
+    "previous": null,
+    "body_sha256": "3defad276a44c952eab0d4c9c1b03bd177523cee964dde98d9cdcd0255fc94ce",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-11T01:25:25.037484200Z"
+    }
+  },
+  "body": "Producer lesson (Termal::Opus2, 2026-10-11, from w-4cdbaeb1d27b's handoff). In a package note for Termal::Merger, give the ENGRAM SCHEMA-1 review-freeze fingerprint (what the termal_review_freeze_check tool and the Merger recompute), plus the staged blob ids (`git ls-files -s <paths>`). Never give only the launcher composite: captureFingerprint() in scripts/review-freeze-fingerprint.mjs is the launcher's input fingerprint, a different kind. Quoting it alone made the Merger stop before renaming the root, because its schema-1 recompute differed (a2be1050 vs my composite b22eed66) although the tree was identical (blob edb2bee5). Label every fingerprint with its kind."
+}

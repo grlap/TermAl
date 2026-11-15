@@ -1,0 +1,29 @@
+{
+  "id": "01a1e077-89d3-74c0-97f5-bf6083f4609f",
+  "external_ref": null,
+  "title": "Delegation wait tools return 404 for a running host-created acceptance evaluator",
+  "outcome": "A parent that requested an acceptance evaluation either can await that running evaluator through termal_resume_after_delegations / termal_wait_delegations, or receives a typed refusal that names the evaluator fan-in as the supported completion path, never a bare 404 \"delegation not found\".",
+  "acceptance": [
+    "A session that requested an acceptance evaluation with termal_evaluate_acceptance, and calls termal_resume_after_delegations or termal_wait_delegations with the returned evaluator delegation id while that evaluator is queued or running, receives either a registered wait or a typed refusal stating that the evaluator completes by its fan-in, not a 404 delegation-not-found error.",
+    "A test covers that behaviour against a running evaluator delegation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "delegation",
+    "wait-api"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

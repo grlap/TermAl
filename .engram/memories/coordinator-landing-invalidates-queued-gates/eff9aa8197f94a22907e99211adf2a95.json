@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-landing-invalidates-queued-gates",
+    "revision_id": "eff9aa8197f94a22907e99211adf2a95",
+    "previous": null,
+    "body_sha256": "3dc10504716eafacabf4e2ae86fd175f5637b1c7f22b0c720ba5409f8458036b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-20T01:43:01.237781100Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-20 02:46Z, learned the hard way). Every landing moves master, so EVERY gate frozen on the previous master stops counting for landing, including a gate that is RUNNING at the moment of the landing (a landing commit needs parent = current master and tree = gated tree). Tonight: the P0 landing (a5cca6e7) invalidated the credited Darwin and w-604b gates on 476c45c7; then the S4b landing (on a5cca6e7) invalidated the w-604b gate that had just launched on a5cca6e7. Practice: (1) Before giving a gate GO, check whether another item is about to land (evaluation passed, landing package in flight); if so, either land that first and carry before the gate, or hold its landing until the running gate's item lands too. (2) Prefer landing order = gate order: gate, evaluate, land, then broadcast the new master, then carry, then the next gate. (3) Never kill a running gate to recover; let it finish as evidence. Related: w-edd8fa00da6b (batch-gate credit) would remove most of this cost."
+}

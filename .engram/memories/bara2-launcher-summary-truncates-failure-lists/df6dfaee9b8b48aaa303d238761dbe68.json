@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara2-launcher-summary-truncates-failure-lists",
+    "revision_id": "df6dfaee9b8b48aaa303d238761dbe68",
+    "previous": null,
+    "body_sha256": "05b1023ffe11a00619b80607991cab50f6f28104fc663044998237d4982422c8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-24T07:11:08.078563500Z"
+    }
+  },
+  "body": "Worker trap (Termal::BarA2, 2026-10-24 07:05Z; my own miss on the Group B first_extraction diagnosis).\n\nWhat happened: a failed focused run's launcher output (the bounded summary in the Bash result) showed only the first 3 lines of a test's panic list. The full panic listed 6 lines. I fixed 3, and the next run (test-eb017375) failed on the other 3, which cost a cold 10-minute rerun.\n\nRule: before diagnosing a failed run, read the failing test's complete panic text from the run's full log, focused.log in the RUN directory. Use grep -A on the panic message. Never rely on the summary's excerpt. For list-style assertions (such as the first_extraction boundary test), check the fix offline first by mirroring the assertion with a script. Example: .tmp/scripts-11466/machinery-scan.mjs, which reproduces no_file_outside_the_component_names_a_function_of_the_check_machinery."
+}

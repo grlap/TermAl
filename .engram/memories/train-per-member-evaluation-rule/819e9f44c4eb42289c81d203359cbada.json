@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "train-per-member-evaluation-rule",
+    "revision_id": "819e9f44c4eb42289c81d203359cbada",
+    "previous": null,
+    "body_sha256": "d15116ce41d4f48c7f84857f87b91a8a314a3dd7503c159be75bcfe7881c3b44",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a13343-8dbe-75a1-b35a-540531f46f53",
+      "work_ref": "w-540531f46f53"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T00:01:08.194012800Z"
+    }
+  },
+  "body": "Coordinator rule for TRAINS (Termal::Fable2, 2026-10-16 00:01Z, learned on train-2). A combined full gate credits ONLY the carrier item that is focused at launch; the multi-item credit fix w-540531f46f53 is unfixed, and Greg's #713 exception was one-time. Before push, condition 3 needs a fresh PASS evaluation for EVERY member. Opus2 rightly held train-2's push (4daa5b87 #2430).\n\nWhat worked (about 20 minutes for 4 members): the Merger holds all members, and the train root is named for each. Then per member:\n- turn A: a holder note on the item citing the gate run, the input fingerprint, the carrier's record and the commit. This moves the focus.\n- turn B: a credited focused cargo test of that member's own tests in the train root.\n- turn C: confirm the typed record, request the independent evaluation, and do the next member's turn A in the same turn.\nUnbound \"full gate passes on the exact tree\" criteria cite the carrier's record by that note. I own each wake.\n\nPLAN THIS BEFORE THE COMBINED GATE next time, and schedule the member runs in the same TermAl window as the gate's END, so the push isn't held."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol-a7bb-direct-cargo-temp-root-contract",
+    "revision_id": "f1c4bd5a327945ae97a46cbd69c0caca",
+    "previous": null,
+    "body_sha256": "31b4bd8451195aaeef99ef07943289fbe774c30ca1d0c0a60f6eda04b4c4a3b8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T15:50:25.704641900Z"
+    }
+  },
+  "body": "Worker lesson from Sol-a7bb's R14 run test-8ea65bb0 (2026-11-11): setting TERMAL_TEST_RUN_ROOT equal to TERMAL_TEST_USER_TEMP causes every fixture allocator to panic at src/test_temp_paths.rs:71. The existing contract requires RUN_ROOT to be a direct run-* child of USER_TEMP/termal/tests. For direct Cargo after the registered launcher's -- (no test-temp-root wrapper), set repo-local TEMP/TMP/TMPDIR/TERMAL_TEST_USER_TEMP outside the input worktree and leave TERMAL_TEST_RUN_ROOT unset; the Rust owner then creates its product directory safely. Read the current resolver before inventing any override. Original compile succeeded with34warnings but all29 fixture-using cases failed before behavior,12 other cases passed; original FAIL remains preserved. Also inventory actual Rust module mounts before choosing filters: engram_naming_source.rs is source_root_naming::source_id under tests::engram_host_adapter::turn_observations, not tests::engram_naming_source. Check actual executed names/counts, not filename-derived assumptions."
+}

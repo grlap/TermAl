@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "closure-shared-target-dir-2026-11-13",
+    "revision_id": "509680e000ab4224ac78309a0472d59a",
+    "previous": "558c497549c44a4e84032d76e8131606",
+    "body_sha256": "b31ceea6a9080ba7a72e75cec262782197abdba4ae9fbbeada782b0070914de9",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T06:13:55.018335600Z"
+    }
+  },
+  "body": "Closure-check shared Cargo target (Opus2 proposal #5820, CONFIRMED by Fable2 #5821, 2026-11-13 04:48Z). For closure checks of landed items (one small registered check on current master plus one independent evaluation), every check at the same master commit X uses ONE shared CARGO_TARGET_DIR: C:/github/Personal/TermAl/target/closure-<X first 8 hex> (for example target/closure-57a762c8), so only the first compiles cold. Conditions: (1) EXACT-COMMIT ONLY: a closer may use target/closure-<X> only when its worktree HEAD is exactly master X and clean; a new master means a new directory (keeps the stale-binary risk w-8376b03f2259 harmless). (2) Serialized through the Central slot; never concurrent use. (3) Cleanup: when master has moved on and the last closure at X has ended, the integration owner removes target/closure-<X> after a path check that it is inside the repo, and records the removal; no lingering per-commit directories. (4) The record stays a direct, classified cargo test (no wrapper) run in the closer's own named root; only the target directory is shared. Closures are Central-only (DL560 runs are hostless, no registered record); interleave with feature work; evaluation slot strictly one at a time; closers hold at most 3 items at once; Opus2's landed combo items join the same stream.\n\nMEMORY NOTE (2026-11-13 06:14Z, memory central-cargo-memory-budget-2026-11-05 rev 11, Fable2 #5834): a shared closure-<X> target used from a different worktree still recompiles the termal crate (its Cargo fingerprint includes the worktree path), so such a run is COLD for the memory floor: raw FV at least 24 GiB, no other rustc. It saves dependency build time only. WARM (20 GiB) is only the same root at the same commit in its own already-built target. Measured 06:11:59Z: 8e1f's aa7b closure from root 3611 on closure-e8be8a38 (built by Opus3's other roots): one rustc 12.4 GB, FV 10.16 GiB."
+}

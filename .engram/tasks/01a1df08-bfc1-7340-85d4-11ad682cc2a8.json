@@ -1,0 +1,33 @@
+{
+  "id": "01a1df08-bfc1-7340-85d4-11ad682cc2a8",
+  "external_ref": null,
+  "title": "Extract acceptance CLI read decoding from the large API module with explicit caller ownership",
+  "outcome": "A focused module owns acceptance CLI read decoding and states which callers and publication policies it serves, without changing their semantics.",
+  "acceptance": [
+    "Move the read decoder/seam and any appropriately shared fixed diagnostic policy into a focused module with an ownership header; the API module delegates without coupling unrelated callers to evaluator recovery publication policy.",
+    "Behavioral tests preserve parent/settings unsupported-operation and user-refusal handling, and evaluator recovery confidentiality/classification; no new CLI, environment or authority override is introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "acceptance-evaluation",
+    "blocks-engram-memory-sync",
+    "cross-project",
+    "design-rule",
+    "diagnostics",
+    "evaluator",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1de3a-abf6-7512-a7b5-27e5e342bba4",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

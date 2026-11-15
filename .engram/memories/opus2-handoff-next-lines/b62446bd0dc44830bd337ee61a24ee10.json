@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-handoff-next-lines",
+    "revision_id": "b62446bd0dc44830bd337ee61a24ee10",
+    "previous": null,
+    "body_sha256": "0095fc96f683045ecee856ffb3a77747527e796f857760cbab8274d29d0a1717",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T03:36:44.384032200Z"
+    }
+  },
+  "body": "Opus2 standing practice from 2026-11-13 03:37Z (Fable2 #5805, memory rules-handoff-continuity-2026-11-13, Greg's request for precise handoff rules): every GO, result or landing message from Opus2 ends with \"NEXT: <owner> <action>\". Every placement request gets an answer on the next turn: \"placed\", or \"queued behind X, ETA HH:MMZ\". A running FULL never blocks reviews, author focused runs on other runners, or code writing; place them in parallel within the Central budget. Address sessions only by native id (session-N, or host:UUID::session-N); a display name routes to an unwoken domain mailbox. If a sent message reports durableButNotWoken, resend natively at once. No reaction after 20 min: ping once natively. After 40 min: escalate to Fable2."
+}

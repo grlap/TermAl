@@ -1,0 +1,14 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-direction-native-remote-mailbox-2026-10-19",
+  "head": {
+    "state": "active",
+    "chain": [
+      "1436f36f8cbe4fe2b2a74d6a45af9b80",
+      "f4b5648a209441b4b34b14c2e50f2812",
+      "4bf8bd9cd06c413f99ce8cc65302e779",
+      "d55118552004459fb2cdc10a01e974d0"
+    ]
+  }
+}

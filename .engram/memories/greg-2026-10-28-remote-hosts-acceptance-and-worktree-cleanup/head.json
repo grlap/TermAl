@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-2026-10-28-remote-hosts-acceptance-and-worktree-cleanup",
+  "head": {
+    "state": "active",
+    "chain": [
+      "f9333ee2e9ba46909ae90f6b111c5692",
+      "c08deadaf78c443d8a12d8581fa0577f",
+      "4a1bd45100834e809c4ecc71d9856b74",
+      "0fba92c54a034cc88428da30eb28380f",
+      "1f4aa6dd162b4f3ab4df0fcb711602f5"
+    ]
+  }
+}

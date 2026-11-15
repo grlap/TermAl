@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-22-fail-open-admission",
+    "revision_id": "25de8236b9ed461c9daa0b92fc3c7f8d",
+    "previous": null,
+    "body_sha256": "85183f9081bdf0c1a701834f480f5f324e384608a8e9bc4502fa7567d93e04ab",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a164fe-6291-7020-9a4d-06fb930cac38",
+      "work_ref": "w-06fb930cac38"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=claude-fable-5-1;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-22T19:14:46.733451800Z"
+    }
+  },
+  "body": "Greg's direction of 2026-10-22, recorded by Termal::Architect1 (session-8982) from Engram::Advisor's verbatim relay (TermAl mailbox bac6ea2a #39, mailbox-message-0e433ddd-3121-4bd5-b524-5193b003abb3, 19:13:29Z; the chat host exposes no sub-minute timestamp for Greg's own line). Greg's words in the Advisor conversation: \"Engram::Architect1 naprawia gated control, ktore wogole nie dziala, i blokuje normalna prace\" and \"zwykly prompt nie powien miec gated control, tak ?\". Advisor's reading, which is the direction: ordinary prompt admission must not depend on gated control; keep only explicitly gated operations gated (also Advisor #34 mailbox-message-82cfc9ee-ff34-4efe-b074-0bfaffd38af8 and #35 mailbox-message-e3a25de8-5902-4b3f-ada6-8ee987d9a3a3). Earlier the same day, in Engram::Architect1's acting session (relayed in TermAl mailbox 798c9aa3 #62, 19:03Z): \"to ty to napraw, jedyna sesja ktora chodzi\" — Engram::Architect1 (session-9550) implements the incident repair. Via Engram::Opus (mailbox 5096166d #7): \"CZEMU MUSZE ANULOWAC PROMPTY ?\" — Cancel is a workaround, not a design.\n\nWhat was decided and recorded: the design of record is the C1-C3 contract on w-06fb930cac38 (note of 19:16Z): for an ORDINARY prompt (user or mailbox), when admission ends in an availability failure and nothing may have reached Engram, the host sends the turn without a grant with a Degraded card naming the cause — no park, no retry record, no window, evidence host-local; a possibly-sent Begin is reconciled first through the exact replay; explicit Refuse and Defer keep their semantics; interrupted retained heads are re-admitted by Resume or re-enable, or refused with a typed reason, never a silent 200. w-a5cb89d95340 (Profile P design, deferred 2026-10-11) is decided only for this narrow part; Profile P's evidence profile is not revived.\n\nItems filed on Greg's word via Opus (#7, #10): w-06fb930cac38 P0 (Resume of interrupted heads after control disable/re-enable), w-de6021f4b32f P0 (StateInner held for seconds: full 19.3 MB / 6,793-session snapshot built under the lock on every commit_locked plus the writer tail trim), w-260d2528bc15 P1 (retries re-run a full evaluate inside the 20 s budget shared with the fence), w-9a356000735e P1 (boot recovery eagerly rebinds every session that ever bound: 25 control sidecars in two minutes), w-6468a16d9f1c P2 (cross-project implementer cannot bind or run; carrier route), plus existing w-ac230a24d0d8 (exhaustion card). Containment applied by 9550 under Advisor's authorization (1075ac67 #167): Engram project only, enabled:true turnGatedControl:false; TermAl lanes stay gated. Carrier route: 9550 authors in .tmp/gated-recovery-9550; Termal::Architect1 applies frozen patches in .tmp/wt-gated-recovery-8982 (23f7a2be), holds the claim, names the root, runs the credited checks, gate, review pair and evaluation. Evidence: w-1fcaa9b93d12 notes 1823d195, 43dc2c58, 0b9a6d95, e8f53437; TermAl .evidence/p0-profiling-8982/report-2026-10-22T19Z.md."
+}

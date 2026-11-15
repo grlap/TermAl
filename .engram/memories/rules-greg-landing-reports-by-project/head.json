@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "rules-greg-landing-reports-by-project",
+  "head": {
+    "state": "active",
+    "chain": [
+      "c35edde2401f41b0a1e47f665f4e3997"
+    ]
+  }
+}

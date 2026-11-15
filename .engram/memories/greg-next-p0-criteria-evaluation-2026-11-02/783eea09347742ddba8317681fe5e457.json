@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-next-p0-criteria-evaluation-2026-11-02",
+    "revision_id": "783eea09347742ddba8317681fe5e457",
+    "previous": null,
+    "body_sha256": "762770acb84643dc76d164acbb706267c46fb202989dcf6a316f3a0ce71b98b5",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+      "work_ref": "w-3fe8f4472e5d"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-02T06:48:25.156082900Z"
+    }
+  },
+  "body": "Greg, 2026-11-02 06:47:30Z (via Engram::Asistant #30, relayed verbatim by Engram::Fable #5902): \"Mysle ze to nastepna rzecz P0. Ewaluacja kryteriów.\" Meaning: after w-3fe8f4472e5d (gating removal / Execution Observability) lands, the next P0 is making acceptance-criteria evaluation work again through Execution Observability. Evaluation stays temporarily off until then, per memory greg-acceptance-evaluation-non-blocking-2026-11-02. In the same message Greg asked for a concrete list of sessions and actions for the retained-state cleanup: \"Co mam wykonac i na jakiś sesjach. Jezeli nie potrzebujemy tych sesji mozemy je usunąć.\" Session deletion is Greg's act only; agents never delete sessions."
+}

@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-gate-has-no-clippy-stage",
+  "head": {
+    "state": "active",
+    "chain": [
+      "ebf2921e14ad4b70afdba0a0d2687793"
+    ]
+  }
+}

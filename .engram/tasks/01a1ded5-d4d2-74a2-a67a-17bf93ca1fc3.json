@@ -1,0 +1,29 @@
+{
+  "id": "01a1ded5-d4d2-74a2-a67a-17bf93ca1fc3",
+  "external_ref": null,
+  "title": "Exercise raw Cargo output environment paths with a link before dot-dot through executeRun",
+  "outcome": "Integration tests distinguish the raw environment matching walk from the normalized metadata path validation.",
+  "acceptance": [
+    "With metadata reporting an admitted normalized path, exercise CARGO_TARGET_DIR and CARGO_BUILD_BUILD_DIR raw spellings containing a linked component before '..'; executeRun refuses before any stage starts and creates no output."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "dl560",
+    "performance",
+    "review-low",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dae9-ede6-7e10-a850-06f3c0e4467d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

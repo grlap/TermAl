@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "restart-plan-joint-sync-2026-11-11-0914",
+    "revision_id": "49614d2f9aa44e63bd8fce01ff916986",
+    "previous": "3ab0ea61c07048698ac6420d122a951e",
+    "body_sha256": "6851dfd521639c17ec1e7b92ecd019d2707c082ad8dd7f069670d0422a9e1139",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T14:52:18.752415600Z"
+    }
+  },
+  "body": "Joint TermAl+Engram restart plan, 2026-11-11, revised by Termal::Fable2 at 14:52Z. It supersedes the 15:00-17:00Z window.\n- Engram estimates, from Engram::Fable (TermAl mailbox ebe242f7 #7571): the sync (including w-6ecc, MAX_BUDGET 60000, and the w-537c 10 s warning fix) lands about 18:30-20:30Z. The Central and DL560 installs follow right after, in Opus2's slot timing once any open TermAl run ENDs, and the Mac install after that. Joint restart about 20:30-22:30Z. w-6ecc is not split out.\n- TermAl train: combo54-57 landed and installed on Central and DL560 (master 6338adde at 14:45Z). combo58 (be3b6fd8, w-56cd UI) is gating, then combo59 (e6b8d2f7, TermAl half of w-ab5d).\n- w-18a1: R13 (tree dc1752fe on pinned e6b8) is frozen, but no registered run is possible: its launcher sends --timeout-ms 60000, and pre-sync owners refuse it. Coordinator decision at 14:51Z: R14 OMITS --timeout-ms to the source owner (old default 30 s, new 60 s), and a7bb inventories every budget value TermAl sends to Engram. The memory w-18a1-install-order-engram-first stays in force until that inventory clears every value.\n- At restart: once all installs are done and the coordinators agree, send Greg \"restart now\" with the build hashes and reason through Engram::Advisor (session-6219, mailbox b9d13887), cc Engram::Asistant. Greg performs the restart.\n- After restart: run the census and the closing-jobs diagnostics (w-97ace) for w-1676, the boot sub-phase timings (w-e75b) for w-9995, and ONE real contended evaluate for Engram w-ccc1 with 11334."
+}

@@ -5,7 +5,7 @@
   "outcome": "Re-applying an unchanged broad remote snapshot stamps no mirrored proxy, so it adds nothing to the next persist delta and never forces whole-transcript rewrites. Every real change is still stamped and persisted; an undecidable comparison counts as changed.",
   "acceptance": [
     "A deterministic test re-applies an identical broad StateResponse to mirrored proxy sessions, both revision-gated and ForceAfterLaggedEvent, and asserts that every proxy's mutation_stamp is unchanged and that the persist delta plan at the post-first-apply watermark selects 0 sessions; it is recorded failing (RED) on a6f605aa or the then-current master without the fix.",
-    "sync_remote_state_inner decides per proxy, by reading only, whether the incoming summary changes the record, using equality on the full localized record without messages plus the transcript identity markers (remote session_mutation_stamp, body_seq, epoch, message_count); any field that cannot be compared is treated as changed; session_mut_by_index and the transcript clone run only for proxies whose record changes.",
+    "For each mirrored proxy, sync_remote_state_inner applies the incoming summary in memory and advances the proxy's mutation stamp only when something a stamp consumer observes differs before and after the apply: the serialized broadcast summary (excluding its own session_mutation_stamp), the raw live_activity, the serialized persisted projection without messages (excluding the per-write source_stamp), or the transcript identity (message_start_index, retained length, remote_applied, remote_epoch, and the remote session_mutation_stamp, body_seq, epoch and message_count); a view that cannot be serialized counts as changed. While the summary is applied, the previous transcript is moved rather than cloned, and the session is replaced within the same StateInner critical section.",
     "Positive controls are each stamped and selected by the delta plan: a metadata-only change (such as status or title), a transcript append (message_count and body_seq), an epoch change, and a remote mutation-stamp change with otherwise equal data; the existing remote-sync tests still pass.",
     "The independent review pair, explicitly asked to check the field coverage of the comparison, has no outstanding Medium or higher finding, and the full gate passes on the exact landed input."
   ],
@@ -36,12 +36,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a15102-d358-7642-acdd-1fcaa9b93d12",
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed on master as ffaa0047 (fast-forward from 53baf7b8, pushed 07:36Z). An unchanged broad remote snapshot no longer re-stamps mirrored proxies; real changes are still stamped and persisted. Evidence: RED test-5177d69c on 4df7785a; registered GREEN at the landed commit test-dded2c4b (164/0, verification 2d401370); review pair round 2 clean, adopted byte-identically by the re-cut; landing FULL test-7b71d935 on DL560 C7 green on tree e4aba3dc. Criterion 2 revised to the variant the coordinator approved (concurrence 51c0eb0f). Post-landing evaluation 7025af40 passed all 4 criteria. Follow-up w-da1b0393291e filed for the change-view clone cost.",
+    "completed_at": "2026-11-15T07:55:45.915513700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

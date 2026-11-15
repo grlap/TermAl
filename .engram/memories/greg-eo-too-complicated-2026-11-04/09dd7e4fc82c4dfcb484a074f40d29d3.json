@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-eo-too-complicated-2026-11-04",
+    "revision_id": "09dd7e4fc82c4dfcb484a074f40d29d3",
+    "previous": null,
+    "body_sha256": "b5e2e456b2386208c21fc361efb512a37cf618e6757fc4d089dc1144f7fc7bd5",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T19:57:53.135927600Z"
+    }
+  },
+  "body": "Greg, verbatim, via Engram::Asistant 588693a8 #381, 2026-11-04 19:56Z: „obawiam sie bardzo, ze system do EO jest bardzo skomplikowany, kiedy nie powien byc”. Asistant's scope: with Engram, assess and simplify the whole path from running a test to evaluation: the minimal source and evidence model, what must really work, which states, comparisons and procedures are unnecessary and cause false refusals, and concrete code simplifications, not new ceremony. Ordinary work must work automatically, real source changes stay told apart, historical evaluations untouched. P0 repairs continue; one short joint proposal goes to Greg. Before approving any new EO mechanism, ask first whether the commit comparison already decides it (src/acceptance_committed_input.rs)."
+}

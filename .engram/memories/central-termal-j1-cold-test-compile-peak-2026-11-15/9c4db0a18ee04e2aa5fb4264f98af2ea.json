@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-termal-j1-cold-test-compile-peak-2026-11-15",
+    "revision_id": "9c4db0a18ee04e2aa5fb4264f98af2ea",
+    "previous": null,
+    "body_sha256": "a3d1a90b1f8bd28329e57348a254838ae6bd23dcbbd1e6763dffc0bfc215f48a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-15T18:54:55.586380Z"
+    }
+  },
+  "body": "Central capacity fact (Opus2, 2026-11-15 18:55Z), from c593's verified measurement on the 0742 Windows leg. It corrects the older figure in central-cargo-memory-budget-2026-11-05 (a rustc of about 9.7 GB, with FV at about 14.2M).\nA cold `cargo test -j 1 --bin termal` compile of TermAl at 521085f7 peaked at a rustc private of 16,387,858,432 bytes (about 15.26 GiB), with a working set of about 13.96 GiB. Sampled FreeVirtualMemory fell to 7,311,360 KiB at 18:37:02Z, from an admission of 23,244,024 KiB at 18:31:27Z.\n- The run was test-0d6696a7. There were 126 samples, starting about 42 s after launch, so this is a sampled minimum, not a continuous bound. There was no 1455 or OOM.\n- Consequences while such a compile runs: no LLM spawn (the 16,777,216 floor is not met), and no second cargo job.\n- The 23,068,672 admission floor held, with about 7M of margin. Treat that margin as thin: anything else that commits memory during the compile can exhaust it.\n- An Engram crate compile is a different size. Measure it rather than reuse this figure."
+}

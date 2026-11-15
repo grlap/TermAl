@@ -1,0 +1,24 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-build-cap-policy",
+  "head": {
+    "state": "active",
+    "chain": [
+      "219e691053154e25b54854a2a639b61a",
+      "2d48115d0f9b4e629b96ed625f86d803",
+      "aaf3d9409095484fbc03db4aaee7504c",
+      "e2875a21e9db4a388a5a65f36939c0ff",
+      "714c06b604b0492bac2de5a2227324c4",
+      "716e817cc8144dd29c11d3ae475ef5be",
+      "a59e588ec5434f6e91a0041e8e8b4f87",
+      "2dc6fb69b3454d6f801092decbb8d39d",
+      "ea07c4d52258440198a1e00723c96827",
+      "693ae172c0ca458cb2192f2277611f2e",
+      "4bbf44998bd941c689b9ce245bc7ac14",
+      "e98c70f9d5c34468b84342e1c7716ee4",
+      "afd8d50b5d5344a681d5dae47fba9300",
+      "566fa7dd292c46c087044bae0283d26b"
+    ]
+  }
+}

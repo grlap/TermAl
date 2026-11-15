@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara2-handoff-to-session-id-not-display-name",
+    "revision_id": "fe63e505d35f471fb26e28a45c4bd1c7",
+    "previous": null,
+    "body_sha256": "90a9c787adbfbe8e2fac583873656c7f53baf14207e4327ae3bc98238f601226",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T01:02:58.005004700Z"
+    }
+  },
+  "body": "Worker trap (Termal::BarA2, 2026-10-30 about 01:01Z; my own miss on w-e1aa5b230565, diagnosed by Fable2 #1177).\n\nWHAT HAPPENED\n- An Engram handoff offer made with to=\"Termal::Merger2\" (the display name) could not be accepted.\n- Merger2's accept was refused with \"ambient work has no live incoming handoff offer\", even with the item focused.\n- The handoff tool's `to` takes any string and validates nothing: it accepted the display name silently.\n\nFIX\n1. Cancel the bad offer: handoff action=cancel, reason.\n2. Re-offer with to=\"session-14549\", the recipient's TermAl SESSION ID. Merger2 then accepted, after selecting the item's focus.\n\nRULE\nAddress handoff offers to the recipient's session id, never its display name. Pass ttl_seconds for a long-lived offer, because the default expiry is short (it is capped at your claim expiry).\n\nALSO\n- A live offer blocks your own holder notes on that item, so note before offering.\n- Cancel and offer both move your focus to that item; renew your other claim afterwards to restore focus."
+}

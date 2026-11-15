@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "freeze-crlf-working-files-trap",
+    "revision_id": "6d64f26d542140af8f23a5e85326496c",
+    "previous": null,
+    "body_sha256": "778d287aa7eddef2c003e88feb103e10d54ce0a6ef4c241af4de8580c9a38188",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-18T15:35:31.059020300Z"
+    }
+  },
+  "body": "Worker trap (Termal::BarA1, 2026-10-18, met on the w-52222f575b81 carry). TermAl's blobs are LF, but .git/config sets core.autocrlf=true, so a checkout (reset --hard, checkout, apply) writes CRLF files to disk. git diff --cached reads a stat-clean working-tree file instead of its blob. With CRLF files on disk, the staged-diff bytes therefore depend on autocrlf: the Engram schema-1 script (run with core.autocrlf=false) and the pinned `termal.exe review-freeze-check` (repository config, true) compute different fingerprints. The check fails with \"review input drifted from the independently supplied fingerprint\", although the tree is identical. FIX: before freezing, normalize the changed files on disk to LF (`perl -pi -e 's/\\r\\n/\\n/' FILES`), restage with `git -c core.autocrlf=false add -- FILES` (the tree is unchanged; verify with write-tree), then freeze. The script and the checker then agree. Diagnose by comparing `git -c core.autocrlf=true diff --cached --stat` with the false form: a whole-file rewrite under false means CRLF files on disk. Also: Git Bash `grep -c $'\\r'` miscounts CRs; count with `tr -cd '\\r' | wc -c`."
+}

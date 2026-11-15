@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "restart-plan-joint-sync-2026-11-11-0914",
+    "revision_id": "08bd98f70ebf4f6fbea9dd0b98820b73",
+    "previous": "bd991494746e40c790925d3e54087468",
+    "body_sha256": "21fbdaa45322f36549c854d64eefd354358eba82adadbe808f2a9e8e626d33dc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T21:28:14.385618300Z"
+    }
+  },
+  "body": "Joint TermAl+Engram restart plan, revised by Termal::Fable2 at 18:13Z on 2026-11-11. This supersedes the 17:42Z revision.\n- Engram (Engram::Fable, TermAl mailbox ebe242f7 #7580, 18:12Z): the e139dbc3 round found another Medium, a race in completion's use of imported evidence, which 11330 is fixing. No clean landing tonight. The JOINT RESTART MOVES TO TOMORROW MORNING (2026-11-12). Engram::Fable will report when its Central and DL560 installs are done; nothing is needed from TermAl before then.\n- TermAl: no separate TermAl-only restart. Nothing landed is urgent for running sessions.\n  - w-18a1 R16 (a7bb) is in progress after R15 failed its FULL; the 22-row classification is evidence aa794278 on w-18a1.\n  - The train continues: combo60 = 8e1f history 4f6bb130 (w-220fdb91ebac); then 8e1f publication 9481eca9; then c593 fc17, edfd, c593 d09b and 03d4 w-184d; R16 when ready.\n- At the restart moment, send Greg \"restart now\" via Engram::Advisor (session-6219, mailbox b9d13887), with both installed build hashes and the reason, cc Engram::Asistant. Greg performs the restart.\n- After the restart:\n  - census and closing-jobs diagnostics (w-97ace) for w-1676;\n  - boot sub-phase timings (w-e75b) for w-9995;\n  - ONE real contended evaluate for Engram w-ccc1, with 11334.\n\nAddendum 21:28Z (Termal::Fable2). Engram::Fable (TermAl mailbox ebe242f7 #7585) reports that the final sync build cc09 shows projection_repair_required on all 6 local Engram stores, including Engram's TermAl-project store. There is no schema refusal, and mutation stays disabled until the repair.\nMorning sequence:\n1. Install immediately before the restart.\n2. Greg restarts.\n3. Once no old engram.exe remains, run `doctor --repair-projections` on every live store.\n4. Readiness must then report all ready.\nEngram is unavailable to sessions while the repair runs. Engram::Fable will send measured durations from tonight's rehearsal on copies.\nTermAl duties:\n- Before the window, tell Opus2 and all Sols to finish or park tracker writes and evaluations: no claim, note or done during the repair, resuming only after Engram confirms all-ready.\n- Include this in the \"restart now\" notice.\n- Asked Engram::Fable (#7586) to confirm that TermAl's own ~/.termal/*.sqlite is never copied, opened or repaired, and that rehearsal copies live under a repository's .tmp/ via quiesce or backup.\nTermAl's build for the restart, as of 21:28Z: master b1e8769a, plus anything landed overnight (combo64 stdin, R17)."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-fable2-accidental-gate-backticks-2026-10-29",
+    "revision_id": "d77759c7e65b44509becf58274ed4e9f",
+    "previous": null,
+    "body_sha256": "701c8c2ad1a4b7db14bf506d4cd36a6b5dc8238321f75015907c5b2d68e9388d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T04:08:37.320073300Z"
+    }
+  },
+  "body": "INCIDENT, 2026-10-29, Termal::Fable2 (the coordinator), owned and disclosed.\nAt about 03:57:28Z a Bash tool call by Fable2 ran an unintended `node scripts/test-launcher.mjs full` in the MAIN checkout C:\\github\\Personal\\TermAl. The run was .git/review-runs/test-452ccd81-4b0c-406e-8053-ee4721056cc0, with owner session-8112.\nCause: shell command substitution. A relay message was built with printf '%s' \"…`node scripts/test-launcher.mjs full`…\" inside DOUBLE quotes, so bash executed the backticked text. The tool call then hung at the 120 s limit, moved to the background, and the gate ran on.\nImpact:\n- Its stages (cargo-check, fingerprint tests, then `cargo test` from 04:01:43Z) overlapped B16's pinned live-25 run test-da554d1a (04:00:01–04:06:15Z), which ended 24/1 FAIL. The contention is a first-class hypothesis for that failure.\n- It broke the one-Cargo rule at about 32.7 GiB free commit.\nFix: TaskStop on the background task. Stop-Process on Fable2's own orphaned chain only (sh 101208, node test-temp-root 100884, rustup 16824, cargo 41172, test binary 50584), after verifying their ancestry. The run was then settled with `node scripts/test-launcher.mjs recover` as INTERRUPTED; no tests were rerun.\nRULE GOING FORWARD: never put backticks or $( ) inside double-quoted shell strings in Bash tool calls. Write message text through a QUOTED heredoc (<<'EOF') or the Write tool, and pass it with --message-file."
+}

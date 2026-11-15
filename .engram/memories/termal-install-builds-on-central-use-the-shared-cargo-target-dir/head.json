@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-install-builds-on-central-use-the-shared-cargo-target-dir",
+  "head": {
+    "state": "active",
+    "chain": [
+      "a4b019627eb24b7a98b513bf0550e64a"
+    ]
+  }
+}

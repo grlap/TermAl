@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-verify-before-claiming-to-greg",
+    "revision_id": "a1e1b1afbc5c4b4792d8915549c51255",
+    "previous": null,
+    "body_sha256": "6b929bed32363e4bbb05ec65d598c2bdd873d1257f9c6a0c62205bdd63dc74d0",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-03T17:03:53.215233300Z"
+    }
+  },
+  "body": "Lesson from 2026-11-03, 17:05Z. I told Greg \"every acceptance evaluation is refused\" (w-fdbb), taking the claim from the item's title without checking the code. Asistant challenged it: Engram's Registered Git-input path admits an evaluation without a sighting. TermAl already implements that path in src/acceptance_committed_input.rs, where a registered `--input commit` run, once Engram acknowledges it, admits with `git-commit:` and the sighting is not read. I had to correct it with Greg and Engram::Fable.\n\nRule: before telling Greg a universal claim (\"every\", \"never\", \"blocks all\"), check it against the source or the feature docs. An item title records the reporter's view at filing time, not verified scope. Name the evidence (file:line or test name) when I state it."
+}

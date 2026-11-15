@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "author-run-must-cover-changed-source-test-modules",
+    "revision_id": "992aa20e6ae14a7ba8d494f8e3d39ddc",
+    "previous": "0f2ec618dada4641b18f1f6a4c499eb9",
+    "body_sha256": "9a1ebff92fae6a97d79ecaf0bdb71937867d2c7a0c0db364d2e5f97fd631dffc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-12T00:25:52.153723900Z"
+    }
+  },
+  "body": "Process rule from the TermAl coordinator (Termal::Fable2). Revision 2, 2026-11-12 00:27Z, after Greg's complaint that the whole suite runs twice (\"puszczamy calosc 2 razy\", relayed by Engram::Asistant 588693a8 #1410).\nBefore a candidate is handed to the integration owner, the author run covers EVERY test module that exercises the changed source files: the changed modules, their test modules, and the sibling modules that call the changed code. The author lists those modules in the handoff. The author does NOT run the whole suite; the whole suite runs exactly once, as the integration owner's FULL gate on the test ref.\nOrigin: on 2026-11-11, two FULL failures were missed by narrow author runs. w-18a1 R15 ran only 47 targeted tests, and FULL found 22 failures. edfd 4fe61e6b ran 553 focused tests and missed a sibling module, engram_unadmitted_reporting_repairs. Revision 1 allowed \"the whole suite or every module\", and authors then chose the whole suite, which duplicated the FULL.\nException: a whole-suite author run is allowed only when the module set can't be determined, or when the change touches shared infrastructure used everywhere (the test launcher, persistence core). Say so in the handoff."
+}

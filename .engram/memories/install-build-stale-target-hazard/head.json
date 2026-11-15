@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "install-build-stale-target-hazard",
+  "head": {
+    "state": "active",
+    "chain": [
+      "8ef5e84ff4734c80b3f1d8c5898c5350"
+    ]
+  }
+}

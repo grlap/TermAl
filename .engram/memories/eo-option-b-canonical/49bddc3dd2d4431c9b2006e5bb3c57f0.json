@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "eo-option-b-canonical",
+    "revision_id": "49bddc3dd2d4431c9b2006e5bb3c57f0",
+    "previous": "0b42f0d594144057b3b32226ebc06647",
+    "body_sha256": "40a3f00d8e2667ef4d772b93f52221939c47b787b90563d7e487409417c4f9dd",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-06T16:32:20.927676600Z"
+    }
+  },
+  "body": "CANONICAL EO OPTION B. This is the joint TermAl and Engram wording, identical to Engram memory rules-source-identity-2026-11-03 rev 6 and rules-greg-native-clean-before-b-2026-11-06 rev 3. It was recorded by Termal::Fable2 at 2026-11-06 16:28Z, per Greg via Asistant: „EO nie mialo tego uzywac, mialo sprawdzac tylko stan przed i PO wariant B ABY ... TO UPROSCIC”, „prosze o sprawdzenie memory, dokumentow ZAPISANIE POPRAWNEGO WARIANTU” and „ŻADNEGO hashowania katalogu .git” (the earlier wording limited to .git/info was wrong). It supersedes every earlier option-B text, including the 05:52Z point (4) \"the file watcher can only DISQUALIFY\", and all watcher, H3, .git/info and source-v2 decisions of 2026-11-06.\nEO OPTION B credit requires ONLY:\n(a) a clean source_id at commit X, taken before the turn's prompt is dispatched;\n(b) the declared test is the turn's first tool action;\n(c) a clean source_id at the same X after the test;\n(d) the result recorded with the existing verification_record_v1 (plus the existing artifact, identity and claim checks).\nNO watcher condition of any kind, no hashing or comparison of anything in the .git directory, no submodule scope list, no other gate.\nsource_id = `engram source` v1, the only version: root HEAD, the filter guard, submodule status --recursive with all rows ' ', one root git status with --ignore-submodules=none, HEAD reread. No ls-files.\nACCEPTED LIMITS: a change reverted before the after-test capture; anything git status doesn't report (hidden index flags, edits inside .git); ignored files.\nRule: no new conditions, mechanisms or gates on this model without Greg's explicit word. Work items: w-24a72c898d6d and w-6f42c416b0c7 (v1 only). Central work is PAUSED by Greg since 16:25Z.\n\nPENDING REQUIREMENT (16:30Z, not yet agreed): Greg, via Asistant #583, verbatim: „source_id powien takze zawierac liste lokalnie zmodyfikowanych plikow o ile takie istnieja + ich hashe”. The proposed source_id is commit X plus the list of locally modified files with their worktree content hashes (empty when clean), with no full repository list and no .git hashing. Open points: Greg must choose whether option B keeps \"clean before and after\" (an empty list) or credits when source_id before equals source_id after; and untracked, deleted, ignored and submodule files, size limit and deadline behaviour are still to be analysed. Engram owns the contract. This record's \"clean source_id\" wording stands until both teams agree and Greg decides. Central is still paused.\n\nCORRECTION (16:32Z, Greg via Asistant #586, verbatim): „NIE, source_id opisuje stan zrodel, czyli commity git + hashe lokalnie zmienionych plikow mamy jeden mechanizm na wszystko TAK ? to jest moja propozycja ktora probuje wymusic od paru dni”. source_id is ONE mechanism describing source state: git commits (root and submodules) plus hashes of locally changed files, with Git reporting what changed, no full-repository enumeration and no .git hashing. It is NOT a clean source_id plus an add-on and NOT a second mode. The 16:30Z \"pending requirement\" paragraph above is superseded in its framing: drop the (a)/(b) option-B choice and any \"clean plus dirty suffix\" idea. Kimi::Consultant (session-15305) is diagnosing the simple design for all consumers (added, deleted and changed files, and submodules). This record is to be rewritten from that result, jointly with Engram. Central is still paused."
+}

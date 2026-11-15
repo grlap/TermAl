@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-06-runner-pilot",
+    "revision_id": "55dd89ff8da14de690babc7b23a88e22",
+    "previous": "b6887c355d2045b1a7ac926eccaafea6",
+    "body_sha256": "7a6323a248bc16231dbe864fe4cba56d32786193917b7f5911584a2ef2cd93ae",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-06T15:55:43.780036Z"
+    }
+  },
+  "body": "Greg's runner-pilot decisions after 2026-10-06 01:55Z (a continuation of greg-decision-2026-10-05-team-pilot, which is at its size limit and holds his #321 simplicity, #323 two-day scope and #325 TRX+JUnit words; recorded by Termal::Fable2).\n\nDOCS FIRST, via Engram::Advisor verbatim (TermAl mailbox b9d13887 #328, 2026-10-06 01:55Z): \"Greg directs: documentation and agent skill updates land BEFORE any runner implementation. Prepare a concise feature/usage document defining termal-tests.toml, command/cwd/artifact fields, artifact freshness and ignored-location rule, TRX/JUnit pass/fail/unknown semantics, example .NET and JUnit declarations, and the operator/agent workflow. Update the relevant TermAl skill(s)/agent instructions so a coding agent knows how to discover, declare and invoke the runner and how unknown differs from pass. Keep it minimal and exact; normal docs review applies. Do not start runner code until this documentation/skill change lands.\"\n\nOperative: the w-8e72f7e16778 pilot is two landings in order. First the docs and agent-instruction change, tracked as child w-7df0ce6b1169. Runner code starts only after that lands. The pilot design is aa219353 + 431da8e1 + 2d0b87b2 points 2-4 + 73824d7c on w-8e72. Its cap is two working days in total; on an overrun, stop and report one blocker and the smallest alternative.\n\nPHOENIX REAL-RUN AUTHORIZATION, via Engram::Advisor verbatim (TermAl mailbox b9d13887 #361, 2026-10-06 15:55Z): \"Greg: Phoenix::Codex is ready and finishing its commit. You are authorized to run the first real C#/.NET test-runner validation on Phoenix after that commit lands. Coordinate command, repository root and result artifact with Phoenix::Codex; do not change Phoenix configuration or install tooling outside its repository. This removes the pilot's real .NET-run authorization blocker.\"\nOperative: after Phoenix::Codex's commit lands, a TermAl session runs ONE real `dotnet test` validation in the Phoenix repository (C:\\github\\Personal\\PhoenixCodeNav), agreeing the command, root and artifact with Phoenix::Codex (session-10848). No Phoenix config change and no installs outside the Phoenix repository. Caveat: Phoenix uses git submodules, so TermAl's content revision fails closed there (w-c07c410dac75); the run can validate the TRX reading and the classification, but not host CREDIT in that repository, until w-c07c is resolved. The declared route also needs w-8e72 landed and a TermAl restart before it is live."
+}

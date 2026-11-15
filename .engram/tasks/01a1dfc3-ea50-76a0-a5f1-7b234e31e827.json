@@ -1,0 +1,36 @@
+{
+  "id": "01a1dfc3-ea50-76a0-a5f1-7b234e31e827",
+  "external_ref": null,
+  "title": "Clarify the test-ref landing-gate wording in CLAUDE.md/AGENTS.md: \"same fingerprint before and after\" means the launcher's recorded source_id before/after equality since the 30ddf016 cutover",
+  "outcome": "Clarify the test-ref landing-gate wording in CLAUDE.md/AGENTS.md: \"same fingerprint before and after\" means the launcher's recorded source_id before/after equality since the 30ddf016 cutover",
+  "acceptance": [
+    "The test-ref bullet in CLAUDE.md and AGENTS.md states that a remote FULL counts as the landing gate when its results record equal sourceIdBefore/sourceIdAfter (the launcher's boundary identity since 30ddf016, docs/test.md 'Ordinary committed-input runs') and the review-freeze fingerprint is bound by the test-ref name and commit; the change is a clarification only, with no condition loosened.",
+    "It lands only after (a) both coordinators' concurrence on the exact wording recorded on this item, (b) Greg sent the exact wording and its consequence, and (c) the final-diff audit recorded as passed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "authority-file",
+    "docs",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The test-ref landing-gate wording in CLAUDE.md and AGENTS.md is clarified: \"same fingerprint before and after\" means the launcher's recorded sourceIdBefore and sourceIdAfter are equal, as they have been since 30ddf016. It is a clarification only, with no condition loosened. Landed as e5c0d06b on origin/master at 18:00:20Z, after the coordinators' concurrence, Greg's word and the final-diff audit, repeated on the carried input. Gate 7B23-FULL-2 test-1cf5c40c passed on DL560 C6. The independent evaluation (delegation-960113d8) passed both criteria. Docs only: nothing installed and no restart needed.",
+    "completed_at": "2026-11-15T18:04:40.199733900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

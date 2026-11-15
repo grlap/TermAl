@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "k3-s2b-landing-release-2026-11-13",
+  "head": {
+    "state": "active",
+    "chain": [
+      "32cc9a066f884b3da08ecf92a08acf67",
+      "dd9f11ab2bc74ed1aeafee74ddfa5176"
+    ]
+  }
+}

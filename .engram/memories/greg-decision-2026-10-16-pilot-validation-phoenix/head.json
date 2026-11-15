@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-decision-2026-10-16-pilot-validation-phoenix",
+  "head": {
+    "state": "active",
+    "chain": [
+      "2cbad1b97cac4945a9baa2982ead2bed",
+      "6d73b9ad59b94d21b4796ed6493dbf5a"
+    ]
+  }
+}

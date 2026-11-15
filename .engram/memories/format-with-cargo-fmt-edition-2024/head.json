@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "format-with-cargo-fmt-edition-2024",
+  "head": {
+    "state": "active",
+    "chain": [
+      "03c705c2847b441ab45ef4340b5b3b6b",
+      "51f56357dc124a899284f69eadf144f6"
+    ]
+  }
+}

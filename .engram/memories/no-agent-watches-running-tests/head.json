@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "no-agent-watches-running-tests",
+  "head": {
+    "state": "active",
+    "chain": [
+      "40396532f171444cbe42555397f15d51",
+      "91700e811eb0420e8dbaa9a1fea7d494",
+      "b1762c10178441ddbb06127e67926bb8"
+    ]
+  }
+}

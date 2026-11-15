@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "coordinator-state-no-live-store-in-assignments",
+  "head": {
+    "state": "active",
+    "chain": [
+      "e3d745d3c51b4edabdf0f013654954e6"
+    ]
+  }
+}

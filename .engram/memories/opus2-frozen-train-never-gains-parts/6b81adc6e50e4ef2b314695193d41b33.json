@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-frozen-train-never-gains-parts",
+    "revision_id": "6b81adc6e50e4ef2b314695193d41b33",
+    "previous": null,
+    "body_sha256": "6792e496f17db9ae12762795b2de809ecb1ad1ea6d6ddc4908f99df76715f85c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T21:37:37.031638500Z"
+    }
+  },
+  "body": "Integration-owner habit (Fable2 #5213, 2026-11-09, after Greg via Asistant #1209 approved Kimi's recommendations with „Robimy tak.”, within existing rules):\n1. A frozen train never gains parts. A part may be removed; a newly READY part takes the next train. That's one composite pair and one authority audit per train.\n2. Author focused checks go to DL560 by default, through an author test ref (refs/heads/author-test/<item>-<commit8>, the rule landed in d53b3c7a). Central's single cargo slot is kept for installs, Windows-only checks and anything that must run there. Opus2 confirms DL560 capacity with Codex 6, then announces it to the authors.\nOrder of work: finish evaluation fixes, the six-stage fmt gate (w-645c) and C6, then remove blocking bugs and dead items."
+}

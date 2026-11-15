@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "ready-coverage-rule-architect3-engram-rules-merger-role-r4-terma",
+    "revision_id": "5d541f907b80439c9081667259324f5a",
+    "previous": null,
+    "body_sha256": "91b34b632b1206eb7429cfd085ddc36329d1ad6f54b6f6d574dad9fb08c893bd",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-25T04:54:16.476146200Z"
+    }
+  },
+  "body": "READY coverage rule (Architect3, Engram rules-merger-role r4; TermAl merger-operating-procedure r12, relayed by Merger2 on 2026-10-25): the required independent reviews must cover the actual final changes, including changed tests and documentation. Before sending READY, check each reviewer's packet filesInspected against every changed path (e.g. the git diff-index --cached --raw manifest), and read its notes for disclosed unread paths: a clean summary is not readiness. Resolve any gap BEFORE READY, either by following up the same reviewer delegation (termal_followup_session) on the unchanged frozen tree, or by showing prior coverage of byte-identical final blobs. Export the review packets (/api/sessions/<parent>/delegations/<id>/result) and the complete full output (/result/output, paged until complete) to .evidence, and send Merger exactly one complete READY."
+}

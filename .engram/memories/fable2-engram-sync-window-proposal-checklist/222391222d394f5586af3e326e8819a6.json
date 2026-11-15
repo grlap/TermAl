@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-engram-sync-window-proposal-checklist",
+    "revision_id": "222391222d394f5586af3e326e8819a6",
+    "previous": "67b313b43fd34ed4944047719558bb93",
+    "body_sha256": "1de58dc9d191d1b02558d94e37fd8b84817b5ea8c4467146612153b7d7b88530",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-12T21:23:25.535453100Z"
+    }
+  },
+  "body": "Engram AACB sync cutover: POST-CUTOVER record (Termal::Fable2). Rev 25 condenses revs 12-24; history is in those revisions. Remove this memory once the rollback hold ends and cleanup is recorded.\n\nDONE (2026-11-12):\n- Engram aacb1370 landed at 15:43:34Z. w-4eab evaluation 4/4, sealed e7bf18ac (rev 50).\n- Greg ran the v2 release package after the signal through Asistant at 19:55Z.\n- Central: the cutover started at 19:57:30Z and ALL SIX STORES were READY, 4039 s in total. engram.exe b2fc71a9, build cbf98fef. I verified this at 21:14Z.\n- DL560: BOTH STORES READY, release 5b5ac67e (ddd136df). 12325 verified the originals. Exception #18 read the backup manifest and state.\n- Central TermAl up since 21:12:29Z on master 73f0fe27.\n- Engram::Fable's \"cutover complete\" came at 21:15Z. Drains and freezes are lifted, and ordinary landings are back.\n\nROLLBACK PATHS (do not use without agreement; later writes would be lost):\n- Central: & 'C:\\github\\Personal\\Engram\\.evidence\\provisional\\aacb-cutover-20261112-release-v2/central-rollback.ps1' -SnapshotDirectory 'C:\\Users\\grzeg\\.engram\\backups\\sync-aacb-20261112T1957300702573Z'\n- DL560: python3 /home/greg/github/Engram-runner/.evidence/provisional/aacb-cutover-20261112-release-v2/dl560-operator.py rollback /home/greg/.engram/backups/sync-aacb-20261112T211219050221Z\n- Old builds: Central d4d0182b (0bd70a30); DL560 0c7d8988 (ce3c7439).\n\nROLLBACK HOLD is ON. My proposed end conditions (12325 #390, Engram::Fable #7710, awaiting concurrence):\n(1) both hosts up on the new Engram;\n(2) normal writes, including an independent evaluation, for a few hours with no store errors; review at about 09:00Z on 11-13;\n(3) the Merger's w-34e0 readiness (sha 24fadb0b) PASSES on all 6;\n(4) no report of lost or garbled data.\nThen both coordinators send \"rollback hold ended\", followed by path-checked cleanup of the v2 pinned artifacts (Central sync-repair-final-12325, DL560 s4-aacb-full and s4-aacb-release), 12325's timing worktree, the v1/v2 packages and my .tmp/fable2-dl560-pkg. The ~/.engram/backups snapshots are Greg's data; deleting them needs his word through Asistant.\n\nLESSONS (filed):\n- w-bebbae70639c: the drain idled 1.5 h because the signal went to Advisor only. Procedure: memory rules-waits-and-wakes-greg-act-holds-2026-11-12. Criterion 3 was met at this cutover.\n- w-4dab2c84fda5: CLAUDE.md routing still names Advisor (Engram twin w-0df4f54f219d).\n- memory greg-2026-11-12-asistant-is-the-channel.\n- The v1 package pinned DEBUG builds; my v1 review missed it.\n\nNEXT: K3 S2b raises the reader floor. It needs its own Greg-act window under the new procedure, scheduled with Engram::Fable."
+}

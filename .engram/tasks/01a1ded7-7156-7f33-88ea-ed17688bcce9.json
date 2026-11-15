@@ -1,0 +1,31 @@
+{
+  "id": "01a1ded7-7156-7f33-88ea-ed17688bcce9",
+  "external_ref": null,
+  "title": "Cover causal completion scan selector and row identity refusal branches",
+  "outcome": "A post-decode invalid causal selector and a feasible row identity conversion failure are independently covered without stalling healthy same-page and later requests.",
+  "acceptance": [
+    "A behavioral regression drives a decodable custody/receipt to selector_validate refusal and checks the supported diagnostic, same-page healthy planning, later settlement, original damaged-row retention and unchanged settled history; cover row_identity_decode when a fixture can reach it without relaxing schema or authority."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-rule",
+    "eo",
+    "k3",
+    "review-followup",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1de73-dca3-7b41-a372-0742de0886ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

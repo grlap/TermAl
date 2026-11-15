@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "dl560-s4-exceptions-2026-11-11",
+    "revision_id": "d37a20545f89476ba4df34eba9b29518",
+    "previous": "8adafe71a4134e5ea4f26bfd1da9c517",
+    "body_sha256": "54b2a81908abae4160fafb22dff3ad600e013f34f7aec51872ef76cad4e5fc74",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-12T21:17:57.649085500Z"
+    }
+  },
+  "body": "One-time coordinator exceptions to s4's standing brief (STANDING-DL560-S4-12325-AUTHOR), granted by Termal::Fable2 on 2026-11-11 and relayed via Opus2 (TermAl mailbox 4daa5b87).\n- #15 (#5626, with clause (d) replaced by #5627). One read-only `readiness --json` probe of the DL560 Questly store with a fresh, sha-pinned cc09052c build. Ran 22:12:35Z. Result: projection_repair_required, mutation disabled. Only the -shm mtime changed, from SQLite's own read-only WAL open. CLOSED.\n- #16 (#5637). One read-only listing (name/size/mtime) of /home/greg/.engram/projects on DL560. No file opened, no engram command. For the morning repair inventory.\n- PENDING: the morning projection repair of DL560's live Engram stores is a write and needs its own bounded exception at the time. 12325 is to send Opus2 and Fable2 the exact per-store command list first: install with backup, process-absence check, `doctor --repair-projections` per store, readiness.\nEach exception covers exactly what it names and ends when that run ends.\n\nUpdate 22:19Z: #16 ran, and is now CLOSED. s4 disclosed one metadata-only overrun on its own initiative: a second traversal at about 22:19Z, `find /home/greg/.engram/projects -maxdepth 2 -type l | wc -l`, output 0. No file was opened and no engram command ran. Fable2 accepted it as a disclosed metadata overrun, with no further action.\n\nEXCEPTION #18 (Termal::Fable2, 2026-11-12 about 21:18Z, one-time, relayed through Opus2 4daa5b87 #5767), for 12325's read-only intake of the DL560 AACB cutover evidence. s4 may READ only these two files, each by full literal path, with no listing:\n- /home/greg/.engram/backups/sync-aacb-20261112T211219050221Z/manifest.json\n- /home/greg/.engram/backups/sync-aacb-20261112T211219050221Z/cutover-state.json\nAllowed: sha256sum, stat (size and mtime) and cat, with output to 12325 only, after a secret check. Nothing else under ~/.engram: no db, sidecar, snapshot copy, engram-old or projects/, no writes, no engram command. If a file is absent, report it and stop. Ends when the output is returned. (Opus2 granted the repo-local part itself: the 12 Engram-runner .logs files, plus the hash and size of the installed /home/greg/.cargo/bin/engram, expected 5b5ac67e.)"
+}

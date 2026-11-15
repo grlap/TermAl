@@ -1,0 +1,39 @@
+{
+  "id": "01a1e0ef-212e-70d0-aa69-97bc1f59bf56",
+  "external_ref": null,
+  "title": "Notify the requester after durable native completion, then perform a targeted authenticated causal pull",
+  "outcome": "Notify the requester after durable native completion, then perform a targeted authenticated causal pull",
+  "acceptance": [
+    "After a native causal completion is durably retained, the runner sends an idempotent completion-ready hint containing the original causal key and run id over the existing authenticated relay to the original requester; a failed persistence emits no success notification.",
+    "The requester uses a valid hint only to schedule its original pending key immediately, then performs the existing authenticated ReadCausalTestCompletion and all custody, origin, mode, input, terminal and post-I/O checks before ordinary idempotent settlement; duplicate, stale and forged hints create no completion or credit.",
+    "Lost notification, disconnect and restart remain recoverable through the durable pending set. Behavioral tests cover successful and failed persistence, duplicate hints, authentication/currentness refusal and targeted recovery.",
+    "The independent review pair has no outstanding Medium-or-higher finding and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "eo-critical",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a15bc9-c8a2-71f0-9ac8-48c4a207f226",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

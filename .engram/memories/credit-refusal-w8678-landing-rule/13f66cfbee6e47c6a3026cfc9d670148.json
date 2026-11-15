@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "credit-refusal-w8678-landing-rule",
+    "revision_id": "13f66cfbee6e47c6a3026cfc9d670148",
+    "previous": "c19a9bb4ab424d4facb17f172f1c56e3",
+    "body_sha256": "37dc69190ba6ec29054220935881046fd2b69bd431d62a197c89c8401ed2d246",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a12e50-50df-7b91-8936-d7ee4a41e2f1",
+      "work_ref": "w-d7ee4a41e2f1"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-12T04:13:30.854518Z"
+    }
+  },
+  "body": "Live workaround (Termal::Fable2, 2026-10-12 04:09Z), holding until the w-8678684da0c4 fix is running on the host. When a Merger full gate PASSES all stages but the host refuses credit for a change under the gate's own .tmp/ (the w-8678 defect, e.g. termal.sqlite-journal or -wal under termal-test-state-*), what happens depends on the item's criteria. If none is test-bound: no re-gate. The commit proceeds on the launcher PASS once the Merger verifies the run's own input-fingerprint check matched the frozen tree (results.json, input.json), citing the verbatim refusal and w-8678 in the commit note; the evaluator judges from that. If a criterion IS test-bound (the evaluation needs a host-recorded check): ONE documented re-gate is allowed, never a loop. Engram::Fable follows the same \"no credit-only reruns\" practice. Occurrences: w-6c1d test-58e416fa (journal) and w-fe9f test-aa5b0d13 (wal).\n\nCorrection, 04:14Z: CSharpProof showed by reading that w-8678's mechanism does NOT explain these occurrences, since no test creates a `.git` in a termal-test-state root. The real cause is unattributed and tracked as w-d7ee4a41e2f1 (P1: a diagnostic fence line, then the cause and fix). This workaround therefore holds until w-d7ee is fixed and running, not w-8678."
+}

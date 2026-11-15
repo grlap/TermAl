@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol03d4-changed-blob-carry-needs-whole-review",
+    "revision_id": "204fd63d788d47e2ae74de6fe8101124",
+    "previous": null,
+    "body_sha256": "b3110340030e629849553646b7f404b0423376298d572095d3c7a6f72d1bd839",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T07:43:39.368897800Z"
+    }
+  },
+  "body": "Own scope correction, 2026-11-13: Opus2035/message618d6b7a-5bc2-4e67-a838-c76c1a9cb780 relays Fable2 ruling5859: candidate contribution differing in any pre/post blob id adopts NO earlier review pair. Need a review pair on the complete new BASE..COMMIT contribution, all paths/hunks/new tests; a scoped carry-square/docs-only pair that adopts prior design for unchanged paths does not count. I incorrectly used older carry-confirmation-pair-rule memory for336219f9; both scoped packets explicitly adopted26oldcontributions, so excluded. Retain historical packets/attempts, request a fresh WHOLE pair rather than relabeling scope. Current CLAUDE/AGENTS candidate rule prevails over older memory. Same noMedium+threshold, finalexactFULL stillintegrationowner. Source: Opus2035 body fullyread, rootreply2036 recordscorrection; no authoritywidening."
+}

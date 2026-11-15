@@ -1,0 +1,27 @@
+{
+  "id": "01a1e0d3-c2c0-7051-90a4-59e24d88343d",
+  "external_ref": null,
+  "title": "Discriminating test for the card update-path compaction flag clear during an otherwise unchanged rescan",
+  "outcome": "A test shows that when a carded run's card turns terminal during a rescan whose index diff is empty (for example a failure-excerpt retry on a Failed run whose earlier read was Unavailable, or a card that was Cold during the pass that changed the run), the became_terminal clear of compaction_examined_revision in update_test_run_card_locked (src/test_run_cards.rs) makes that same pass select and compact the run. Removing the clear must turn the test red.",
+  "acceptance": [
+    "A focused test fails when the became_terminal clear in update_test_run_card_locked is removed and passes with it, and it asserts compaction of an over-limit run in the same rescan that flips its card terminal with an empty index diff."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "state-lock",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

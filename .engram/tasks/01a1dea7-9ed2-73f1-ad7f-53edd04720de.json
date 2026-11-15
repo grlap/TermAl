@@ -1,0 +1,27 @@
+{
+  "id": "01a1dea7-9ed2-73f1-ad7f-53edd04720de",
+  "external_ref": null,
+  "title": "SourceId::validate callers outside observations may report a complete identity as invalid on a cancelled capture",
+  "outcome": "Each caller that runs EngramSourceId::validate is known not to run on a cancelled capture worker, or validates the in-memory identity without depending on the capture's cancellation, so a complete identity is never reported as invalid because of host shutdown.",
+  "acceptance": [
+    "The call sites src/acceptance_source.rs:189 (acceptance_source_bytes), src/native_test_completion.rs:103 and src/test_runs_disk.rs:19 are each classified, with evidence, as either never on a capture worker or able to run on one.",
+    "Any call site that can run on a capture worker and only reads memory validates outside the capture's cancellation, with the existing shape rules and budget unchanged, and a discriminating test shows a complete identity stays valid after the capture is stopped."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

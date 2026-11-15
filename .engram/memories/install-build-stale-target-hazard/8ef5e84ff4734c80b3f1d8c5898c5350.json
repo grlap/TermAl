@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "install-build-stale-target-hazard",
+    "revision_id": "8ef5e84ff4734c80b3f1d8c5898c5350",
+    "previous": null,
+    "body_sha256": "ed61054b4738aed906c544a585c7de5c73227563e3604c340b9444a442f16c24",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-03T19:45:23.875565400Z"
+    }
+  },
+  "body": "Install-build hazard (Opus2, 2026-11-03 19:44Z). A release build of a NEW worktree into a SHARED CARGO_TARGET_DIR (.tmp/install-target) can come back \"Finished in <1 s\" with the PREVIOUS commit's binary. Cargo's dep-info for path packages is relative to the package root, and freshness is judged by mtime. If the new worktree's files were checked out BEFORE the previous build's outputs were written, Cargo treats them as fresh.\n\nObserved: worktree wt-c437r5c-8111 was created at 18:40Z, and the 7cca build finished at 18:46Z. The 14b53e3b build then returned in 0.89 s with the 7cca sha 50df2ea6, even though c437 changes src/test_run_named_root.rs and src/test_run_registration.rs.\n\nRULE: before every install build, run `cargo clean --release -p termal` against the install target dir (deps stay cached; termal recompiles in about 3–4 min). Then check that the build took minutes, and that the sha differs from the previous install unless the diff provably touches no compiled code."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-launch-form-by-runtime",
+    "revision_id": "1b3a70fba6a644068a73c499e5bdf04e",
+    "previous": "df1b0f2eebfa442080b8666690aa60ad",
+    "body_sha256": "e8b1d20697ac0e642bb449e1410a8b3f943147ceb147975918626d2c57424594",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-15T16:35:18.962347600Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-15 15:24Z, learned from my own wrong LAUNCH NOW). Match the gate-launch form to the worker's RUNTIME:\n- Claude worker: one Bash call in background mode, `pushd \"C:\\…\\worktree\" && node scripts/test-launcher.mjs full --detach --notify session-8112`, nothing chained.\n- Codex worker (Termal::Merger, the Sol-* coders, Codex-*): its NATIVE command, with workdir set to the worktree and command `node scripts/test-launcher.mjs full --detach --notify session-8112`. Codex's /bin/bash can't pushd into a Windows path; it fails with \"No such file or directory\" and nothing launches.\nI sent the Merger (Codex) the Claude pushd form for w-c538. It refused cleanly at 15:16Z and asked, and the gate start slipped about 10 min. Check the worker's runtime before writing the form.\n\nUI vitest form (2026-10-15 16:35Z, after Sol-03d4's test-30514ef4 failed before any stage with \"executable not found: npm\"). On Windows, scripts/test-launcher.mjs resolves executables to .exe ONLY (executable(), line 300; by design, .cmd/.bat \"require a shell\"). npm and npx are .cmd shims, so `node scripts/test-launcher.mjs focused -- npm ...` is REFUSED. A launcher-wrapped `node ui/node_modules/vitest/vitest.mjs` isn't recognized for credit (Sol-edfd). The CREDITED form for a single UI file is the DIRECT command `npx vitest run <file> [-t \"<name>\"]`, with workdir = <named root>\\ui (Codex: native command with that workdir; Claude: `pushd \"<root>\\ui\" && npx vitest run <file>`). 11336's record d3d05496 used it. I wrongly told Sol-03d4 and Sol-a7bb the launcher npm form."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-verify-pair-ids-on-freeze",
+    "revision_id": "2a0d65dfc9c142bf830f8de0e2bde5a5",
+    "previous": null,
+    "body_sha256": "8a690b0c4821ae1a479739cfa5812de10452613d236f0a50d95cd904bf40133f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-15T16:12:00.246540700Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-15 16:12Z, learned from my own error on w-c538). Before LAUNCH NOW for a landing gate, and before telling the integration owner that a pair is clean, verify that BOTH review delegation ids, Codex and Claude (or a recorded Kimi stand-in), are cited on the item against the EXACT final freeze fingerprint. A \"Codex clean\" from an earlier round on an earlier package does not carry over to a re-freeze. On w-c538 I carried \"Codex clean\" from R2 (the five-file package) to freeze bccec35b. Only Claude 20e06252 had reviewed bccec35b. Opus2's pre-push check caught it (4daa5b87 #2380), and a fresh Codex review was needed after the gate had already passed. The gate stays valid for the exact tree; only the push was delayed."
+}

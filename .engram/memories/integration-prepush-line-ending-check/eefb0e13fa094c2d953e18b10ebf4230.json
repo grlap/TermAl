@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "integration-prepush-line-ending-check",
+    "revision_id": "eefb0e13fa094c2d953e18b10ebf4230",
+    "previous": "c232897d9fba49aa87b98dea9ffb167c",
+    "body_sha256": "9436dc504f013f0e48b321ed68c958ca0afe58e480145a2bd84ace650dc7b897",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-11T08:25:12.757234Z"
+    }
+  },
+  "body": "Integration owner pre-push check (Termal::Opus2, from Termal::Fable2's mailbox 4daa5b87 #2159, 2026-10-11 05:23Z; revision 2 corrects the counting method per Fable2 #2168). The Merger's w-d3e9 commit 76e1819d stored all four files as CRLF: whole-file churn of +14360/-13998, and its evaluation then found criterion 4 insufficient. It was never pushed and must be refused if handed over.\nRULE: before pushing any Merger commit, in addition to the usual checks (master tip = reviewed/gated commit, origin/master = base, fast-forward, staged blob ids):\n(1) run `git diff --stat <base> <hash>` and refuse when a small change shows whole-file-sized line counts;\n(2) count CR bytes in the committed BLOBS with `git cat-file blob <rev>:<path> | tr -cd '\\r' | wc -c` (expect 0).\nDO NOT use `grep -c $'\\r'` in this machine's Git Bash: it matched every line (a sanity test with LF-only input returned 2), which produced a false 'CR in every line' reading on the minimap commit 02474e0a. Do not read working-tree files either: system core.autocrlf=true checks them out as CRLF.\nBackground: core.autocrlf=true also makes `git apply` write CRLF while the index stays LF. Carry with `git -c core.autocrlf=false apply`, or write files from their index blobs."
+}

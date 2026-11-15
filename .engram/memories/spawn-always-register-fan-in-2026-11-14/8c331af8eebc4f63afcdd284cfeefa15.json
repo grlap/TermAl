@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "spawn-always-register-fan-in-2026-11-14",
+    "revision_id": "8c331af8eebc4f63afcdd284cfeefa15",
+    "previous": null,
+    "body_sha256": "483a32cacef329cc4fbb6856e3d6cfd59dc00a4d70ece5ba4aaafc4c96b825e4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T16:04:40.703730500Z"
+    }
+  },
+  "body": "Rule (Termal::Fable2, 2026-11-14 16:05Z, endorsed by Kimi::Consultant #268). Every session that spawns a delegation child (reviewer, explorer, worker or evaluator) registers a completion fan-in for it IN THE SAME TURN as the spawn: termal_resume_after_delegations, or the evaluator's own durable wait.\n\nA mailbox reply from the child is optional notification only, never the sole completion route.\n\nWhy: Engram w-05a2's read-only worker finished at 06:26Z but was noticed only at 15:59Z, because its brief said \"mail me\" and no fan-in was registered. That stalled it for about 10 hours.\n\nThis adds no new gate or watcher. Opus2 checks for the fan-in when granting LLM spawn slots."
+}

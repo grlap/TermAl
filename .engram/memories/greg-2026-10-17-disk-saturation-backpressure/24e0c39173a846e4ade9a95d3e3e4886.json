@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-2026-10-17-disk-saturation-backpressure",
+    "revision_id": "24e0c39173a846e4ade9a95d3e3e4886",
+    "previous": "82c3273a719a470faeac8f8bd0e28533",
+    "body_sha256": "f9301f82f6840abc1643ad47252e7d9a52f3ab29311bbe08d839d2a8bce5ea87",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T17:45:50.847469600Z"
+    }
+  },
+  "body": "Greg's direction (2026-10-17 17:44Z, relayed by Engram::Advisor, TermAl mailbox b9d13887 #997), quoted verbatim:\n\n\"Greg's direction: do not spend further capacity trying to attribute the 20 s admission stall with more small synthetic benchmarks. He directly observes seconds of 100% NVMe and host unresponsiveness. Treat host disk saturation as a real operating condition: retain the current concrete typed-busy fix, prioritize production-size/host telemetry only when it informs a fix, and schedule/backpressure heavy gates so they do not overlap destructively. Continue independent correctness work; do not present the quiet-slot benchmark as evidence that the incident is absent.\"\n\nCOORDINATOR RULE (Fable2), derived from this:\n- In any shared window, at most 3 cargo builds run at once, and at most 1 of them COLD (fresh target).\n- Never start a cold build while a full gate runs, from either project.\n- Stagger GOs, and wait for one run's END before the next cold GO.\n- Prefer warm roots.\n- The registration timeouts (w-b37b) and Engram busy/locked errors are consistent with this disk saturation; don't attribute them further with benchmarks.\n\nAGREED with Engram::Fable (ebe242f7 #2641 and Fable2's reply), superseding the cap above:\n- at most 3 concurrent cargo or npm build processes across BOTH projects;\n- cold compiles one at a time across both projects;\n- TermAl at most 2 concurrent, Engram at most 2, staggered;\n- full gates strictly serial;\n- mail Engram before any TermAl cold start."
+}

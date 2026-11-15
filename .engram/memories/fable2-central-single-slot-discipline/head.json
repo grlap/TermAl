@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "fable2-central-single-slot-discipline",
+  "head": {
+    "state": "active",
+    "chain": [
+      "52e13115c5d94636a591bfdc8f940c0e",
+      "c2ca3f38b5be47669c0848f6a36f9feb",
+      "12015ef369e34a9793882d1dec71cbff"
+    ]
+  }
+}

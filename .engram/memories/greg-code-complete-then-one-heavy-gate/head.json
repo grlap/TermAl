@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-code-complete-then-one-heavy-gate",
+  "head": {
+    "state": "active",
+    "chain": [
+      "e1bbbfb31181437f98a68ff204203432",
+      "032b22b5c2264eb9b2c9703ae6863b91"
+    ]
+  }
+}

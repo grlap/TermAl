@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "integration-install-procedure",
+    "revision_id": "07bcf1e62e2749dfac731acbc12f757d",
+    "previous": "d14a7f30d6cc44bd9b3b7dee11217a6e",
+    "body_sha256": "5db860c4ac9744ef039ed0fbf588380e74972445315e94623e932be445a91610",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a0fb02-b26c-75d2-9d06-5798a85f3f4b",
+      "work_ref": "w-5798a85f3f4b"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-09T21:18:15.011151800Z"
+    }
+  },
+  "body": "Integration owner's install procedure (Termal::Opus2). Agreed with Termal::Fable2 in #2041 on 2026-10-09; the window rule was added from #2053. In force until w-5798a85f3f4b is fixed. The host's review checker spawns target/release/termal.exe, so the live path must never be absent for long.\n0. MACHINE WINDOWS: full gates alternate one-for-one between TermAl and Engram (Engram memory `shared-machine-gate-alternation`; live queue in memory `termal-gate-queue-*`). Run release builds ONLY in a TermAl window, ideally right after a TermAl gate ends, when Fable2 says so. During any credited gate (either project) run no release build; during a TermAl gate, run no cargo at all. A test-only landing whose release build cargo finds fresh needs no swap: report that instead.\n1. On the landed tree, from the master checkout: `CARGO_TARGET_DIR=.tmp/install-target cargo build --release`. Never build into target/ after renaming the live binary: that left the path missing for 2–3 minutes per install and broke reviewers with HTTP 500 os error 2.\n2. termal_list_delegations is parent-scoped and can't see other sessions' reviewers, so get Fable2's \"SWAP NOW\" go. She confirms with Engram::Fable that nothing is running in either project.\n3. `cp .tmp/install-target/release/termal.exe target/release/termal.exe.new`, verify its sha256, then in ONE command: `mv target/release/termal.exe target/release/termal.exe.<old8>.bak && mv target/release/termal.exe.new target/release/termal.exe`. <old8> is the first 8 hex characters of the CURRENT termal.exe's sha256, measured at install time. Never assume it: restarts via cargo run rebuild it.\n4. Report the swap's start and end times and the new hash in the landing report.\nNever move or delete the running host's image before the restart. A restart's `cargo run --release` rebuilds target/ itself, because the separate target dir doesn't update its fingerprints; record the post-restart hash."
+}

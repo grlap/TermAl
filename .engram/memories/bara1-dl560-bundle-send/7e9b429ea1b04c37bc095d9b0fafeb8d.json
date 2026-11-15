@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-dl560-bundle-send",
+    "revision_id": "7e9b429ea1b04c37bc095d9b0fafeb8d",
+    "previous": "d9f4315801b9487e8a034e76dcc162ec",
+    "body_sha256": "d6e9031f7ea5dc012347c7e50f761ab4b2659256a175125fb804accb04eaaefe",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-01T01:07:33.122129Z"
+    }
+  },
+  "body": "Worker how-to (Termal::BarA1). Revision 2026-11-01 01:08Z, after Fable2 #1079: a new runner and a new path.\n\nPlacement rule (Fable2 #1071): TermAl focused runs and full gates that don't need Windows go to DL560 by default, admitted by its census, with no per-job GO. Central needs a named GO, and only for host-recorded check credit or when no remote host can run the job.\n\nRUNNER:\n- Use the TermAl-only DL560 runner, session-3 (\"Codex 3\"), at host:e83d08f4-22ac-4655-a84d-941fc0eeb4f1::session-3. Its checkout is /home/greg/github/TermAl, with one detached worktree per job under .tmp/r/<8>.\n- The old runner, session-4 (Claude, the Engram runner), is DOWN until Nov 5 with a weekly limit, and its never-started jobs are frozen.\n\nProcedure:\n1. Commit an unpushed candidate on a detached HEAD at the CURRENT master, staging explicit paths. A failed candidate is superseded, never amended.\n2. `git bundle create X.bundle HEAD ^<master>`, then `git bundle verify`, and note the byte size and sha256. Bases ab3aa0f6 and 637616e6 are both in the runner's checkout.\n3. `base64 -w0`, then concatenate a plain-prose PREPARE header and the base64 after the literal marker `BASE64_INPUT_BUNDLE:`.\n4. Send with `\"$TERMAL_CLI\" mailbox send --to <runner> --message-file <file> --idempotency-key <stable> --json`. Use --message-file, because a 30 KB body is too close to Windows' command-line limit.\n5. Give a base gate: the runner must prove the prerequisite object exists, and HOLD without fetching if it is missing.\n6. Expect PREPARED, START and END. Runs are registered as untracked, so they are evidence only, never host credit.\n7. Resending to a new runner means a NEW key with the same content, naming the frozen request it replaces.\n\nTraps:\n- Relay and central-domain mailboxes REFUSE noContinuation on ACK.\n- A 423 \"federation persistence is settling\" means retry with the identical key; duplicate=true confirms the first send landed.\n- The review-freeze fingerprint changes when you commit, because HEAD and the index move. Rewrite the freeze on the clean committed checkout and send that value.\n- A runner that reads mail only between long turns can sit hours on a backlog. Ask the coordinator to nudge it; never resend."
+}

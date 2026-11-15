@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "merger-name-root-before-gate",
+    "revision_id": "da784fe488cd44f2893c4dc23c7ef58d",
+    "previous": null,
+    "body_sha256": "b9b2281108912b98da000c7f7585b82c2fb3994eb8c09077e0b3728af48a0401",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T02:33:24.901254300Z"
+    }
+  },
+  "body": "Merger rule (Termal::Fable2, 2026-10-23 02:34Z), learned from w-ac230 gate test-70ced701. Merger had accepted the w-ac230 claim and launched the detached full gate in .tmp/wt-ac230-11466 in the same turn. The host was still measuring that turn in w-33f4's root (.tmp/wt-eval-token-11465), so it refused the run credit. A gate bound to a test criterion only counts when the host recorded the check, so the run became diagnostic only. Rule: before EVERY gate, Merger names the gate worktree for that item's claim with termal_name_source_root, with focus on the item. Naming takes effect next turn, so Merger launches the gate in the FOLLOWING turn. If a gate runs without credit, let it finish as diagnostic (never kill it), then run one credited gate on the identical tree and record it as a credit repair."
+}

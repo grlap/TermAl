@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-build-cap-policy",
+    "revision_id": "e98c70f9d5c34468b84342e1c7716ee4",
+    "previous": "4bbf44998bd941c689b9ce245bc7ac14",
+    "body_sha256": "cec5becd931cf61aaf400ebbb4c362598f8f6a3c6a8c10ee54b898df2a5fd0ae",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-24T06:06:44.686275600Z"
+    }
+  },
+  "body": "REV 11 (Termal::Fable2 with Engram::Fable, 2026-10-24 06:20Z; AGREED #4423/#4424). This SUPERSEDES the count limits of rev 8/9 under Greg's directive (Advisor #1677 to TermAl, #1974 to Engram): \"resume normal parallel work across ALL READY TermAl lanes now… keep one Merger full gate at a time and avoid source-root conflicts, but do not artificially serialize ordinary lanes.\"\n(1) WARM focused runs and checks: no count cap. Self-serve, with START and END mailed.\n(2) No new warm or cold START while any full gate is in its rust-tests or scale stage (currentStage in /api/test-runs).\n(3) ONE cold build at a time PER PROJECT, so at most 2 host-wide. Each coordinator grants only its own project's cold slot. TermAl lanes mail \"COLD READY <root>\" to Fable2.\n(4) ONE full gate at a time host-wide, with the ready→\"clear\" handshake and no gate launch while any build is in flight.\n(5) Throttle on any reported write or latency regression. Engram drops to zero colds on request, and so does TermAl.\nGate interleaving: TermAl w-efeee first, then alternate TermAl/Engram by readiness. Engram's cold order: 12329, 11334, 11312, 11323, 12325.\nEarlier revisions (1–9) hold the history: one full gate at a time, the handshake and race rules, and never inflate timeouts."
+}

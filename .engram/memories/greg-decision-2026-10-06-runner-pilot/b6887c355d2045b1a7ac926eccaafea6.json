@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-06-runner-pilot",
+    "revision_id": "b6887c355d2045b1a7ac926eccaafea6",
+    "previous": null,
+    "body_sha256": "ff9fc3abb351e7e1af022017a19a8b05669cae305aec707fca81d30c1d1e5c23",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-06T01:56:46.597578800Z"
+    }
+  },
+  "body": "Greg's runner-pilot decisions after 2026-10-06 01:55Z (a continuation of greg-decision-2026-10-05-team-pilot, which is at its size limit and holds his #321 simplicity, #323 two-day scope and #325 TRX+JUnit words; recorded by Termal::Fable2).\n\nDOCS FIRST, via Engram::Advisor verbatim (TermAl mailbox b9d13887 #328, 2026-10-06 01:55Z): \"Greg directs: documentation and agent skill updates land BEFORE any runner implementation. Prepare a concise feature/usage document defining termal-tests.toml, command/cwd/artifact fields, artifact freshness and ignored-location rule, TRX/JUnit pass/fail/unknown semantics, example .NET and JUnit declarations, and the operator/agent workflow. Update the relevant TermAl skill(s)/agent instructions so a coding agent knows how to discover, declare and invoke the runner and how unknown differs from pass. Keep it minimal and exact; normal docs review applies. Do not start runner code until this documentation/skill change lands.\"\n\nOperative: the w-8e72f7e16778 pilot is two landings in order. First the docs and agent-instruction change, tracked as child w-7df0ce6b1169. Runner code starts only after that lands. The pilot design is aa219353 + 431da8e1 + 2d0b87b2 points 2-4 + 73824d7c on w-8e72. Its cap is two working days in total; on an overrun, stop and report one blocker and the smallest alternative."
+}

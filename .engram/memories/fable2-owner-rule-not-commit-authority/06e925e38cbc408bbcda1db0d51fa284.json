@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-owner-rule-not-commit-authority",
+    "revision_id": "06e925e38cbc408bbcda1db0d51fa284",
+    "previous": null,
+    "body_sha256": "7e66bdc8f8b16173e4bab7441bc4a510fc748bd24d7fa35397fbefa031f7900f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-06T22:12:41.330566Z"
+    }
+  },
+  "body": "Lesson (Termal::Fable2, 2026-11-06 22:12Z; my own error, corrected after Opus2 #4693). The one-decision-owner-per-feature rule covers a feature's own design and scope decisions. It does NOT cover repository commit, review or gate authority. On 22:11Z I told Sol-a7bb that M1's owner's \"clean-carry adoption proof instead of a fresh review pair\" governed. That contradicted .claude/commands/review-changes.md:85-87 (\"committed afresh as a new candidate whose parent is the current master, which is frozen, gated and reviewed as its own input\") and CLAUDE.md condition 1. Loosening a commit-rule condition needs (a)/(b)/(c) plus Greg's own recorded word. Before deferring to an owner, check whether the matter is commit/review/gate authority text; if it is, the rule text governs and only Greg can loosen it. On 2026-11-06 the option was put to Greg as a question; the default stays fresh pairs."
+}

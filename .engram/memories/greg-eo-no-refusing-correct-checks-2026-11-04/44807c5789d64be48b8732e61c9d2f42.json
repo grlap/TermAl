@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-eo-no-refusing-correct-checks-2026-11-04",
+    "revision_id": "44807c5789d64be48b8732e61c9d2f42",
+    "previous": null,
+    "body_sha256": "a83788c1db2450e7f20b8373497d503b5e18684c550ebe43b30772c67f72de6d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T16:05:47.067246500Z"
+    }
+  },
+  "body": "Greg, verbatim, via Engram::Asistant 588693a8 #332, 2026-11-04 16:05Z, after both evaluation windows were refused: „To nie moze tak byc. Znowu bedziemy odrzucac poprawne testy.” Task as relayed: priority; with Engram establish the actual source of both refusals and fix automatic distinction of correct evidence from a real source change, with no empty turns, silence or special manual procedures and without weakening protection; positive and negative regressions plus a simple end-to-end under normal work; do not change old evaluations; give plan and status. A silence rule or a form rule for holders is not an acceptable answer. Tracked by the p0 item titled 'Execution Observability must not refuse a correct check'."
+}

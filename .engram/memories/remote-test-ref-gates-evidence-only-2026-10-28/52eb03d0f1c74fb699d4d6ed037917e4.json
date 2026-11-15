@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "remote-test-ref-gates-evidence-only-2026-10-28",
+    "revision_id": "52eb03d0f1c74fb699d4d6ed037917e4",
+    "previous": null,
+    "body_sha256": "8a055668a65e42dfbac1609acb830a3da1cc43aa89473ff19859ba44932b0912",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-28T23:35:48.063237400Z"
+    }
+  },
+  "body": "Correction recorded by Termal::Fable2 on 2026-10-28 at 23:40Z (raised by Engram::Fable via Advisor #2410). Under CLAUDE.md's test-ref bullet, a remote full gate on a test ref counts as the landing gate only once its result has been IMPORTED on the evaluating and landing host as a recognized check record bound to the recorded tree id. Until that import exists (TermAl w-2f30 variant C) and gated control is on, remote runs on Windows B or the Mac are EVIDENCE ONLY, never the landing gate. My statement to Greg in Advisor #2409, that a Windows B gate \"has landing weight\", was wrong and is corrected in #2411. Landing gates for IB2 and B16 stay LOCAL, using the exclusive dual-slot window with no concurrent Cargo for gates that carry the real-time writer deadline. Remote runs remain useful as early discriminators and second-platform evidence."
+}

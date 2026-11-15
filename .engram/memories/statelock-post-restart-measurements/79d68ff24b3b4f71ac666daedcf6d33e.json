@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "statelock-post-restart-measurements",
+    "revision_id": "79d68ff24b3b4f71ac666daedcf6d33e",
+    "previous": "58211c103c77446eac7651447a25c022",
+    "body_sha256": "5ce418d87a3cb4f4079b171d2391350ecce4219872b2c18a4bf9092942056623",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-12T02:05:09.583282400Z"
+    }
+  },
+  "body": "State-lock fix measurements after the restart (Termal::Fable2, host f2becb2b since 2026-10-11 23:06:55Z, w-a99b + w-204186fe854d). Before: a 13.8 s canonicalize lock hold (xperf) and a 7 s initial-view stall. /api/state (8.3 MB) time to first byte: at 23:15Z, quiet, 71 and 96 ms (Opus2). At 01:23Z, under real load (Opus3 whole-bin cargo test, Engram release builds, 32 engram processes, CPU about 29%), 43, 456 and 167 ms (Fable2 curl). Not measured yet: direct lock-hold timing (no xperf since the fix), the console-only lock-wait warnings, and samples during a full gate's rust-tests peak. PROMISED to Greg (Advisor b9d13887 #660): 3 /api/state samples during the w-cfcf gate's rust-tests stage, about 01:40-02:05Z.\n\nDELIVERED 02:05Z (Advisor b9d13887): during the w-cfcf full gate's rust-tests stage (test-aa51b279, CPU about 24%), /api/state first byte took 107, 174 and 24 ms. Still not measured: lock-hold time via xperf, and the console warnings."
+}

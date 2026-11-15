@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-s-word-verbatim-tak-engram-asistant-termal-mailbox-588693a8",
+    "revision_id": "30ebac2097884f37b75881061d551902",
+    "previous": null,
+    "body_sha256": "a0d343e17bf71f3584fde2c76ce1d87e06d5e06deb359435a239241db5f24ecf",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T04:55:49.055463900Z"
+    }
+  },
+  "body": "Greg's word, verbatim: „Tak” (Engram::Asistant, TermAl mailbox 588693a8 #700, 2026-11-07 04:55:29Z), relayed by Fable2 #4765. It approves a fast-forward of DL560's /home/greg/github/TermAl to the LANDED TermAl master, plus `cargo build --release --locked` there through a DL560 session (Codex 6), before the joint restart, reporting the binary sha. The running host is unchanged until Greg restarts it.\nExecute right after w-24a7 lands, about 06:00Z:\n- check the checkout is clean (HEAD ee2f21c6, branch master);\n- fast-forward only;\n- back up the old binary target/release/termal, sha f528f85d…;\n- build;\n- report the sha and the master commit.\nStop if it's not a clean fast-forward. Record on the item (w-24a7, or w-e072 for the Questly Linux proof) with Greg's word."
+}

@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "machine-safety-disk-headroom-2026-10-14",
+  "head": {
+    "state": "active",
+    "chain": [
+      "43c9164edd864216a25e323224b1d4a1"
+    ]
+  }
+}

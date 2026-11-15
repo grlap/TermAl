@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "watchdog-paused-queue-is-often-retry-hold",
+    "revision_id": "fa8f24ef8eb141afa3410eee9362a695",
+    "previous": null,
+    "body_sha256": "8d9bf491f16936d79cb39c7d021d30cce123bfb280d2be0da2c710bf09f4ae31",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T03:02:18.874056900Z"
+    }
+  },
+  "body": "Watchdog rule (Termal::Fable2, 2026-10-23 03:03Z), from Opus3's w-80e0cb2002da diagnosis. A session that shows queuePaused=true and pending>0, or a send that returns heldBehindPausedQueue or durableButNotWoken, right after the session's turn ended is usually an AUTOMATIC Engram retry hold, not a Stop. The orchestrator_auto_dispatch_blocked latch is set while an admission, begin-preparation, abort or bind retry is due, with causes such as begin_preparation_pending, control_unavailable or dispatch_budget_exhausted. These holds self-recover in about 11-19 s, and the API currently projects them as a plain pause. Do NOT resume at once. Resume only if the session is still paused with pending work at least 60 s after first being seen, and its latest dispatch record shows no scheduled automatic retry. The fix (a distinct \"waitingForAutomaticRetry\" disposition) is w-80e0 (Opus3)."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-windows-run-for-new-fixtures-2026-11-05",
+    "revision_id": "b945c96b80be42e7b378ead4ae558be5",
+    "previous": "835b99c2718e4447b7184b903ce95af8",
+    "body_sha256": "77dbea9caff75960be441574aa44ff99e6d2a76b5b0260636a05d7b5b367d19e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T04:45:03.186532700Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-11-05, from w-d57f7ec79343). Two observed_terminal tests that landed with w-814b in 7eb731fc spin forever on Windows; the landing gate was a Linux FULL, where they pass. From now on, a landing that adds or changes tests using filesystem or Git fixtures (temp roots, worktree loss, path walking) gets a Windows run of those new tests before landing, even when the FULL runs on Linux. This doesn't replace the standing rule's gate. It's my check when reading condition 3 and gate evidence.\n\nFixture isolation lesson retained during the 2026-11-09 memory cleanup from termal-window23-2026-10-18 rev9 and its filed bug w-927a571ee633: a test forward starting at a fixed port collided with the running host's SSH tunnel at 47000, producing peer-unavailable failures before the behavior under test. Reserve an OS-assigned loopback listener and retain its owner through setup instead of assuming a fixed port is free. Diagnose the actual resource owner before attributing such a failure to protocol behavior. This historical example makes no claim that the production allocator is still defective and adds no permission to alter live tunnels or run probes."
+}

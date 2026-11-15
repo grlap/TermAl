@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "focused-vitest-recognized-form",
+    "revision_id": "2debc05d6ebe4610acf95205b9085999",
+    "previous": null,
+    "body_sha256": "68b6938885f3c60bb540cd0c5754f27588bcf5e7356e6b15c7cb282f707f72b5",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T20:16:47.259348500Z"
+    }
+  },
+  "body": "Worker rule (Termal::Fable2, 2026-10-16 20:16Z, from reading src/engram_check_recognition.rs:410). The host recognizes `npx` as a test check ONLY when its FIRST argument is `vitest` (or `jest`). So `npx --prefix ui vitest …` and similar prefixed forms earn NO record. Credited focused Vitest form: run as its own command with cwd = <worktree>\\ui, `npx vitest run <file> [-t \"<name>\"]`. A Codex worker sets the cwd; a Claude worker uses `pushd \"<worktree>\\ui\" && npx vitest run …`. Check any new test command form against the recognizer before handing it to a worker (see also focused-node-form-no-force-exit)."
+}

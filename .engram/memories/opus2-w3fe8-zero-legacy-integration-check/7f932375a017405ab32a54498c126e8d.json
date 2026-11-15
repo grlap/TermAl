@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-w3fe8-zero-legacy-integration-check",
+    "revision_id": "7f932375a017405ab32a54498c126e8d",
+    "previous": null,
+    "body_sha256": "06ab001de6a12bd9cf73a3c75f90eadb7d12e191080bab61c7706cce95494374",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-02T00:18:12.177221200Z"
+    }
+  },
+  "body": "Integration-owner check (Termal::Opus2, from Fable2 #3814, 2026-11-02 00:18Z; Greg's direct order relayed by Engram::Architect3 #473: 'NIE NIE NIE KAZALEM TO USUNAC!!! MAMY POLITYKE ZERO LEGACY…').\nTurn gating is to be PHYSICALLY DELETED in both projects: TermAl w-3fe8 and Engram w-5b17f50b5079.\nREFUSE to land a w-3fe8 candidate as a completed removal if it keeps any of these:\n- gated-control code kept for compatibility;\n- an executable legacy route;\n- a fallback to evaluate, begin, grant or settlement;\n- a setting that can reactivate gating.\nIts revised criteria require a cited source search showing no call to the turn operations; verify that the search is on the item before landing.\nIndependent acceptance evaluation is REPLACED, not repaired: TermAl w-fdbb4fb85a50, Engram w-ff546a940de0.\nThe w-ba8d minimal OFF fix is an independent repair, not the removal.\nCutover order: TermAl w-3fe8 is installed and running first, then Engram's deletion with its store migration in the same coordinated restart."
+}

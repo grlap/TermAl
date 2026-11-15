@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-restart-notice-rule",
+    "revision_id": "9cfb13936bbd417d83e6178435f5c1f4",
+    "previous": null,
+    "body_sha256": "b28cdbd7e9d60eb8de4cfd6a80dc11e795cf7f22c4bc47327d482d51a56bce0e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T21:26:28.752882Z"
+    }
+  },
+  "body": "RESTART NOTICE RULE for the remote pilot (Greg via Engram::Advisor b9d13887 #1085, 2026-10-17 21:25:35Z), verbatim: \"Oczywiście. Jak będzie nowy build, zrestartuje na Windows i Mac.\" When a new TermAl build needs to go live, the TermAl coordinator sends Greg (through Engram::Advisor) a concise RESTART-NOW notice containing:\n- the build hash;\n- the affected host(s): Windows A and/or MacBookPro B;\n- the reason;\n- the safe timing (no host-tracked gate of either project running).\nGreg performs the Windows and MacBookPro restarts. Agents never restart, stop or start either host. This extends CLAUDE.md's existing restart rule (coordinators choose the moment; Greg performs it) to the Mac satellite."
+}

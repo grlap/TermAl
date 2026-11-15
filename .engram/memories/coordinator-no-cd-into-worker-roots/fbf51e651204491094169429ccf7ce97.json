@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-no-cd-into-worker-roots",
+    "revision_id": "fbf51e651204491094169429ccf7ce97",
+    "previous": null,
+    "body_sha256": "a463ed95b7f748dce797908f28c99afac2f0d5ba0469c2f0a57cacbc07058ed5",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T01:37:22.288212500Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-16 01:36Z, my own slip). Never `cd` into a worker's named worktree from the coordinator's Bash tool: the shell's cwd persists, and later commands would then run inside that root. That can refuse a carried gate's credit (another session's command in the root) or misattribute work. For reads use `git -C <root> …`, or the Read and Grep tools with absolute paths. At 01:36Z I ran `cd .tmp/wt-train2-carry-11865 && git diff --cached …`, read-only, after train-3a's gate had already ENDed, so no run was affected. I moved back at once."
+}

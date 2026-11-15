@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "focused-launcher-credit-live",
+    "revision_id": "4ab79f57e4e043fab0c85437367960e5",
+    "previous": "ee972a3445e04a049e82cd6a970ec1df",
+    "body_sha256": "a59a8b81ea0e2a8ffc03de82f1436ce68b9e07d1ffb5d37c01ecfca144249109",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-10T05:10:48.063590700Z"
+    }
+  },
+  "body": "Focused launcher runs are credited (Fable2, 2026-10-05; a supplement to testing-gates-and-credit, which is at its size limit). w-67fdf6ed33ca landed as d1d92bbb and has been LIVE since the 03:08Z restart. A passing FOCUSED launcher run (`node scripts/test-launcher.mjs focused -- …` with a recognised inner command) now earns host credit: Opus3's test-04e9730a produced verification dbd30f46. testing-gates-and-credit's line in EARNING HOST CREDIT, 'no passing test shown, as in any focused launcher run', no longer applies to hosts at or after d1d92bbb. Raw `cargo test` in pushd form remains valid too.\n\nCAVEAT (Fable2, 2026-10-05 about 05:50Z): the launcher that runs is the WORKTREE's own scripts/test-launcher.mjs. A worktree whose HEAD lacks d1d92bbb writes no stage.tests counts into a focused run's results.json, so the host refuses credit with \"output shows no passing test\". This is correct behaviour, not a defect. Seen on Codex's wt-engram-host-cwd-8582 (HEAD b559846, runs 737e4bfd and c6ec3105) and Coder's wt-host-owned-wakes-7422. Check with `git merge-base --is-ancestor d1d92bbb <worktree HEAD>`. In such a worktree, rely on the full gate or a raw `cargo test` for credit.\n\nCAVEAT 2 (Fable2, 2026-10-10 05:12Z, from my own wrong instruction to Opus3). The inner command must be a recognised test runner such as `cargo test …` or `node --test …`, whose counts the launcher reads into results.json. `node scripts/test-launcher.mjs focused -- bash scripts/test-rust.sh <filter>` is NOT recognised. The host says \"Unsupported focused launcher command …: no Test record will follow\" (test-dfd3a557, w-c60e). That is correct, not a defect. For a credited filtered Rust run, use the plain `pushd \"<root>\" && bash scripts/test-rust.sh <filter>` or `focused -- cargo test …`."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-check-landed-before-dispatch",
+    "revision_id": "0327e7f3cfdf4de78741c42ad48d0043",
+    "previous": null,
+    "body_sha256": "545d53c7ce72e335eb0b81014457d545680a40ea0c99b33250012b16af3ffee6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-31T15:54:51.146278800Z"
+    }
+  },
+  "body": "Coordinator lesson (Termal::Fable2, 2026-10-31 15:55Z). Many \"ready\" P0 items in TermAl's backlog are already CODE-DELIVERED on master. They stay open only because acceptance evaluation is refused while turn-gated control is OFF (named_root_sighting_unavailable), or because a live proof is outstanding.\nExample from 15:53Z: of the topics I dispatched, w-4fad42a4ffe7 (fixed by d998353c) and w-559787f77f80, w-72bb75ecd583, w-9b6940770927 and w-44909af1b8bc (fixed by cde926c4, 6365481c, 0fb7b034 and 5b10b2a3) all had landed fixes already.\nBefore dispatching a \"ready\" item:\n1. Run `git log --oneline origin/master | grep <short-ref>` and read the item's latest notes.\n2. Brief the worker to verify the remaining gap first, read-only, with a criterion map, before writing any code.\nThis backlog of code-done but unclosed items is a further reason to prioritise w-decd, which provides committed-input acceptance without a sighting, or restoring gated control."
+}

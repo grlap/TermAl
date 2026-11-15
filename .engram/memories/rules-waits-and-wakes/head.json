@@ -1,0 +1,21 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "rules-waits-and-wakes",
+  "head": {
+    "state": "active",
+    "chain": [
+      "bbbfc92cd08540fcae8a1c41f5077d6c",
+      "2bcbd989ded34f129f38e7cf36603892",
+      "65f0510e30e64c05b2d87f8220f74954",
+      "8578cece344248868e6f4181f6bd8aeb",
+      "8ca2ec7a5dbf427b9590754f7b095d63",
+      "648759468fd34c34af97144358cc728c",
+      "2e8b21f1090247c8b114c2f701e48267",
+      "8d3a7af4e6be40de8c6d154b1d5b20b1",
+      "57f53b218fe14af9b6174fdcee8ffe92",
+      "3b748c6adc3c497cab97a133de2456f7",
+      "4ba9fae5a34b45abad87d6b17f64b717"
+    ]
+  }
+}

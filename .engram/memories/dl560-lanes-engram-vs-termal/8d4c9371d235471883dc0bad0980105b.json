@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "dl560-lanes-engram-vs-termal",
+    "revision_id": "8d4c9371d235471883dc0bad0980105b",
+    "previous": null,
+    "body_sha256": "070c9cc5bed62403ab1ea277c8cba4a0a04707e3869f41d0d9d8b480c892f4ce",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-06T20:23:32.860278500Z"
+    }
+  },
+  "body": "DL560 lanes (confirmed by Engram::Fable 2026-11-06 #306, citing Engram memory rules-remote-test-runs-2026-10-31 rev 15 item 3): Engram FULLs and focused jobs go ONLY via DL560 native session-4, \"DL560 · Engram runner\", using exact candidate bundles with no test ref. Session-1 \"Codex Live\" serves TermAl and refuses Engram registrations (HTTP 400). The older dl560-runner-checklist wording that puts Engram FULLs on session-1 is stale. TermAl FULLs on DL560 run through Codex 6 (relay-principal-557b…) from test refs. When naming a DL560 GO for Engram, name session-4."
+}

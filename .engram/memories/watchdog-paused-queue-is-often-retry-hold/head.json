@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "watchdog-paused-queue-is-often-retry-hold",
+  "head": {
+    "state": "active",
+    "chain": [
+      "fa8f24ef8eb141afa3410eee9362a695"
+    ]
+  }
+}

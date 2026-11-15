@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-build-cap-policy",
+    "revision_id": "4bbf44998bd941c689b9ce245bc7ac14",
+    "previous": "693ae172c0ca458cb2192f2277611f2e",
+    "body_sha256": "c34c78f32e7aa304068c0f9f5f76c9c96405d27291053ed2251d4904062237d9",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-24T06:03:41.222304700Z"
+    }
+  },
+  "body": "REV 10 (Termal::Fable2, 2026-10-24 06:11Z). This SUPERSEDES the count limits of rev 8/9 under Greg's directive (Advisor #1677 to TermAl, #1974 to Engram): \"resume normal parallel work across ALL READY TermAl lanes now… keep one Merger full gate at a time and avoid source-root conflicts, but do not artificially serialize ordinary lanes.\"\nJoint rule, proposed to Engram::Fable at #4423, awaiting its \"agreed\" (TermAl lanes use it in the interim):\n(1) WARM focused runs and checks: no count cap. Self-serve, with START and END mailed.\n(2) No new warm or cold START while any full gate is in its rust-tests or scale stage (currentStage in /api/test-runs).\n(3) ONE cold build at a time host-wide (a fresh target directory's first build, check or test). TermAl lanes mail \"COLD READY <root>\" to Fable2 for a slot, and the coordinator reads the other project's mailbox to the end first.\n(4) ONE full gate at a time host-wide, with the ready→\"clear\" handshake and no gate launch while any build is in flight.\n(5) Throttle on any reported write or latency regression.\nGate interleaving: TermAl w-efeee first, then alternate TermAl/Engram by readiness.\nPrior history (revs 1–9) stays in earlier revisions: one full gate at a time, one cold at a time, no warms in rust or scale, the handshake and race rules, and never inflate timeouts."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-operating-procedure",
+    "revision_id": "93a9b77274bb4f6783d4eca67bc3f710",
+    "previous": "e615fed4ecf248169666a0b53a1d1e88",
+    "body_sha256": "4c6e1fd8c64221180e04dd92adbed4d5fd198c405d1ca6ba3ad2ab71215b341e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-25T05:17:58.289552700Z"
+    }
+  },
+  "body": "TermAl coordinator operating procedure: the canonical home for current coordinator rules, created 2026-10-25 by Fable2. It mirrors Engram rules-roles-and-council r7, MEMORY UPKEEP. Memory grants no authority. Older single-incident coordinator-* memories remain as history; fold current guidance in here when one is next revised.\n\nMEMORY UPKEEP (Greg DIRECT to Architect3, 2026-10-25: \"jezeli dostaniesz raport bledow wspolpracy, zmien reguly\"; follow-up: \"i upewnij sie, ze inni je otrzymali\"; relayed in TermAl mailbox 63096d00 #23):\nOn a collaboration-failure report, inspect the facts and correct the responsible operating rule without another request from Greg. Revise its existing canonical memory; retain only current guidance in the body. Keep incident evidence and discarded assumptions in task notes/history. Check the current full readback and communicate the correction to affected agents. Verify its effect on the next real handoff. Preserve Greg's decisions and reserved authority. Retire ended workarounds and update references; each workaround names its retirement item.\nCoordinators convey relevant corrections to affected active coders when a concrete incident requires them, using the complete current rule.\n\nSINGLE EDITOR (Engram rules-merger-role r6, Architect3 63096d00 #30): each canonical procedure has one named editor. Merger2 edits merger-operating-procedure; Fable2 sends corrections to Merger2 and never writes that key. Fable2 edits this key.\n\nARCHITECT3 ROUTING (Greg DIRECT in Architect3's session, 2026-10-25: \"Termal::Merger2 nie powien ci raportowac normalnych statusow. tylko cos tam gdzie zawodzi praca twoja rola jest poprawa wspolpracy i poinformowanie innych\"; Engram rules-merger-role r7, rules-architect-escalation-boundary r2; 63096d00 #32):\nArchitect3 receives only concrete collaboration failures needing a workflow/rule correction: failed interaction, evidence, impact, current owner; also report them to Advisor. Routine START/PASS/FAIL, READY/accepted, queue/landing/install and repair progress go to the task and to Fable2, never Architect3. A product test failure goes to Architect3 only when it exposes a collaboration failure. Never name Architect3 as a test --notify recipient, result relay or recovery owner; Fable2 and Merger2 own operational recovery and results (including run 97a6f3e6). Do not interrupt or rerun a gate to change routing. No routine success-confirmation mail to Architect3.\n\nREPORTING (applied 2026-10-25): report a memory, tracker or config write only after the tool's actual success response and a readback. Never report intended revisions."
+}

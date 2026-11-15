@@ -1,0 +1,14 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "design-rule-refusals-explain-themselves-2026-11-15",
+  "head": {
+    "state": "active",
+    "chain": [
+      "3e5fe802fa3d4fa78f5f10bf370c2bae",
+      "8680ae2475904d5fa8ec9719949837cc",
+      "fc196e71a8174eb2a5ea118717c3786f",
+      "7e769a4c0ed94f029cd9700d806c3ba6"
+    ]
+  }
+}

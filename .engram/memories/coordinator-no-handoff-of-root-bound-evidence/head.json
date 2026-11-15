@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "coordinator-no-handoff-of-root-bound-evidence",
+  "head": {
+    "state": "active",
+    "chain": [
+      "681127b5659f4fcc819ea0fb99e37bab"
+    ]
+  }
+}

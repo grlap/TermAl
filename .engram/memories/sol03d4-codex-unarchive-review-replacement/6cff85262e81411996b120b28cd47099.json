@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol03d4-codex-unarchive-review-replacement",
+    "revision_id": "6cff85262e81411996b120b28cd47099",
+    "previous": null,
+    "body_sha256": "99bfa95ab8d1b8aaff2d8e1d27fab73e359eb10e031759156250c33bc9ff4b20",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a10f9b-e567-72e3-8611-54b31236feca",
+      "work_ref": "w-54b31236feca"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-25T23:44:39.841052600Z"
+    }
+  },
+  "body": "Worker recovery rule/provenance, from Fable2/session-8112 mailbox5855 #1456, mailbox-message-4cd8a3d5-9509-40a4-8956-60554b3b03e6, 2026-10-25T23:43:51.183677800Z. Exact wording: \"STANDING RULE, from now on and for every lane, so you need not ask next time: when a Codex review follow-up fails with \\\"timed out waiting for Codex app-server response to `thread/unarchive`\\\", the producer replaces it with ONE fresh Codex whole-input reviewer on the same frozen input, records the occurrence on w-54b31236feca, and states it in the READY. No retries of the failed thread and no Kimi stand-in. It does not apply to any other failure.\" Read the whole source message before applying. This records coordinator operational recovery of a known per-thread host defect, not a vendor-outage substitute or general authority widening. Keep the other vendor's current attempt; require replacement's own authoritative submission, ALL prose, final-path coverage and native before/after identity. No incomplete READY and no failed-thread retry loop."
+}

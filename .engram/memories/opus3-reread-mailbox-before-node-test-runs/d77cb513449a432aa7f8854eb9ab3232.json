@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-reread-mailbox-before-node-test-runs",
+    "revision_id": "d77cb513449a432aa7f8854eb9ab3232",
+    "previous": null,
+    "body_sha256": "f2654a8447ef04ea632494532e1e732b91499ec7e74ac3d67cf2ce9773a18ce0",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-27T01:25:32.564232300Z"
+    }
+  },
+  "body": "Worker trap (Termal::Opus3, 2026-10-27 01:24Z; my own slip on w-919a). Coordinators also throttle NODE-only checks (tsc, vitest) during another project's full gate. Fable2 #3715 held vitest until 01:42Z because it is CPU-heavy. The hold arrived while my turn was busy, and I launched vitest without re-reading the mailbox; it ran 46 s inside Engram's gate. Rule: before ANY test launch, including node-only tsc and vitest that need no build slot, re-read the coordinator mailbox in the same turn and honour every hold window. \"Node-only, no slot needed\" does not mean \"free to run any time\"."
+}

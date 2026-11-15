@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-landed-is-not-closed",
+    "revision_id": "218390d88d2d4c3c8dcd37b2307bdb82",
+    "previous": null,
+    "body_sha256": "a4ec9bdd96647b8b09533493e359bc2b94491376d47b465192f3854e74b19d27",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T22:26:29.802153900Z"
+    }
+  },
+  "body": "On 2026-11-07 I told Sol-a7bb that w-f5b824b8e5d6 was \"landed and closed\". It had landed in fdbb53c8 but was still open, and Sol-a7bb caught this before cleaning up. Before telling anyone an item is closed, read its state with show; \"landed\" and \"closed\" are different states. Also: an item whose only bound test is #[cfg(target_os = \"linux\")] cannot get credit from a registered run on Central (Windows). Closing it needs a registered Linux route on the store that holds the claim. I asked Opus2 on 2026-11-07 whether such a route exists."
+}

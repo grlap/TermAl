@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "evaluation-naming-quiet-window",
+    "revision_id": "e60ad49f21f54e5181242034f84f7d37",
+    "previous": "bc42320843734d41915fea9f16a71380",
+    "body_sha256": "16dcef8ddf9e25bf86a7c4ba9e01df1fd57d574db26bcfad99f000e4cbb2d86e",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a15431-7c90-7d63-96ca-33f4cde5413c",
+      "work_ref": "w-33f4cde5413c"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=claude-fable-5-1;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-22T23:25:07.391708200Z"
+    }
+  },
+  "body": "CORRECTED AGAIN (Termal::Architect1, 2026-10-22 23:26Z; revision 4 removes an unsupported inference from revision 3). Facts from w-06fb930cac38 on 2026-10-22: three acceptance evaluations were refused at submit with \"the task no longer names the evaluated source root under claim generation N\" — 21:44Z (generation 1758, naming revision 1 at capture), 21:47Z after a >60 s idle gap (generation 1758, naming revision 1 at capture AGAIN, so the first attempt left no persisted bump behind), and 23:05Z after 37 idle minutes on a fresh main-checkout naming made under the current claim (generation 1762, naming revision 2 at capture). The idle-gap workaround of revision 2 therefore does NOT work, and a second request right after a refusal does NOT pass either. BarA1's code trace (w-33f4 note 4ba736bc…): request and submit do no canonical learn; every revision bump goes through learn_engram_authority_locked, reached on the evaluation path by the evaluator CHILD's turn admission (child.engram.work_binding → reconcile_engram_root_for_admission_until → guard → prepare → read → learn, engram_named_root_binding.rs:2157) after the parent's token capture, and by the parent's own mail-wake turns during the wait. Why attempt 2 captured revision 1 again is not explained by that trace; BarA1 owns the diagnosis. What still holds from revision 2: the token is per work; other works' namings cannot stale it; naming a DIFFERENT path under the same claim is the recovery for a stuck journal. RULE until the fix lands: expect the first (and possibly every) evaluation after a naming to be refused; do not idle for it and do not loop (Greg, 2026-10-22: no ceremonial repeats); record the exact refusal and the evaluator's unrecorded verdicts on the item (the verdicts are in the delegation's full output) and report to the coordinator. Fix: w-33f4cde5413c GREEN-4, option A ruled 2026-10-22 23:14Z (the token binds to the named binding B; a +1 revision step whose frontier is Bound(B) under the same claim, workspace, generation, named_at and run identity is admitted). This entry retires when w-33f4 lands and is running on the host.\n\nREFINED ROOT CAUSE (BarA1 H5, w-33f4 note \"REFINED ROOT CAUSE\", accepted by Termal::Architect1 2026-10-22 23:40Z): the refusals are not a learned Bound event at all. While the holder is IDLE (an evaluation's fan-in wait, mail-wake gaps), the host's reclamation pass re-plans the Current route for the holder's named root about every 17–20 s (engram_named_root_reclamation.rs:136-142); during each pass, prepare → recover → publish, engram_authority_work_unresolved (engram_root_authority.rs:259-262) is true, and an evaluation submit that lands in that window is refused with the FINAL catch-all \"no longer names the evaluated source root under claim generation N\" although nothing changed and the naming revision never moves; the capture is clean because the parent is active at request time. So idling makes it worse, not better. Fix ruled as w-33f4 GREEN-5: the fence waits out an in-flight transition (bounded by the submit budget) and re-checks, else returns a typed RETRYABLE refusal the evaluator resubmits with the same attempt key (P); the reclamation planner skips the Current-route re-plan while an evaluator delegation is open (Q). Until it lands: an evaluation may be refused by chance; record the refusal and the evaluator's unrecorded verdicts, report, and do not loop."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-background-focused-run-no-credit",
+    "revision_id": "4a27c68aa777439398a8d7db91134c93",
+    "previous": null,
+    "body_sha256": "b8385ed2f145ed6135b4de43986730889b79b231b0f15a0a847acf0c386becbf",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-20T05:09:06.492300800Z"
+    }
+  },
+  "body": "Worker trap (Termal::BarA1, 2026-10-20 05:05Z, my own miss on the w-33f4 GREEN-3 cold test-a7aa0e03, which passed 16/0). A FOCUSED launcher run started in a Claude Bash BACKGROUND task (run_in_background) earns NO verification credit, even in the exact one-call `pushd \"ROOT\" && node scripts/test-launcher.mjs focused -- …` form. While the background task runs, the host counts it as \"background, subagent or orphaned Claude work… with no verified completion\" and restricts this session's evidence. The run under that restriction is the restricting work itself, so it is never credited: the settled item shows no verification record, though the restriction lifts afterwards.\n\nRule:\n- Run focused warm and cold checks in the FOREGROUND.\n- If a cold build may exceed the 10-minute foreground cap, either accept that the cold is uncredited evidence (it still warms the target), or ask the coordinator for the right credited form.\n- Then re-run the same focused command once in the foreground, on the now-warm target, for the credited record.\n- Disclose it every time.\nRelated: bara1-focused-runs-foreground, termal-claude-gate-launch-rule."
+}

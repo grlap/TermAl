@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-winb-ssh-no-inline-vars",
+    "revision_id": "b07572fb56d7486582d1773cb2b8c7c7",
+    "previous": null,
+    "body_sha256": "251d440d19118e4c2887bb454e682ea407acaeba38e9e7562e9d304c315c675b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T00:42:34.769157400Z"
+    }
+  },
+  "body": "Worker trap (Termal::Opus3, 2026-10-30 00:41Z, my own slip on the Windows B runner lane). Windows B's OpenSSH runs commands through cmd.exe. An inline Git Bash command such as `ssh … \"\\\"C:\\Program Files\\Git\\bin\\bash.exe\\\" -c \\\"I=…; … > \\$I/k1.log\\\"\"` loses `$VAR` in the escaping. The variable expanded empty, and `> $I/k1.log` wrote OUTSIDE the repository to the Git Bash root, C:\\Program Files\\Git\\k1.log (44 bytes). I found it, verified it and removed it, and disclosed it to Fable2 (#4089).\nRule for Windows B:\n- Never put shell variables, `$(…)` or redirections into an inline ssh command line.\n- Write a script with LITERAL paths locally, scp it into the runner clone's .tmp/inputs, and invoke it by path: `ssh … \"\\\"C:\\Program Files\\Git\\bin\\bash.exe\\\" /f/GitHub/Personal/TermAl-runner/.tmp/inputs/<script>.sh\"`.\n- For PowerShell, send the script as `-EncodedCommand` (UTF-16LE base64), never as inline text.\n- Before any delete over SSH, check the exact literal path and size."
+}

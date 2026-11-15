@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-go-credited-form-by-runtime",
+    "revision_id": "73bfa62637a242c7b048c58ccb273f77",
+    "previous": null,
+    "body_sha256": "892e9fa4e4186d9e7aa23d244e6700d00dd71e5c241ae2e8b5c1a8c922099fd3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-31T13:37:56.216449100Z"
+    }
+  },
+  "body": "Fable2 GO wording (2026-10-31 13:37Z): the credited local form depends on the runtime. A Claude session runs `pushd \"DIR\" && <cmd>` in one Bash call, in background mode for a full gate. A Codex session runs the bare command as its own exec with cwd = DIR. In a Central GO, name the input, the census, the bare command and DIR, then add \"in your runtime's credited form\". Don't impose pushd/Bash on a Codex session. Sol-8e1f, a Codex session, correctly substituted the Codex form under GO #1708."
+}

@@ -1,0 +1,17 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "restart-addendum-engram-baa6-cutover-2026-11-13",
+  "head": {
+    "state": "active",
+    "chain": [
+      "bb04e11b7bac4d758102cd9380d44825",
+      "572ff6f268e3486bab15e995b7b8f683",
+      "959764616e7f4b2487fb19d83476a190",
+      "e27c4bb813134c1dafb1905492786c5b",
+      "ea0b1a660d114bff88c48803b00fac14",
+      "48ee4c5618b549bf976b1b4cfc23b7b3",
+      "ab02313dba804b09a0eebc4380e1bae8"
+    ]
+  }
+}

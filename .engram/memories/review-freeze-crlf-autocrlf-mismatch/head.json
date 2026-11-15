@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "review-freeze-crlf-autocrlf-mismatch",
+  "head": {
+    "state": "active",
+    "chain": [
+      "571554c5ac5c499288dcb1245ecfd136"
+    ]
+  }
+}

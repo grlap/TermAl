@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-no-live-store-queries-via-others",
+    "revision_id": "6a8f9205c2234c728d9336a1acbe3b6b",
+    "previous": null,
+    "body_sha256": "2dfea1859dbeaf2d4471af62189b39be990925ca8a22d5f2abd07a6fcc5761c2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T15:57:20.338381800Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA1, from Fable2 #812, 2026-10-23 15:55Z, after my own w-650b request to Engram::Fable). When asking another project for timing or diagnostic evidence, ask ONLY for what its own tools and logs already expose: diagnostics files, its MCP or its CLI. Never ask for, or suggest, a direct query against a live store; never run one myself either. That covers Engram's stores and ~/.termal/*.sqlite alike. My request for \"store-lock or transaction timing\" led Engram::Fable to run a read-only Python sqlite query on Engram's two live stores at 15:40:42Z. It never returned, and Windows hung within about a minute; that is time-adjacent only, recorded on w-3be56ef0b931. If a split needs store-level timing, name it as a missing measurement point and stop there."
+}

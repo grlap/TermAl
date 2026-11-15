@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-verify-other-repo-refs-ls-remote-only",
+  "head": {
+    "state": "active",
+    "chain": [
+      "e13c823fd98e45c8b6e67d765a2915fb"
+    ]
+  }
+}

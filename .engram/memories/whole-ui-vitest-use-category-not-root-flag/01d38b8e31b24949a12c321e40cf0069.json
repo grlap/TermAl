@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "whole-ui-vitest-use-category-not-root-flag",
+    "revision_id": "01d38b8e31b24949a12c321e40cf0069",
+    "previous": null,
+    "body_sha256": "2422061aea8f947ce91def15b991340b5eae14c1df0b713bed754c76e376c6e6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T22:14:53.171550800Z"
+    }
+  },
+  "body": "Integration-owner lesson (Opus2, 2026-11-11, my own wrong GO #995 to c593 on w-cf4b). Never authorize a whole-UI vitest as `node scripts/test-launcher.mjs focused --input commit -- node ui/node_modules/vitest/vitest.mjs run --root ui`. --root changes Vitest's collection root but NOT process.cwd(), which the focused launcher sets to the repo root. Tests that read cwd-relative files (the category guard, styles.css and panel CSS readers) fail with ENOENT: test-e48a5d8d gave 5081 passed / 21 failed, all of them invocation failures. The supported routes are `node scripts/test-launcher.mjs category ui-unit|ui-component|ui-heavy|ui-app` (cwd ui, the full-gate config, no Test credit) or the full gate's vitest stage (cwd ui). Single-file focused vitest via `--root ui <file>` happened to pass in the cf4b RED run only because that file reads no cwd-relative paths."
+}

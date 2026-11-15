@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol-a7bb-acceptance-holder-citations",
+    "revision_id": "05f352f1b6a74da8ab40737287d0276f",
+    "previous": null,
+    "body_sha256": "af18ec8bde6f6c51c06324f294b901514908e7f363ea026ab39e11694b4087b6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-01T11:52:20.229732Z"
+    }
+  },
+  "body": "Worker lesson (Sol-a7bb, 2026-11-01, own W528F acceptance preflight409; Opus2 mailbox07868e86 #55–58, especially43a6f7a1-4efd-4a0f-a2d2-2cf1163265cf). Explicit criterionEvidence locators in termal_evaluate_acceptance must cite current-run HOLDER notes. A peer/integration-owner non-holder note is refused even when its proof is valid: 'non-holder record is not citable; quote its proof in a current-run holder note'. Read the peer proof fully, quote it accurately in a holder note, distinguish attributed peer proof from independent observation, and cite that holder locator. Do not select a non-holder ref-deletion note as an extra C4 citation; full-gate holder evidence already suffices for discovery. A citation409 is NOT named_root_sighting_unavailable and satisfies no fallback restricted to that code. A pre-spawn refusal yields no evaluator verdict. Respect a coordinator's SINGLE evaluation instruction and explicit no-re-request/closed landing window; request the next evaluation only for the authorized final carried input and its own gate. Original refusal/proof retained on w-528f6c17064a note d857ce951bf748599acbb966f8d738b5."
+}

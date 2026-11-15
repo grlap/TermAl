@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "sol8e1f-merger-mail-ready-only",
+  "head": {
+    "state": "active",
+    "chain": [
+      "284e7fe8f8eb41f5a67e921f11a459bf",
+      "dc84559cc3c94617b83553b8868c6526"
+    ]
+  }
+}

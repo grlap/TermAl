@@ -1,0 +1,19 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-decision-2026-10-05-team-pilot",
+  "head": {
+    "state": "active",
+    "chain": [
+      "1682647d72f646ffa3b00638ee8d1f85",
+      "89de02a1bc78403c96a0ccf044f4dfe1",
+      "ec2496903d654a408d1e334dbc67cabe",
+      "48eb710564b0437287ea95b0bfc84c34",
+      "f9485617b0a544bfb721b758264add02",
+      "415696d344664c15a2c2fb77c8af4064",
+      "4c64b34702c346a48cae3c60ba60c0c6",
+      "6119df11ace446b4ad12dae8918f99bc",
+      "54c2ac1839d547e0bbe54facf27bfbe9"
+    ]
+  }
+}

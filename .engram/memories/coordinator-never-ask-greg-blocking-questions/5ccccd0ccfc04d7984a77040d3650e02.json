@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-never-ask-greg-blocking-questions",
+    "revision_id": "5ccccd0ccfc04d7984a77040d3650e02",
+    "previous": null,
+    "body_sha256": "0071e014a6a2fb2262ee7a953cd1dd5b1bdaa8c91e58953fe804ac62802a578f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T04:00:51.864756100Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-16 03:41Z, Greg's own words when I asked him via AskUserQuestion how to proceed with a worker wake after he had rejected one tool call): \"NEVER ASK ME QUESTIONS LIKE THIS, THIS BLOCKS THE SESSION\". Never use AskUserQuestion, or any other blocking prompt to Greg, for coordination decisions: wakes, run windows, sequencing, or which option to take after a rejected tool call. Decide by the standing rules and record the reasoning. A rejected tool call is not a request for a question. Re-plan from the current state, take the safe choice, and keep the session moving. Decisions that genuinely need Greg (restart, scope, authority) go to him as a mailbox report through Engram::Advisor, never as a blocking prompt."
+}

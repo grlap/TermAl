@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-task-sync-exchange-routine-2026-11-15",
+  "head": {
+    "state": "active",
+    "chain": [
+      "accb20a76d76438aa7edd9cb0d564f7b",
+      "475fbdb452b44d61ba65f715ee75399a",
+      "f0a88f513aa249849e9f1d643fbdacaa"
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-decisions",
+  "head": {
+    "state": "active",
+    "chain": [
+      "b3d2f48db9db47a6858cbc0f648e2c94",
+      "0c26a6238d244d4198a69da01ff18ed4",
+      "1d6e9a98bdbc44c4a117ee210539fba4",
+      "6afebb180c1342f7ab8a7c199d08dbdd"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "closure-full-gate-criterion-needs-registered-full",
+    "revision_id": "b5616e2df1ae487388c79f388fe7563e",
+    "previous": null,
+    "body_sha256": "5253e8cf71aa545fae1bfdf123a7ce2ec1b76f2079be8aa75c8062d8298c9944",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T06:20:51.265516100Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-11-13 06:22Z, from Opus3 #5255 on w-e1053ea93543). Evaluation 2 there failed C4, \"the full gate passes on the exact landed tree\", with \"lacks a qualifying full-gate verification locator; gate results appear in notes only\". Landing-time FULLs quoted in notes (test-9dcc68b2, combo84's FULL) are not registered verification on the closure claim.\nRule: before launching any closure check, read the item's criteria. If any criterion is bound to the full gate, run `node scripts/test-launcher.mjs full --input commit` in the claim's own named root at current clean master, instead of a focused run. One Central slot (COLD 24 GiB, about 40 min) then serves the whole item.\nBatch member credit does not exist: the verification_bind decision is #[cfg(test)] only (src/engram_verification_bind.rs). Each root and claim needs its own registered run.\nDo not reword such criteria to cite note-only gates; that loosens them and needs Greg's word."
+}

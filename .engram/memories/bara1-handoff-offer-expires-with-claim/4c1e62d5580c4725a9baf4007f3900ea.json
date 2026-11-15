@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-handoff-offer-expires-with-claim",
+    "revision_id": "4c1e62d5580c4725a9baf4007f3900ea",
+    "previous": null,
+    "body_sha256": "8b91f0d64cea535505b2e88ef9eef81d5e52871e29cf7f732ec4246d364c64a6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T07:37:59.635750600Z"
+    }
+  },
+  "body": "Worker trap (Termal::BarA1, 2026-10-23 07:37Z). A handoff offer's expires_at is capped at the holder's claim expiry, whatever ttl you pass. While items wait in Merger's queue, my claims on w-2f344 and w-7fcb lapsed (06:13Z, 06:33Z), and their offers silently died with them. A LIVE offer also blocks renewing the claim (\"a live handoff offer blocks this operation\").\n\nRule: when handing to Merger, claim with a long ttl first (e.g. 4h) and then offer. Track each offer's expiry. Before it lapses: cancel the offer, renew the claim, re-offer to session-11865, and mail Merger the new offer id. Inputs are unchanged by this."
+}

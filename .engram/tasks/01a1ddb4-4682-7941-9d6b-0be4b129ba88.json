@@ -1,0 +1,31 @@
+{
+  "id": "01a1ddb4-4682-7941-9d6b-0be4b129ba88",
+  "external_ref": null,
+  "title": "Causal remote test completion: settlement scan latency grows with mailbox history, and its skips leave no readable diagnostic",
+  "outcome": "A remote runner's passed completion for an original test request settles on the requester promptly regardless of mailbox history size, and an operator can read why a given request has not settled yet.",
+  "acceptance": [
+    "On a requester with a large mailbox_messages and mailbox_relay_intents history, a completed causal test request is read and settled within a bounded time that does not grow with the number of unrelated historical rows, shown by a test with such a history.",
+    "For an unsettled original test request, a supported read-only surface reports which settlement stage it is in or which check skipped it (custody or current-plan check, peer handle or lease, relay read timeout, missing or non-authoritative completion, admission target), shown by tests for each stage.",
+    "Existing causal admission and federation native binding proof tests stay green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "eo",
+    "observability",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

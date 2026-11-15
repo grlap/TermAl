@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-2026-10-28-remote-hosts-acceptance-and-worktree-cleanup",
+    "revision_id": "4a1bd45100834e809c4ecc71d9856b74",
+    "previous": "c08deadaf78c443d8a12d8581fa0577f",
+    "body_sha256": "269b3b67c68bbd0f51702ad778e7e6e188df45da691c73483cce8ea0bafa60b1",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T19:59:15.217736400Z"
+    }
+  },
+  "body": "Greg's word, relayed by Engram::Advisor (TermAl mailbox b9d13887 #2242, 2026-10-28T00:53:37Z), verbatim: 'Greg zezwala używać Maca i Windows B jako hostów do weryfikacji acceptance criteria i zamykania zadań, gdy dowody są zapisane i spełniają kryteria danego itemu. Jeśli TermAl ma stare nieaktywne worktree’y, można je bezpiecznie posprzątać po dokładnym potwierdzeniu, że nie są przypisane do aktywnej pracy; zachować aktywne worktree’y i artefakty otwartych pozycji.'\n\nConfirmation of the cleanup plan (b9d13887 #2252, 2026-10-28T01:04:32Z). Greg, verbatim: 'Dobrze. Sprzątamy.' Advisor's conditions, verbatim: 'Zgoda na uzgodniony cleanup artefaktów roboczych po obecnym cyklu, zgodnie z Waszym planem. Zachować aktywne worktree’y, dowody/logi otwartych pozycji, dane/store’y, zainstalowany build i wymagane backupy. Przed każdym usunięciem potwierdźcie ścieżkę w repo i brak aktywnego użycia; zapiszcie listę oraz odzyskany rozmiar. Klon Windows B objęty polityką zostawić, chyba że Greg sam go usunie.'\n\nThe plan proposed in #2243:\n1. Remove .tmp worktrees and their target/ only for closed or landed items, after a path and active-use check.\n2. Remove .logs and .evidence files of closed items only.\n3. Keep the current binary plus 2 most recent backups.\n4. On the Mac, remove only the target/ of finished runs.\nTiming: AFTER the current cycle, with no gate or test active. Record the list of removed paths and the bytes recovered.\n\nThis grants no commit, push, install, restart or live-store access.\n\nUPDATE 2026-10-29 19:54Z. This is now the canonical TermAl cleanup rule; it replaces the separate key rules-worktree-cleanup-after-merge, which is tombstoned. Greg's standing rule (Advisor domain mailbox 271d07ab #11; Engram copy via Advisor 19c59c2c at 19:54:37Z), verbatim: \"Greg doprecyzowuje stałą zasadę: po udanym merge i zamknięciu pracy worktree należy automatycznie sprzątnąć. Wyjątek wyłącznie wtedy, gdy istnieje konkretna, zapisana i nadal aktywna przyczyna retencji (np. niezbędne otwarte dochodzenie). Nie odkładajcie cleanupu do ręcznego przypomnienia Grega; dopiszcie/egzekwujcie to w zwykłym procesie Mergera i koordynatora.\"\n\nThe trigger is now AUTOMATIC: after a successful merge (pushed and read back) AND the work's closure, the worktree and its build output are removed as part of the normal Merger and coordinator flow, with no reminder from Greg.\n- **Who removes it:** the owner. For handed integration roots, the integration owner.\n- **How:** `git worktree remove`, after an absolute-path-in-repo check and a no-active-use check.\n- **What is kept:** a worktree is kept only for a concrete, recorded, still-active retention reason, with owner and end condition recorded on an open item.\n- **What stays the same:** the safety checks, and keeping live worktrees, roots still serving open work, and required evidence that has not been preserved.\n- **Landing reports:** they list the worktrees removed or retained, with reasons. The coordinator's sweep enforces this.\n\nThis is not an additional gate."
+}

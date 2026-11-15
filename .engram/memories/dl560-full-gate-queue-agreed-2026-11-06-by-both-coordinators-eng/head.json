@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "dl560-full-gate-queue-agreed-2026-11-06-by-both-coordinators-eng",
+  "head": {
+    "state": "active",
+    "chain": [
+      "7858c397a3c846d4ac96d61e103384b3"
+    ]
+  }
+}

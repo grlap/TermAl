@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-auto-approve-new-coding-sessions",
+    "revision_id": "9cce441ca0f14ff5aa9b0b5cfc1c7647",
+    "previous": "16403fd080d64913954674819384e6eb",
+    "body_sha256": "3e3baf905e912edbc0cc697243ca74b525104c400ead57fac0da4941809c9adb",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T21:42:42.779919100Z"
+    }
+  },
+  "body": "Greg's direction, relayed by Engram::Advisor in TermAl mailbox b9d13887 #916 (2026-10-16 21:41:16Z), verbatim: \"Greg direction: create new coding/implementation sessions with TermAl auto-approve mode enabled, so routine MCP prompts do not park a lane. Apply it to future eligible sessions and record the effective mode in the dispatch. This does not broaden task scope, commit/push/restart authority, or permit unapproved external actions. For already-created Codex 7305, do not assume this changes its pending prompt; Greg will handle/cancel it in UI.\" How to apply: whenever a TermAl coordinator or worker creates a NEW coding or implementation session (termal_spawn_session or a root created for a lane), enable TermAl's auto-approve mode if the tool offers it, and state the effective approval mode in the dispatch message and the item note. Read-only reviewer children keep writePolicy readOnly; this doesn't change that, and it widens no other authority. Existing sessions are unchanged. Context: TermAl w-b0638788f33e (a Codex root parked on an MCP elicitation).\n\nMECHANISM (from source, 2026-10-16 21:42Z). New root: POST /api/sessions with {\"agent\": \"Codex\", \"approvalPolicy\": \"auto-approve\"} (camelCase field, kebab-case value; wire.rs CreateSessionRequest). Read back with GET /api/sessions/{id}, field approvalPolicy. Existing sessions: POST /api/sessions/{id}/settings {\"approvalPolicy\": \"auto-approve\"}, but NOT applied without Greg's word (his direction says \"future eligible sessions\"; asked via Advisor #917). CAVEAT: AutoApprove (wire.rs:849-851) answers approval requests only and leaves user-input, MCP ELICITATION and generic app requests interactive, so it would not have prevented Codex 7305's elicitation park (w-b0638788f33e)."
+}

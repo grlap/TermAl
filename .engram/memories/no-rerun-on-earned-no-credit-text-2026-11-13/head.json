@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "no-rerun-on-earned-no-credit-text-2026-11-13",
+  "head": {
+    "state": "tombstone",
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "retire attributed project memory",
+      "remembered_at": "2026-11-14T10:10:48.229633100Z"
+    }
+  }
+}

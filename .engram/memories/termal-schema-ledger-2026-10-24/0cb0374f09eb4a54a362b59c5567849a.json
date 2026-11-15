@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-schema-ledger-2026-10-24",
+    "revision_id": "0cb0374f09eb4a54a362b59c5567849a",
+    "previous": null,
+    "body_sha256": "1b1549213d83b976659b01d3ba5bbc48ef0309b2b9ec01348a08dbca9765f520",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-24T06:10:48.081604600Z"
+    }
+  },
+  "body": "TermAl SQLite schema ledger as of 2026-10-24 06:35Z (Fable2, from Architect2's rulings; the authoritative copies are on w-feba31b85e17):\n- LANDED: \"2-metadata-units-2\" (w-cce8fff7c62d, master de3bc0cd, 04:53Z).\n- NEXT: \"2-metadata-units-2-handoff-1\" (Sol-a7bb's v3, the w-a108 ordinary-handoff batch). Ruling be11673f, ledger copy b95ea76d. Two stages: primary2/units1 → validated units2 → an atomic semantic-floor CAS. The landed primary2-only app_state fallback is kept.\n- THEN: \"2-metadata-units-2-handoff-1-obligations-1\" (the JOINT containment/retirement floor, w-1e85dae945d4 with w-5139). Its immediate predecessor is handoff-1. Ruling 6cd7777d on w-1e85; ledger copy a0e5794a on w-feba. Joint data, inventory, generation and header move atomically; the mandatory ledger is strict even when empty; no app_state writes; known predecessors only; no import of the numeric 3/4 drafts; no default repair of target corruption.\n- Publication order is STRICT: units2 → handoff → joint. No sibling floors, and nothing handoff-only lands over a stronger joint floor.\n- The FEDERATION profile contract is separate and constant \"2\" (Architect2 1150c838, landing via w-efeee9548bef). It is NEVER the storage floor.\n- PARKED: directPrompt and b37b. coordination is 5, unchanged.\n- Not yet allocated: w-4fad42a4ffe7's delegation-catalog delta. It needs an old-writer compatibility floor or an invalidation design, allocated by Architect2 only after its catalog design is known."
+}

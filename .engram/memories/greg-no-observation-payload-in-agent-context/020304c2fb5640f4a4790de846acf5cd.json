@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-no-observation-payload-in-agent-context",
+    "revision_id": "020304c2fb5640f4a4790de846acf5cd",
+    "previous": null,
+    "body_sha256": "38d39d41b3e19301419f1be3bfd02be4c9c35435a66067e89dde7f080f4179f3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T16:55:15.531328200Z"
+    }
+  },
+  "body": "Greg's rule (2026-11-07 16:54Z, Engram::Asistant 588693a8 #871), verbatim: „Bardzo prosze sie upewnic aby tak sie nie dzialo”. The full execution_observe message and the full source_id must NEVER be put automatically into an agent's context: prompts, tool output, hooks, notifications, transcripts or compaction. Short summaries (e.g. Engram's one-line SourceIdSummary, ~150 B, and TermAl's root-path line) are fine. An explicit agent command (e.g. `engram source`) is a separate case. Enforced on both sides: the review pair of any candidate touching observation production or agent notices inspects those paths, and existing behavioural notice tests assert no source_id JSON. No new heavy gates and no tautological tests. Recorded on TermAl w-6f42c416b0c7 and Engram w-d9dbcd311958. State on 2026-11-07, from code: TermAl sends observations only host→Engram (engram_unadmitted_worker.rs:192–293 → engram_unadmitted_delivery.rs:284). Engram's next, hook and feed carry none; `show --observations` shows only the summary line (src/source.rs:49–63)."
+}

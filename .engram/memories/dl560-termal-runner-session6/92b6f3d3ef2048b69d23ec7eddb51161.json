@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "dl560-termal-runner-session6",
+    "revision_id": "92b6f3d3ef2048b69d23ec7eddb51161",
+    "previous": "0f0755666f764d3ca96bdb5fffef093e",
+    "body_sha256": "b0cfdcbbd611a1d275d7cc1db89dda23476dc7a3f7b294392e4a0f63f740b156",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T02:37:43.474338700Z"
+    }
+  },
+  "body": "The second DL560 TermAl runner is session-6 \"Codex 6\", address host:e83d08f4-22ac-4655-a84d-941fc0eeb4f1::session-6, relay principal relay-principal-557b1d0fda0cdfa4a08e3424915ba854e10e701ccf676e42ca4e0d89ef400b16. Created 2026-11-04 about 02:34Z by Fable2 through POST /api/sessions on DL560's loopback API (127.0.0.1:8787 over ssh dl560), on Greg's word „Utwórz poprawnie nową sesję”, relayed by Engram::Asistant, who added: settings like Codex 3 and leave session-5 alone. Settings as returned: Codex, gpt-6.1-terra, high, approval never, danger-full-access, workdir /home/greg/github/TermAl, project-b7327333-6e78-4e54-9196-fc63ab99937b. First check passed at 02:35Z: it read and acknowledged its mailbox and replied, with no approval prompt, checkout HEAD 14b53e3b. It had not yet run a test job at that point. session-5 stays held at the termal_read_mailbox MCP approval (on-request, workspace-write); nobody answered it; don't use it. Brief sent in its mailbox #1 follows dl560-termal-runner-session3 and adds: run long jobs detached and end the turn, because a pending wake only runs when the active turn ends. Basis, per Architect2's corrected finding on w-c752: Codex 3's turns ran about 100 minutes (23:37-01:18Z), 36 and 32 minutes, not one three-hour turn. Lane owners told at 02:36Z: new DL560 jobs go here; withdraw and get an answer before moving a job queued at Codex 3."
+}

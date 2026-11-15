@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-session-removal-cascades-to-children",
+    "revision_id": "c4a5d0034c1440cd979eab003343b385",
+    "previous": "b4265f3d42a048fcbb1144ef65bc110b",
+    "body_sha256": "8f4bd343208c111d6fc3ce2a1995544ef1086dc06f800f318269e6f374f604e6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-08T23:21:59.477226900Z"
+    }
+  },
+  "body": "Lesson (Termal::Fable2, 2026-11-08, revised 23:22Z). POST /api/sessions/ID/kill, which the UI trash also calls, removes the session AND its whole delegation-child subtree (src/delegations.rs:3887). This is INTENDED: Greg, 'Jak usuwam sesje to razem z delegacjami. Nie chce jakiejs historii.' and 'Juz pytamy o potwiedzenie. Nie potrzebujemy info o delegacjach.' So no count, warning or extra confirmation is wanted, and no recovery of removed sessions. Removing session-8581 removed 634 sessions and he confirmed that matched his expectation.\n\nMy error stands as a method lesson: I told him 'nie usunęło innych' was at risk only after acting, because my pre-check filtered /api/state delegations on parentSessionId, a field that projection doesn't carry, so its zero proved nothing, and I hadn't read the whole code path. Rules: before an irreversible act, read the whole path invoked; show a zero-returning check could return non-zero; state the blast radius first. Greg didn't ask for more process around removal; this is about how I check."
+}

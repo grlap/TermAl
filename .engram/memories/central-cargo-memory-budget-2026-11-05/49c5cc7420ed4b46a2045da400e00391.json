@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-cargo-memory-budget-2026-11-05",
+    "revision_id": "49c5cc7420ed4b46a2045da400e00391",
+    "previous": "e3ae4e008ffd476a8aaebcb62c775540",
+    "body_sha256": "d09c4e348c1ddef3d2e7dda0f6d6b78afea5c7ee5dba01dfb0d66790cbc5f2d3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T05:52:20.360714100Z"
+    }
+  },
+  "body": "Central Cargo memory budget (integration owner Opus2 enforces). REV 10, 2026-11-13 05:51Z, CONDENSED: the full history, measurements and verbatim sources of revisions 1-9 remain readable with --revision 9 and earlier. Read the raw FreeVirtualMemory (FV) KiB value; never round.\n\nCURRENT RULES\n1. One Central cargo job at a time; RUST_TEST_THREADS=4; -j 4 needs FV >= 26 GB; nothing starts below 16 GB.\n2. COLD vs WARM -j 2 (Fable2 #5829, ruling on Opus2 #5828; narrows the rev 9 standing parity floor of Fable2 #5811):\n   - COLD -j 2 (fresh worktree, a new commit with no warm shared target, or a target that has never built this commit): starts only at FV >= 24 GiB (25165824 KiB) with no other rustc running. Same as FULLs and release builds.\n   - WARM -j 2 (the shared target/closure-<master8> already built at exactly that commit, or the same root's warm target at the same commit): FV >= 20.0 GiB (20971520 KiB), no other rustc.\n   - If cold vs warm is unclear, treat it as cold.\n   - Prefer reusing an already-warm shared target at the same commit for closure and author checks, under the exact-commit condition (memory closure-shared-target-dir-2026-11-13).\n3. Only ONE sub-24 GiB run at a time across both projects (TermAl and Engram named -j 2 slots, rules-central-slot #507/#509).\n4. Spawns: a reviewer pair or evaluator needs FV >= 16 GiB and no rustc above about 5 GB private at each spawn; otherwise it waits.\n5. Incidents: if FV reads below 12 GiB during a run, record the readings on the run's item and start no further sub-24 GiB run until it ends. Nobody kills a process (Engram w-fa603145720d); below 6 GB the monitor reports to Opus2 and the run finishes, recorded as a resource incident, not a test result.\n6. TEST exclusivity (both coordinators, Fable2 #5799, Engram::Fable #660): while a Central cargo TEST run holds the slot, no other session runs a node TEST that spawns git or engram processes (launcher node --test suites, dogfood). tsc, lint, docs-link checks, UI-only vitest that spawns no git or engram, and read-only reviewers and evaluators stay allowed. A run whose owner asks for EXCLUSIVE gets nothing else beside it.\n7. Large author test builds (--bin termal test compile, Engram --lib test or Clippy) go to DL560's author lanes when free or sooner; Central keeps Windows-only steps and runs that need Central itself.\n8. Engram's #482 author-Clippy rule follows the same cold/warm floors, may start only when no NAMED Central GO is outstanding, and reports START and END to Opus2.\n\nWHY (measurements)\n- 2026-11-11: edfd's -j 2 cargo test --bin termal started at 21.9 GiB; one rustc reached 17.2 GB; FV fell to 3.3 GiB (no kill, passed).\n- 2026-11-13 05:28Z: Opus3's cold -j 2 closure compile: FV 11.88 GiB, rustc 12.7 GB (recorded on w-e1053ea93543).\n- 2026-11-13 05:45-05:50Z: 03d4's cold -j 2 author run test-651fb3af (277b at e81bd2ee): one rustc 18.26 GB, FV 4.87 GiB at 05:48:01Z, under 12 GiB 15 times; launcher STALLED at 05:50:26Z during the pressured link; no kill (recorded on w-277b7077a6ac; raw log .logs/opus2-census-watch.log).\n- Central idles at about 23-25 GiB FV with no rustc (TermAl host about 5 GB plus about 20 sessions at 0.7 GB each); a capacity fact.\n- Greg via Engram::Asistant #445: «To chyba jest max teraz co mamy.»\n\nFable2 is telling Engram::Fable, because the 20 GiB floor in rules-central-slot has the same cold-compile exposure."
+}

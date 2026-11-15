@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-gate-preflight-node-modules",
+    "revision_id": "87d47c34a07444d29a9dbdd8e6b1dc38",
+    "previous": null,
+    "body_sha256": "5b27c7bd0884ac6b53b872335b1e9f77ec557c880d88a7c3603d3b5737c1c0e8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T08:29:55.734552800Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA1, 2026-10-19 08:30Z, my own miss on the w-4d6283a1f1f5 GREEN-6 gate test-c85d2a3d). Before mailing READY for a full gate, pre-flight the root with reads only: `<root>\\ui\\node_modules\\typescript\\bin\\tsc` exists, and `<root>\\ui\\node_modules` is NOT a junction (LinkType empty). If I unlinked a junctioned node_modules earlier in that root (the correct non-recursive removal), the root has NO node_modules until its own `npm ci` runs. Then the gate dies before any stage with ENOENT on ui\\node_modules\\typescript\\bin\\tsc, earns no credit (\"terminal record has no input fingerprint\") and burns a gate slot. Fix: ask the coordinator for an npm ci window (heavy disk; never during the other project's gate), run `pushd \"<root>\\ui\" && npm ci` as its own command, verify, then ask for a fresh LAUNCH NOW. Rules: coordinator-fresh-worktree-npm-ci, no-node-modules-junction-for-test-roots, termal-worktree-node-modules-rule."
+}

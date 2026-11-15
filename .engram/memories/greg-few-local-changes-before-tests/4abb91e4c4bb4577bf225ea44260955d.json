@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-few-local-changes-before-tests",
+    "revision_id": "4abb91e4c4bb4577bf225ea44260955d",
+    "previous": null,
+    "body_sha256": "66bff345b8fd898a03f164a267b3411e2365b022dd244a3c04bb31c1933d1689",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T09:21:43.073747400Z"
+    }
+  },
+  "body": "Greg, 2026-11-07 09:21Z (Asistant #806 TermAl / #576 Engram), verbatim: „Regula jest taka, ze nie powinno byc zmienionych duzo lokalnie plikow przed puszczeniem testów.”\nMeaning, as agreed with Engram::Fable: it is an AGENT WORKING PRACTICE. Keep local work committed or tidy before starting a test run.\n- It is NOT a numeric threshold, NOT a new credit condition and NOT a gate in code.\n- Credit stays as agreed: source_id before == after, dirty allowed.\n- If source_id is too large (many dirty paths), it becomes unavailable: the tests STILL RUN, the run state is the actual stage outcome, and there is no credit. Never refuse the run, and never fake a FAIL. This was fixed in the EO candidate by Sol-03d4 after the windows_launch 2051-path failure.\nRecorded by Termal::Fable2."
+}

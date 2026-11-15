@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara2-reread-mailbox-before-slot-launch",
+    "revision_id": "b4842684b5f9488bb65e8ede84aadb04",
+    "previous": null,
+    "body_sha256": "1f4e122918cda6ff8a364c661b21abf70743ed9586f7097f6a2e45a998e30497",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T01:20:16.434150900Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA2, 2026-10-23 01:20Z; my own slip on w-6d40 RED test-fc50b057). A coordinator's order change can arrive while my turn is active (queuedBehindActiveTurn), and the wake does not show it until the turn ends. Before launching a run into a census slot (the +1 beside a Merger gate, or a cold slot), read the coordinator mailbox in the same turn, right before the launch. The census alone does not show the queue order: a run that has not registered yet is invisible to it. I launched after 9ddcbdb5 cleared and took the +1 that Fable2's #245/#246 had just given to Sol-03d4 (w-7635) and Sol-edfd (w-efee)."
+}

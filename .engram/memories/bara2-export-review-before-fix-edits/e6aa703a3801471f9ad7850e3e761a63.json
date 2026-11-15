@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara2-export-review-before-fix-edits",
+    "revision_id": "e6aa703a3801471f9ad7850e3e761a63",
+    "previous": null,
+    "body_sha256": "cdb5d20db13322176e0d79de1a7dda44cd40b053ef0024c4097547064e868e79",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T09:11:37.494215100Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA2, 2026-10-29, my own slip twice on w-c205 slice A rounds 1 and 2). When a review round returns findings, run the immutable export (node .tmp/export-review-results.mjs <dir> <session> <delegation ids>, plus INDEX.md and SHA256SUMS) FIRST, before the first edit that fixes them. Reading the code to design the fix is fine, but the export comes before any Edit in the reviewed root. Twice I designed and edited straight from the fan-in, and only exported afterwards, disclosing the late export in its INDEX. The packets were unchanged, but the rule is \"export each review round immutably before the next edit\"."
+}

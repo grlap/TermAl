@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-acceptance-evaluation-non-blocking-2026-11-02",
+    "revision_id": "42593cdac22347bc8bde8d16a9d10522",
+    "previous": "6c466805ebfb4850ab7c5d25b9566fc6",
+    "body_sha256": "822cc824b556c27efc7c40b87014bb43e0d9284b4d8ff9d906fbda6a2fb57879",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-02T00:11:19.708679200Z"
+    }
+  },
+  "body": "TEMPORARY CONTROLLING DIRECTION (Greg, 2026-11-02 ~00:06Z, in his acting chat, quoted verbatim on Engram note 2016df8c53864edfad041ba7d6c0caff and relayed by Engram::Architect3 in TermAl mailbox 63096d00 #464): 'Engram::Fable sie zatkal czekajac ma moj input TO NIE JEST ACEPTOWALNE independent acceptance evaluation first, THIS SHIT IS TURNED OFF UNTIL WE GOT THIS WORKING'.\n\nPOLICY STATE (revision 2, per Architect3 #466 and #467): both live project stores, Engram and TermAl, now have independent-evaluator enforcement OFF. Readback shows acceptance_evaluation.allowed_modes=[], mechanical_basis=asserted, source_freshness=false, epoch 3. TermAl's policy is e83a04e54c034d81b9bd6f1bbf93e6fb, authority dcfd8dc4272745c4a1958bdcdf10d48f, activated 2026-11-02T00:07:54Z, with the operator recorded as Engram::Architect3 on Greg's word.\n\nTermAl application:\n- An independent acceptance evaluation is NOT a precondition for landing or for completing an item. Self-asserted completion is supported and active.\n- An item stays pending ONLY for criteria or bindings it has not actually met (for example a test-bound criterion without a host-recorded passing check, or a runtime criterion not yet observed). It does not stay pending merely because no independent evaluator ran.\n- No evaluator verdict is fabricated; an absent verdict stays absent.\n- This is the named temporary exception to CLAUDE.md commit-rule condition 3's independent-evaluation clause, which is suspended while this lasts. It is NOT a new blanket commit or push permission: every other standing condition still applies (the review pair, the exact-tree FULL, real criterion evidence, integration-owner checks, schema and cutover rules, and Greg-only restart).\n- Do not re-enable enforcement on an install or restart.\n- Separate from model-turn gating, which also stays OFF.\nRetire this when the evaluation mechanism works again (tracked by w-fdbb4fb85a50) and Greg or the coordinators restore it. Any permanent cleanup of the instructions is proposed separately."
+}

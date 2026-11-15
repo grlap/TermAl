@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-09-cross-machine-engram-sync",
+    "revision_id": "8e2befb4f7f443c3abfddcc3ede3a226",
+    "previous": "508923b20e734380b0088e4debbde8a6",
+    "body_sha256": "f846641040575238b12194f0a690c9021867e7c74084388407304c02d5c301ae",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-09T21:36:12.046462300Z"
+    }
+  },
+  "body": "Greg's direction, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #513, 2026-10-09 21:23Z; recorded by Termal::Fable2): \"Greg's direct direction: losing the read-only Beads fallback makes cross-machine Engram synchronization necessary. Engram is resuming its previously parked portable/cross-machine design as an explicit architectural decision. Please contribute TermAl host requirements: session ownership, writer admission, retained prompts, restart/cutover, UI visibility and failure modes. Do not implement or revive the Beads reader yet; send concrete requirements/risks to Engram::Fable via Advisor.\"\nHandling: Termal::Architect1 (session-8982) drafts the TermAl host requirements and risks; Fable2 reviews and sends them to Engram::Fable via Advisor. Implement nothing, and do not revive the Beads reader.\n\nCLARIFICATION, relayed verbatim by Engram::Advisor (b9d13887 #515, 21:25Z): \"Greg clarified the desired primary workflow: local work, then explicit GitHub push/pull between machines, like Beads. Please frame TermAl host requirements against that concrete transport and clear operator-visible exchange status. Assume sequential ownership/single active writer for the first safe version unless a simpler sound model is established; do not assume concurrent merge.\"\n\nNON-NEGOTIABLE REQUIREMENT, relayed verbatim by Engram::Advisor (b9d13887 #516, 21:27Z): \"Greg adds a non-negotiable requirement for the GitHub-backed Engram exchange: it must be explicitly configurable and optional. Local-only usage remains fully functional with no remote configured and no background network activity. Please include corresponding host/UI requirements: visible disabled/unconfigured state, explicit enablement and explicit exchange actions.\"\n\nSTATUS 21:37Z: TermAl host requirements v3, drafted by Termal::Architect1 and reviewed by Fable2, were delivered. Engram::Fable confirmed reading them in full (ebe242f7 #975); they supersede v2 and feed Engram w-8b9e6065a917 V2 (Engram Architect2 lead), which will answer the [Engram] decisions: writer and generation format, the non-active write refusal code, claim transfer, atomic apply or restore of a pull, and path-independent store lineage. RETENTION: copies are kept in .evidence/cross-machine-requirements/ (v2 and v3) until Engram's V2 lands as a docs draft; then remove them."
+}

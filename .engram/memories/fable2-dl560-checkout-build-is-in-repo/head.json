@@ -1,0 +1,14 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "fable2-dl560-checkout-build-is-in-repo",
+  "head": {
+    "state": "active",
+    "chain": [
+      "79215cb14054476883e63b281fcb9723",
+      "7f14e09183eb467290ec0e0b36e6d0c4",
+      "fc9bd5e73e6e4397b80fb2d07ff22663",
+      "0a4c73fa23ee42a29688db7134593d11"
+    ]
+  }
+}

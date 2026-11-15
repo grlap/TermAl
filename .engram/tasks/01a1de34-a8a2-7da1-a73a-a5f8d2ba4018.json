@@ -1,0 +1,29 @@
+{
+  "id": "01a1de34-a8a2-7da1-a73a-a5f8d2ba4018",
+  "external_ref": null,
+  "title": "Surface the focused launcher recognizer's rejection reason instead of silently treating the command as not a test",
+  "outcome": "Surface the focused launcher recognizer's rejection reason instead of silently treating the command as not a test",
+  "acceptance": [
+    "When a launcher-shaped command is rejected by engram_focused_launcher_words (for example an unsupported or duplicate option), the computed reason reaches a readable place (the run's registration or check-recognition diagnostics) and names the option and the supported form, instead of the command silently becoming 'not a test'; shown by a behaviour test.",
+    "Recognition outcomes for valid commands are unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "design-rule",
+    "host-feedback"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

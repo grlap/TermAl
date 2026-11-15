@@ -1,0 +1,16 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-decision-2026-10-09-cross-machine-engram-sync",
+  "head": {
+    "state": "active",
+    "chain": [
+      "87ecbadc75c64dde8bd9c05366e06f77",
+      "8fce4eeece094a349db1961dd2d1c74c",
+      "508923b20e734380b0088e4debbde8a6",
+      "8e2befb4f7f443c3abfddcc3ede3a226",
+      "79eaa78fe11d44f8ace08c38581b56f2",
+      "500310357de44e73b6af757a09a493c2"
+    ]
+  }
+}

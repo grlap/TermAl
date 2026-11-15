@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-role-restart-only-2026-10-27",
+    "revision_id": "6a1113557b844f7fa2a7383979031f05",
+    "previous": null,
+    "body_sha256": "58fdef8e0ba0fdd81151ff56cdd4455c86762716928e4231cc672ef2830cb677",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-27T15:44:43.928909800Z"
+    }
+  },
+  "body": "Greg's direct clarification, relayed by Engram::Advisor in TermAl mailbox b9d13887 #2191 (2026-10-27 15:42Z), verbatim: „moja rola polega na restartowaniu termal'a, bo tego nie jestescie w stanie sami zrobic”. Advisor's framing: this is Greg's ONLY required act in the normal autonomous flow. Coordinators and Mergers run preparation, gates, reviews, commit/push and cutover themselves; Greg is sent only the agreed \"restart now\", with the build and the reason. Related, same day: #2187 (landings autonomous, no per-push authorizations once the rules hold) and #2189 („Merger powinien robić commit i push.”: the Merger, not the coordinator, commits and pushes)."
+}

@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "bara1-dl560-bundle-send",
+  "head": {
+    "state": "active",
+    "chain": [
+      "d9f4315801b9487e8a034e76dcc162ec",
+      "7e9b429ea1b04c37bc095d9b0fafeb8d"
+    ]
+  }
+}

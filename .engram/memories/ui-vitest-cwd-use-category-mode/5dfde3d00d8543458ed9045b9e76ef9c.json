@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "ui-vitest-cwd-use-category-mode",
+    "revision_id": "5dfde3d00d8543458ed9045b9e76ef9c",
+    "previous": null,
+    "body_sha256": "98e240d5d685dabc5383019820b478e536e6eb4a01eda3dfc0a4e440b0ee252d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T06:51:22.523498900Z"
+    }
+  },
+  "body": "Opus2 lesson (2026-11-13 06:55Z, two failures from my own dispatch wording): TermAl's UI Vitest tests need ui/ as the REAL working directory (docs/test.md; some tests read `${process.cwd()}/src/styles.css` or vite.config.ts). The launcher's `focused` mode runs its command with the REPOSITORY ROOT as cwd and has no cwd option, so `node scripts/test-launcher.mjs focused -- node ui/node_modules/vitest/vitest.mjs run --root ui ...` fails cwd-dependent tests with ENOENT under <root>/src/... (`--root ui` sets Vitest's root, not process.cwd()). Seen: Codex 7 cf2f62a3 full vitest test-533d4d90 (21 failed, ENOENT wt/src/styles.css, wt/vite.config.ts) and 03d4 1eca278c test-387e105c (workspace-shell-controls.test.tsx:45). Those were harness errors, not product failures.\nCorrect routes: (a) the launcher's CATEGORY mode, `node scripts/test-launcher.mjs category <unit|component|heavy|app> --input commit`, which runs one Vitest project with cwd ui/ (no file filter); (b) on Linux (DL560), `node scripts/test-launcher.mjs focused --input commit -- npm --prefix ui test` (npm runs ui/package.json's `vitest run` with cwd ui/). On WINDOWS (Central) the `npm` form fails (\"executable not found: npm\"): the launcher spawns argv without a shell, so npm.cmd is not resolved. A focused `--root ui` run is only safe for test files that do not read cwd-relative paths. tsc via `node ui/node_modules/typescript/bin/tsc -p ui --noEmit` is fine from the root."
+}

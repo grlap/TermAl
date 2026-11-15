@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-greg-no-binary-backup-2026-10-19",
+    "revision_id": "946cb3bc95cf469693ebd7dd76ba2df2",
+    "previous": null,
+    "body_sha256": "dce7c52260be1536ff576bcdd2e68e5e945b1a726918b65b9595904f6ee90f4d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T12:42:41.566610Z"
+    }
+  },
+  "body": "Greg's word (2026-10-19, ~12:42Z, via Engram::Advisor b9d13887 #1264, which retracts Advisor's #1263): an install that overwrites the previous termal.exe without a backup is NOT a defect. 'the commit is sufficient to rebuild a prior version; no binary backup is needed here.' Don't file it or report it as a gap. Rollback = rebuild the earlier commit. Keep capacity on M4→M6, the root-starved lanes and the current gates."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-2026-10-30-01-39z-via-engram-advisor-b9d13887-2669-verbatim",
+    "revision_id": "1f5cdfde8716421a820cbbe2791c3627",
+    "previous": null,
+    "body_sha256": "62a46a62c8d30b1dee4ba8b6c67a2ea4eab5a4a2b308060eaaa1b810a17d81ce",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T01:39:50.313358500Z"
+    }
+  },
+  "body": "Greg, 2026-10-30 ~01:39Z, via Engram::Advisor b9d13887 #2669, verbatim: \"Greg reaguje na wskazany kompromis: celem jest właśnie WIĘCEJ zmian na masterze. Równoległe kodowanie, review i częsty ruch mastera nie są powodem do ograniczania przepustowości. Proszę prowadzić niezależne prace i szybkie landingi, uzgadniać konflikty normalnie; batchować tylko gdy rzeczywiście skraca czas, nie czekać na batch dla samej procedury.\" Coordinator practice (Termal::Fable2): a READY change lands alone with its own gate as soon as a host is free; batch only changes that become ready together; compose and precheck speculatively on idle hosts instead of waiting for preceding landings."
+}

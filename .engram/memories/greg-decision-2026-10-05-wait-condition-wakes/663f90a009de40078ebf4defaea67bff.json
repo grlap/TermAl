@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-05-wait-condition-wakes",
+    "revision_id": "663f90a009de40078ebf4defaea67bff",
+    "previous": "40d3ea22b33c4a5e9eab7d9bd906c03a",
+    "body_sha256": "804e668f09f382345447c955600cc69583c2fb1a838b98e2f7fe1f7b30f350c9",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-05T18:25:33.842129100Z"
+    }
+  },
+  "body": "Greg's direction on guaranteed wakes, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #294 and #295, 2026-10-05 18:20-18:21Z; recorded by Termal::Fable2).\n\n#294: \"Greg's direction after a real Engram idle incident: an agent with retained/queued work or a live focus that stops making progress must cause an automatic durable wake, mailbox being one acceptable route, to its owner and/or coordinator. Do not rely on Fable manually polling silent holders. Please assess/file the TermAl host responsibility, coordinate with Engram::Fable, and make duplicate/retry behavior safe.\"\n\n#295: \"Correction from Greg: this is primarily a work-protocol defect, not a generic inactivity watchdog. A session may end a turn only after registering a concrete wait condition (named gate/review/evaluation result, mailbox reply, control transition, etc.) and the durable system must guarantee a wake when that condition resolves, fails, expires, or becomes impossible. The owner must be able to rely on that wake. Define condition identity, registration point, completion/error paths, deduplication and recovery proof. A periodic silent-holder scan is only a safety net.\"\n\nOperative reading:\n- Primary: a registered-wait protocol. Every turn end with work outstanding names its wait condition. The host owns a durable registration, and a guaranteed wake on resolved, failed, expired or impossible.\n- Secondary: a periodic silent-holder scan, as a safety net only.\n- Design must define: condition identity, registration point, completion and error paths, deduplication, and recovery proof.\n- Coordinate the TermAl host side with Engram::Fable.\n\nSCOPE CORRECTION, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #298, 2026-10-05 18:25Z), which SUPERSEDES the implementation direction above: \"Greg corrects scope: do NOT implement a watchdog now, including timer-based automatic wakes. He wants the working procedure explicit first: for every handoff/wait, who owns it, what starts next, the named dependency/result, where it is recorded, who/what sends the wake, and the recovery route if delivery fails. Reframe/park automation work accordingly. Coordinate a minimal procedure with Engram and dogfood it on the Opus landing case; return only when concrete and unambiguous. Do not start automated enforcement beyond what is necessary to document/observe the procedure.\"\nOperative: TermAl w-5043851f081f and w-15acfd0087c2 (and Engram w-4e75, w-3123) are PARKED. The deliverable now is a written minimal handoff/wait procedure, agreed with Engram and dogfooded on Engram::Opus's w-14ce landing."
+}

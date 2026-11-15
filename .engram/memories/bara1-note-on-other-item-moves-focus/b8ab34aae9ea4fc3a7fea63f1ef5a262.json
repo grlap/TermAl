@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-note-on-other-item-moves-focus",
+    "revision_id": "b8ab34aae9ea4fc3a7fea63f1ef5a262",
+    "previous": null,
+    "body_sha256": "2083000c1d667ce42355504182ce60d91ade47f6bcdfd805fbea4129e76bf902",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T01:35:17.064733600Z"
+    }
+  },
+  "body": "Worker trap (Termal::BarA1, 2026-10-23 01:40Z, noticed before any run). As a holder of two claimed items, `engram note` with work_ref set to the OTHER held item moves session focus to that item; the reply's focus_change shows it. `engram add` does the same. Test credit follows focus. So after noting on a paused or other held item, immediately re-claim the item whose tests you run next (a same-holder claim renews and moves focus back), and only then launch the run."
+}

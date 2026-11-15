@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-merger-model-2026-10-10",
+    "revision_id": "c9289d8c783245539e1f888a12fe295a",
+    "previous": "e60aa2a1c62f421db7ae04e44b6518f7",
+    "body_sha256": "70c3a26c532229d5f6ba6b29a5c15cf2e876da558c24645d45e266aba54f925b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-10T23:45:36.126117500Z"
+    }
+  },
+  "body": "TermAl operating model from 2026-10-10 about 23:45Z (Greg adopted it for Engram; Advisor b9d13887 #553 asked TermAl to apply it; Termal::Fable2's assessment in #554). CONTINUOUS PRODUCERS plus a SERIAL MECHANICAL MERGER.\n- Producers (coders) prepare disjoint packages in isolated worktrees: implementation, RED/GREEN, freeze, and a clean review pair. Then they HAND OFF the item (engram handoff, or a release plus a note) with a package note: freeze, base, root, pair delegations, run ids, criteria changes. Then they start the next item. Producers no longer carry after every landing.\n- The Merger is Termal::Opus2 (session-8111, the integration owner per CLAUDE.md). It claims the handed-off item, carries it onto current master (hunk-identical: no pair; merged or changed hunks: back to the coder for a confirmation pair or a fix), re-names the root ONCE, and gates on Fable2's LAUNCH NOW. Then it commits, evaluates with the turn held open, and lands and installs. Conflicts and gate failures go back to the coder.\n- Why the handoff: a full gate is credited to the claim of the launching session, from a root named under that claim.\n- Fable2 controls the queue, the gate alternation with Engram, review and evaluation rulings, and landing order.\n- If Opus2 is down (Claude limits), a Codex session can stand in; the procedure is mechanical.\nFirst packages: w-d3e97ac8a353 (Opus3), then w-539ea7e8b506 (BarA1), then w-cd57679e0bb6 (CSharpProof) and Codex's w-aec234e3f7d0 and w-b21c5132848c after their pairs. This grants no new authority; commit and push stay with the integration owner.\n\nCONFIRMED by Engram::Advisor (b9d13887 #555, 23:43:56Z): \"Proceed after w-49818 lands. The proposed handoff model is consistent with Greg's continuous producer/integrator direction: Opus2 is the serial TermAl Merger, carries only the approved package once onto current master, returns conflicts or changed hunks to the coder, and Fable2 retains queue/gate/review/evaluation order. Record the first two preflight packages as w-d3e97ac8a353 then w-539ea7e8b506.\"\n\nCORRECTION by Greg (Advisor b9d13887 #556, 23:44:36Z), verbatim: \"Greg corrects the role decision: do not designate Opus2 as the continuing TermAl Merger. Keep Opus2 on its current w-49818 gate only. Greg is creating a dedicated Termal::Merger; after it appears, route the mechanical carry/preflight queue to that session. Preserve the proposed package order, but wait for the dedicated worker before new handoffs.\" So the MERGER is a dedicated session, Termal::Merger (session id to be recorded when it appears), NOT Opus2. Opus2 stays integration owner for w-49818. Coders keep their claims and frozen trees, and write package notes, until Termal::Merger exists. Package order unchanged: w-d3e97ac8a353, then w-539ea7e8b506. Opus3 and BarA1 were told at 23:45Z to cancel any offer already made to Opus2."
+}

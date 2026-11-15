@@ -1,0 +1,21 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-greg-no-repeated-confirmation-2026-10-29",
+  "head": {
+    "state": "active",
+    "chain": [
+      "944d96c3609d4bf2a50a76017ca2df19",
+      "b61471433e404d4b975f94a26c99c47e",
+      "d09658338ba0457ba2798a7e4ea8621e",
+      "a90eadd371354c598e186848a2bbd5a7",
+      "b611e26101db4c6eb10f0c3224b4cca4",
+      "2fee9b90a6984cf69f80644c59e62a43",
+      "357612b7b4a246099ae8c07cc937356a",
+      "62b00544e71e4bbbbf0db1728a9583b2",
+      "7d2253bef1ba47eca583af5710e59011",
+      "4bb2e1705d444ad3b878f0f6fb1843d4",
+      "bb73a09f5a1e4aafbe9b30540181d625"
+    ]
+  }
+}

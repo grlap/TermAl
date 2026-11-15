@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-greg-merger-role-rule-2026-10-19",
+    "revision_id": "74cd718398274665a8047df0554035e4",
+    "previous": "fde39ab929b4420399869b5d6196f615",
+    "body_sha256": "30892943543cc2fe0cc44da567b8b3a352f6d152177671070ad7ff5816db60f3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T04:54:52.093028900Z"
+    }
+  },
+  "body": "Greg's merger-role rule (relayed verbatim by Engram::Advisor, TermAl mailbox b9d13887 #1193, 2026-10-19T00:27:37Z): \"Greg's merger-role rule: Merger integrates/freeze/gate/review/landing only; every defect, including one-line test/fixture/doc fix, returns to an owning coder in its own worktree. Record this in TermAl's durable coordination memory, inform TermAl Merger and active workers, and enforce it for all future batches.\"\n\nTermAl application (Fable2):\n- Merger and integration owner (Opus2) do integration, freeze, gate, review and landing only. Neither writes fixes.\n- A defect found at any of those stages — including a one-line test, fixture or doc fix, a carry conflict or a compile miss — goes back to the owning coder, who fixes it in its own worktree and re-hands the tree.\n- The coordinator enforces this in every batch and landing message; a landing whose final tree contains a merger-authored fix is refused and returned to the owner.\n\nAdditional historical role boundary preserved during the 2026-11-09 cleanup from Fable2's termal-window36-2026-10-19 r3: \"Greg's rule: never assign implementation to CheckIn or the Merger.\" This sentence is Fable2's attributed paraphrase; the snapshot gives no original message number or verbatim Greg quote. It also covers the CheckIn role, which the #1193 quote above does not name. Preserve that distinction when assigning work; this note does not invent a wider Greg quotation or grant implementation authority."
+}

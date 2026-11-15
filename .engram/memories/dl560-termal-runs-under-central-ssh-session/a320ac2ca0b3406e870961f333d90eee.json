@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "dl560-termal-runs-under-central-ssh-session",
+    "revision_id": "a320ac2ca0b3406e870961f333d90eee",
+    "previous": null,
+    "body_sha256": "4963fdf1e0ce310e8388ad5b50a3288afc859926335693e7b320b6b8be4340dd",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T09:12:59.188675800Z"
+    }
+  },
+  "body": "Greg, 2026-11-11 ~09:11Z, relayed by Engram::Asistant (TermAl mailbox 588693a8 #1370): 'Bo termal na dl560 uruchamiany jest z sesji ssh z central...'. The DL560 TermAl host runs inside an SSH session opened from Central. CONSEQUENCE: any Central reboot or SSH drop ends the DL560 host and every run on it: FULLs, author runs, runner sessions. Seen on 2026-11-11, when the Windows-initiated Central reboot at ~08:30Z killed combo51's FULL and the DL560 author runs; the DL560 link came back authenticated at 09:05:48Z after Greg restarted it. A DL560 run that dies with the host is classified ENVIRONMENT, not a gate failure. Relaunch the same input with a confirmed start; that is not a retry-to-green. Running the DL560 host detached from Central's SSH session (tmux/systemd) is Greg's configuration decision, not an agent's."
+}

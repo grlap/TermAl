@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "testref-procedure-v6-3",
+    "revision_id": "366c1610f68f43fa8e1e8705b590b679",
+    "previous": null,
+    "body_sha256": "e1282ad3959c67297cd1bf5d28b7a160474f29a6433abf0f99619599308b3cf6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T18:53:49.570482200Z"
+    }
+  },
+  "body": "Test-ref push procedure under v6.3 (CLAUDE.md/AGENTS.md, landed 7fa57966 on 2026-10-19; Greg: \"tak, Opus moze wypychac\"). Integration owner = Termal::Opus2. First use: w-604b, commit c723f2d5, pushed 18:53:20Z.\n\nSteps:\n1. Verify the producer's freeze while it still verifies. `target/release/termal.exe review-freeze-check ROOT MANIFEST FINGERPRINT` (manifest usually at .git/worktrees/<root>/engram-review-freeze.json) must exit 0 with stdout exactly the fingerprint.\n2. Compute the complete frozen-input tree: copy the root's index (use an ABSOLUTE GIT_INDEX_FILE path, since a relative path under `git -C ROOT` gives the empty tree 4b825dc6), then run write-tree. Confirm 0 unstaged and 0 untracked, or the tree must include untracked files.\n3. BEFORE committing, note on the item the tree id beside the fingerprint.\n4. `printf '%s\\n' FP | git commit-tree TREE -p BASE`. The message is the fingerprint ONLY: no Co-Authored-By trailer, because the repository rule outranks the attribution reminder. Verify tree, single parent and message.\n5. `git push origin <commit>:refs/heads/test/<item-shortref>-<fp8>`, then ls-remote. Only the remote-tracking ref appears locally; no local branch.\n6. Send the receipt (ref, commit, tree, parent, message, push time) to the coordinator for the runner.\n7. Delete with `git push origin --delete <ref>` once the run's evidence is recorded (at the latest when the items close), then ls-remote, and note the push and deletion (commit, tree, fingerprint, times) on the item.\nA remote full gate on the ref counts as the landing gate only after its result is imported as a recognized record bound to the tree id, and only for a landing whose master commit has that tree."
+}

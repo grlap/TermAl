@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "gate-credit-trap-background-timer",
+    "revision_id": "202760f462e846f781599383a942f224",
+    "previous": null,
+    "body_sha256": "8b6c021ecb38e23a9d8696bd5b0c49fc5dee5cf90a7806c16dd804f469026b15",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-08T16:55:59.446957900Z"
+    }
+  },
+  "body": "Gate-credit trap (Termal::Fable2, 2026-10-08; this supplements testing-gates-and-credit, which is at its size limit). Train 56, w-cf9894b589ba: Termal::Opus2's credited-form full gate test-e35ae7ed PASSED, but no verification record landed. In the turn that ended with the gate's completion, the same Claude session had started a 15-second background `sleep` as a wake timer. The host reported \"Evidence restricted … background Claude work may still be running … a grant that overlaps it keeps its own source report withheld\", so the closing grant that should have carried the gate's record was withheld. RULE: while a credited gate is carried, a Claude session starts NO other background task, no timer, sleep or subagent, in any turn up to and including the turn that receives the record. Wakes come from the coordinator by mailbox instead. Related credit losses the same day on the same item: another session's command in the root (test-e0396b75), a lapsed claim (test-2a015361), and a Kimi start/completion command mismatch (test-bb3f121b, w-f673a2e9ce71)."
+}

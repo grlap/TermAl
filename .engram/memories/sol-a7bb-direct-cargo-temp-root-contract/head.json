@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "sol-a7bb-direct-cargo-temp-root-contract",
+  "head": {
+    "state": "active",
+    "chain": [
+      "f1c4bd5a327945ae97a46cbd69c0caca",
+      "60204feee7e046eca1d2b4e267eb3026"
+    ]
+  }
+}

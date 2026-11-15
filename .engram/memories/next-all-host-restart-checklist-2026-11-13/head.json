@@ -1,0 +1,28 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "next-all-host-restart-checklist-2026-11-13",
+  "head": {
+    "state": "active",
+    "chain": [
+      "c9cd18a289374887b126dece47c4639e",
+      "6b3e0a8fcb654425ac297fbdde24a98f",
+      "ee0e57ee47b640dea40453a6ec248a2f",
+      "f2ed6ddf65544dba872dd89a25de7c6e",
+      "45f74c98e6df4902b73ecc495dbe0643",
+      "a85381dbeb334f2a9aa99cad5286bed2",
+      "3148d63dc9c54922ad08a0fc590de293",
+      "8b9b9b09513d4383a0e7f8af6e4878c0",
+      "3457dbef8113435a8db84a4e43c073e2",
+      "f72d2068d2b44193bc267ec50f197687",
+      "2e17eea25e3a4b65bb7921fef0aa98bd",
+      "28de9001db434b71b1f77f2a50a358d9",
+      "d29a38bcbedb408db6a12011565990e0",
+      "15b59d0966904c70920b5afbcaa2e99a",
+      "eead15008ed546f3939f13f3e0290470",
+      "5c08d117c12e4464bc99344f9bad6887",
+      "b1d5d54efcdf4e778b3b183ae13acb92",
+      "2ca5fc350b274a9bb7d7c606bbe579fe"
+    ]
+  }
+}

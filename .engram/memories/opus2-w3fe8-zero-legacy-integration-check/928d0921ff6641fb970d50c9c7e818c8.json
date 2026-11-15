@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-w3fe8-zero-legacy-integration-check",
+    "revision_id": "928d0921ff6641fb970d50c9c7e818c8",
+    "previous": "0a97d83416c041cea1d3405b91082d5c",
+    "body_sha256": "11d2b1717d61fcb2490ca70a9be253bad42f58c0ebd448f7c233abfd8cf07263",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-02T06:52:12.942371100Z"
+    }
+  },
+  "body": "Integration-owner check (Termal::Opus2, from Fable2 #3814, 2026-11-02 00:18Z; Greg's direct order relayed by Engram::Architect3 #473: 'NIE NIE NIE KAZALEM TO USUNAC!!! MAMY POLITYKE ZERO LEGACY…').\nTurn gating is to be PHYSICALLY DELETED in both projects: TermAl w-3fe8 and Engram w-5b17f50b5079.\nREFUSE to land a w-3fe8 candidate as a completed removal if it keeps any of these:\n- gated-control code kept for compatibility;\n- an executable legacy route;\n- a fallback to evaluate, begin, grant or settlement;\n- a setting that can reactivate gating.\nIts revised criteria require a cited source search showing no call to the turn operations; verify that the search is on the item before landing.\nIndependent acceptance evaluation is REPLACED, not repaired: TermAl w-fdbb4fb85a50, Engram w-ff546a940de0.\nThe w-ba8d minimal OFF fix is an independent repair, not the removal.\nCutover order: TermAl w-3fe8 is installed and running first, then Engram's deletion with its store migration in the same coordinated restart.\n\nAdded from Opus3 #328 (00:18Z): the minimal-OFF candidate 43a61083 makes gated_control_governs_session() return false; it is the immediate repair, NOT the removal. Opus3's w-2aa5 docs land with w-3fe8's final input and describe only what that input contains, so check that they match it. Fable2 decides the w-3fe8 scope with Sol-03d4.\n\nAdded from Architect2 #159 (00:18Z): the deletion also covers recovery paths. w-3fe8 task revision 5 already requires deletion in criteria 3 and 4, and the w-2aa5 docs are mandatory. An intermediate additive or compatibility landing is transition sequencing only, never the completed removal. Historical data is kept honest through the supported data contract or conversion.\n\nCORRECTION from Fable2 #3821 (00:51Z), which supersedes the 'evaluation REPLACED' line above. Greg's rule: 'EWALUACJA jest tymczasowo wylaczona do czasu implementacji Execution Observability'. The evaluator STAYS in code and docs, temporarily OFF and non-blocking, and is NOT deleted; Engram::Fable withdrew the 'replace' reading (#5846). Only turn-gating code is deleted, with zero legacy. So do NOT require evaluator deletion at the w-3fe8 landing.\nEngram::Architect3 has been removed by Greg; route nothing through it.\nLanes: EO focused runs go FIRST on the DL560; the w-7b2d profile rerun is released and re-queued only on Fable2's command. The Mac may take POSIX focused EO runs once Engram's FULL d70cf33d ends, with the 60 GB disk census and no Engram gate waiting; Windows B is the Windows option under the same rules.\n\nFrom Sol-03d4 #86 (06:52Z): the w-3fe8 EO landing FULL must be `node scripts/test-launcher.mjs full --input commit` on the clean exact candidate, with the five stages unchanged (Fable #1808). If the w-3fe8 input edits an authority or instruction file (CLAUDE.md, AGENTS.md or commands, for example the stale closing-checkpoint-credit text), the landing needs the instruction-file conditions: (a) both coordinators' concurrence on the exact wording, (b) Greg sent the exact wording, (c) the final-diff audit recorded on the item. Verify all three before any push."
+}

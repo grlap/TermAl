@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-decision-2026-10-13-w65fb-import-reconciliation",
+  "head": {
+    "state": "active",
+    "chain": [
+      "95a1d9a8b59941e38ccb829991f00ca9"
+    ]
+  }
+}

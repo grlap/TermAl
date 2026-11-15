@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "producer-tsc-before-freeze",
+    "revision_id": "2aa990c9ea5247a690c12faa405606d3",
+    "previous": null,
+    "body_sha256": "eedc261d7fabbcfdedcb87a558242c937df1918a35c71edfe6d469b99464c6a7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-15T18:06:27.251896700Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-15 18:06Z, learned from w-5656's failed carried gate test-a27d5c04). Focused vitest runs (direct `npx vitest run <file>`) TRANSPILE without type-checking, so a package can pass every focused GREEN and still fail the full gate's typescript stage. On w-5656, ui/src/session-reconcile.test.ts passed an object whose messageCount was number|null|undefined where StateSessionSummary requires number (TS2345), and that cost a ~40 min gate slot. RULE: before freezing ANY package that touches ui/src (TS or TSX, tests included), the producer runs `npx tsc --noEmit` from its root\\ui (direct form, workdir root\\ui; a warm narrow check on a slot GO) and cites the clean result in the package handoff. Coordinators: ask for it before LAUNCH NOW on UI packages."
+}

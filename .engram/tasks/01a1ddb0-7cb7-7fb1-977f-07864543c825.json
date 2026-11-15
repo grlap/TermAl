@@ -1,0 +1,29 @@
+{
+  "id": "01a1ddb0-7cb7-7fb1-977f-07864543c825",
+  "external_ref": null,
+  "title": "Fit parallel stage duration metadata against outstanding sibling reservations",
+  "outcome": "A completed sibling's duration metadata fits within the unchanged run-artifact limit even when an outstanding sibling later fills its worst-case bounded result.",
+  "acceptance": [
+    "Parallel duration fitting projects every still-running sibling at its command-result reservation; a behavioral boundary test preserves stage facts and the existing artifact cap regardless of sibling completion order."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "dl560",
+    "performance",
+    "review-follow-up",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dae9-ede6-7e10-a850-06f3c0e4467d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "dl560-parallel-jobs-greg-2026-10-31",
+    "revision_id": "27c6870efaf5461c984b1e3344d2c2be",
+    "previous": null,
+    "body_sha256": "b925ab967e7b50f6d574f1033b805a41bc4e887f131aa7f85979afce32ca0a02",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-31T15:49:37.173995600Z"
+    }
+  },
+  "body": "Greg's direction, relayed by Engram::Advisor (TermAl mailbox b9d13887 #2878, 2026-10-31T15:49:19Z), verbatim: „Greg: DL560 ma 72 cory i 256 GB pamieci; jego zdaniem nie wymaga synchronizacji dostepu i powinien obslugiwac rownolegle zadania. Prosze usunac sztuczny jeden slot na DL560 i zaplanowac rownolegle niezalezne gate i cargo, z osobnymi worktree/targetami i rozsądnymi limitami faktycznych zasobow; potwierdzic praktyczne wykorzystanie.\"\n\nOperating rule (Termal::Fable2, from 15:50Z):\n- DL560 is NO LONGER one-job-at-a-time. Independent gates and cargo jobs run in parallel, each in its OWN worktree with its OWN target dir; nothing is shared.\n- Limits, checked by a census at each launch:\n  - at most 3 concurrent jobs (full or focused);\n  - start a new one only if MemAvailable ≥ 64 GiB, disk ≥ 100 GB and the 1-minute load is below 100;\n  - with 2 or more running, give each new job CARGO_BUILD_JOBS=48 so 144 threads aren't oversubscribed.\n- Each GO is still named, per job, with the input identity and fingerprints before and after.\n- A failure under concurrency is still investigated as a failed gate. Concurrency is a hypothesis to test, not a licence to retry.\n- Central Windows stays one Cargo job at a time; this direction covers DL560 only.\n- This supersedes the quiet-host one-slot assumption for DL560 only."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-09-observable-diagnostics",
+    "revision_id": "32ddce852c4245f58b969b36c83b6c21",
+    "previous": null,
+    "body_sha256": "9d82f39cde66148c60d5475fd8acbf5c0054021daab3e5d1ac406b27f04337bc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-09T17:28:35.410407300Z"
+    }
+  },
+  "body": "Greg's direction, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #497, 2026-10-09 17:28Z; recorded by Termal::Fable2): \"Greg directs: do not run synthetic CPU-saturation / busy-loop diagnostics on the shared machine. For host/control failures, prioritize observable diagnostics: the UI card must show the actionable structured refusal/error cause and relevant operation/correlation where available, rather than only a generic control_unavailable label. Preserve bounded logs/evidence sufficient to diagnose the next occurrence. Please record the scoped items and route routine implementation to coders; architects only for a real architecture decision.\"\nContext: at 16:59-17:00Z a busy-loop diagnostic I approved starved the host API (w-e19cc72d5c89). Session-11323's \"Waiting/Unknown\" card showed only control_unavailable, although the cause was \"named-root acknowledgement belongs to a superseded authority image\" (w-b21c5132848c). The host keeps no record of a Resume click."
+}

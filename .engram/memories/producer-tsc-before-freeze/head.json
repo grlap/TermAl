@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "producer-tsc-before-freeze",
+  "head": {
+    "state": "active",
+    "chain": [
+      "2aa990c9ea5247a690c12faa405606d3"
+    ]
+  }
+}

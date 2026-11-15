@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "audit-inroot-identity-readonly-git-c",
+    "revision_id": "c5e9591bc22c40f1949ee753c37d6b95",
+    "previous": null,
+    "body_sha256": "733544096c4897fe878050e523a086bde65f7140fc11dd4d09d9635bd92127b5",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-10T19:52:33.299240500Z"
+    }
+  },
+  "body": "Coordinator final-diff audits: how to do section 3's in-root Git identity in another session's worktree. Ruled by Engram::Fable as Engram's coordinator, TermAl mailbox ebe242f7 #7463, 2026-11-10.\n\nMy standing rule \"Don't run commands inside other sessions' worktrees\" protects a session's working state. A read-only, lock-free Git query changes none, so with the holder's explicit consent it is outside that rule.\n\nAllowed, and nothing else:\n- `git --no-optional-locks -C <root> rev-parse HEAD`;\n- `git --no-optional-locks -C <root> show -s --format=%T HEAD`;\n- `git --no-optional-locks -C <root> status --porcelain --untracked-files=all`;\n- the authority-diff read `git --no-optional-locks -C <root> diff --no-renames <base> HEAD -- <authority paths>`.\nRun the first three before and after the diff read.\n\nAlways use --no-optional-locks, so status does no index refresh write. Never write, build or test in that root, and get the holder's confirmation that no check or gate is running there.\n\nDoing this establishes identity BEFORE landing. Use the access-gap fallback (identity after landing) only when consent is missing or there's a real tool refusal; after w-92f8, Greg had to approve a post-landing identity once.\n\nFirst used on Engram 8d77fa4e (w-cb6e) at 19:52Z."
+}

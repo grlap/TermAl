@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "no-node-modules-junction-for-test-roots",
+  "head": {
+    "state": "active",
+    "chain": [
+      "2bda3fc27cd74046b1404def40c4c488",
+      "7d1c9408fde44923bdfe839a710bce4f"
+    ]
+  }
+}

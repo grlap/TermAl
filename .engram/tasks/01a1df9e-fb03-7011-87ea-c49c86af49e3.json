@@ -1,0 +1,30 @@
+{
+  "id": "01a1df9e-fb03-7011-87ea-c49c86af49e3",
+  "external_ref": null,
+  "title": "Generic termal-test-state root remains after a green Rust suite; attribute its owner and explain cleanup refusal",
+  "outcome": "Attribute and repair the fixture lifetime or harness behavior that left a generic termal-test-state root after the original green Rust suite. Keep cleanup strict and make a refusal name the creator when retained evidence provides it, with an explicit reason when attribution is unavailable.",
+  "acceptance": [
+    "The reported leftover is attributed to its fixture and late accessor or cleanup owner, and a behavioral regression verifies that the repaired owner preserves cleanup through the last access without weakening the temp guard.",
+    "A cleanup refusal reports the creating test or owner when that information is available, and explains why attribution is unavailable otherwise; it preserves the failed run's evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "criteria-proposed",
+    "design-rule",
+    "failed-gate",
+    "harness"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

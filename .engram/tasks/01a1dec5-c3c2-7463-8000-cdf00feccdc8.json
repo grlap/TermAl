@@ -1,0 +1,31 @@
+{
+  "id": "01a1dec5-c3c2-7463-8000-cdf00feccdc8",
+  "external_ref": null,
+  "title": "Explain prompts queued behind a named-selection predecessor capture hold",
+  "outcome": "Users see the exact predecessor turn refs and release condition when prompts wait for named-selection capture.",
+  "acceptance": [
+    "Queueing an ordinary or human prompt behind an unresolved acknowledged predecessor visibly reports PENDING with the deciding check, exact waiting turn refs and capture-or-own-terminal release condition.",
+    "The notice distinguishes a pending hold from terminal refusal and unknown state, and reports actual settlement without fabricating a report."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "criteria-proposed",
+    "execution-observability",
+    "named-roots",
+    "review-low",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d6bd-7cb5-7f60-9b9f-4093c33dc14e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "windows-b-native-root-explicit-model",
+    "revision_id": "d8c27877b9bb41928339090804e6507c",
+    "previous": "3ff962bc9b3d428ea10b3549d82174db",
+    "body_sha256": "fcbe98463ce63c6772b743e32be7bbbb17cd4d8484ffb6ddbb10900fc64a6f57",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-21T05:08:19.978680100Z"
+    }
+  },
+  "body": "Windows B native-root creation lesson (Sol-edfd, 2026-10-21, w-b7d2018520c5, Fable2 #1078). Creating a fresh B root via native POST /api/sessions without an explicit model inherits gpt-5.4; its first native mailbox wake reached B but the Codex runtime failed HTTP400 before tools: \"The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account.\" B native7/proxy14054 was affected; working native5/proxy13475 uses gpt-6.1-sol. Future B Codex root creates should explicitly name model gpt-6.1-sol, subject to current provider availability and Greg's model rule. Fable1078 authorized ONLY native7's model correction under Greg1387; before/after at05:04:58Z verified gpt-5.4→gpt-6.1-sol, no global default/credentials/capacity/other-session change. Original native task remains the same; continuation is a distinct genuine native mailbox wake, never a proxy/direct prompt or a duplicate gate. The model correction itself is not test PASS evidence. On another pre-tool failure STOP, do not loop through models.\n\nRecovery detail from the same attempt, 05:07Z: the genuine native continuation seq2 was queued behind the first runtime error's pause. The central proxy showed queuePaused=false, but B's own loopback GET /api/sessions/session-7 showed queuePaused=true and one pure native mailbox notification. Always check native-authoritative queue state before diagnosing lost delivery. One native-local /queue/resume under Fable's standing pure-wake recovery rule released that existing head; B7 became active05:07:44Z. Do not resend task/continuation, create alternate keys or treat a proxy's pause field as authoritative. No gate had run during the failed initial model turn."
+}

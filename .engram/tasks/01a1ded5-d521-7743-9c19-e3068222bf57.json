@@ -1,0 +1,29 @@
+{
+  "id": "01a1ded5-d521-7743-9c19-e3068222bf57",
+  "external_ref": null,
+  "title": "Replace redundant missing-build-directory fixture variants with discriminating cases",
+  "outcome": "Each retained build-output regression reaches a distinct behavior rather than varying inputs ignored by the same early refusal.",
+  "acceptance": [
+    "Retain the plain missing build_directory refusal and replace or remove redundant env/config/linked-env variants; retained variants with present metadata fields exercise agreement or raw-component checks and assert refusal before writers."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "dl560",
+    "performance",
+    "review-low",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dae9-ede6-7e10-a850-06f3c0e4467d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

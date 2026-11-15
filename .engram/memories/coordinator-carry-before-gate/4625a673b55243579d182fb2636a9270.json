@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-carry-before-gate",
+    "revision_id": "4625a673b55243579d182fb2636a9270",
+    "previous": null,
+    "body_sha256": "bd22fde4d31ea5d54ef59235a468e8bb699fbdd9ab4fa60eb784a92deab78640",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T15:07:37.677691Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-19 15:08Z, a miss I made twice today and caught both times before launch: S1 at 09:39Z, M4 at 15:07Z). Before any gate GO, compare the candidate's base with the CURRENT origin/master. If master has moved, the candidate must carry onto the new master and refreeze BEFORE the gate, because a gate on the old base gates a tree that will never be committed. A disjoint carry keeps the review pair (rev3); an overlapping one needs a confirmation pair. Check with `git rev-parse origin/master` against the READY's stated base at every gate GO."
+}

@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-greg-runner-refs-2026-10-19",
+  "head": {
+    "state": "active",
+    "chain": [
+      "2160889865484721830ad120a35f8e02",
+      "a6330385625a4661bfd3467fc145e9b3",
+      "bbcaab91984143fda5dd4c57fc3828bc",
+      "76334eb5394d4c32aad56294239770b6",
+      "a234292262824f0f98999552b8470f72"
+    ]
+  }
+}

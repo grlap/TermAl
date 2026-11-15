@@ -1,0 +1,33 @@
+{
+  "id": "01a1e0b1-c86c-79c3-bb16-6831e8936a44",
+  "external_ref": null,
+  "title": "Builder: workRef + branch as the sole test-credit path (local and remote), with every refusal stating reason and remedy",
+  "outcome": "An agent supplies only a work ref and a branch. One builder resolves the branch once to an immutable commit, prepares and pushes the test branch, creates and names its own worktree within the operation, runs the existing launcher locally or remotely through the existing typed request, and reports the source_id and result. It is the only path that earns test credit. Every refusal or hold names the deciding check, the observed values and a remedy.",
+  "acceptance": [
+    "An agent obtains test credit for a work item by giving only its work ref and a branch. No manual worktree naming, launcher command form, author-ref push or typed-request authoring is needed. Free-form shell test commands stay factual, uncredited observations.",
+    "The branch resolves once at admission to an immutable commit. The builder derives the requester, project, store, claim, destination, internal message, send and operation ids, source owner, native host and origin, the source_id endpoints and the terminal facts from existing records. The only extra input it accepts is an undeclared focused test selection or an explicit nonstandard override.",
+    "Existing source, custody, origin and destination guards are kept. A moved destination is reported with its values, and the same retained terminal origin is re-associated without a rerun. Any unavailable capacity is PENDING with its release condition.",
+    "Every refusal or hold names the deciding check, the observed values and a remedy. Behavioural tests cover the unknown or ambiguous work ref or branch, missing claim, unsupported capability, source mismatch, FAIL, moved destination and pending capacity.",
+    "The authority text in CLAUDE.md and AGENTS.md is amended to cover tool-driven branch preparation and push, under the authority-file procedure: (a) both coordinators' concurrence, (b) Greg sent the exact wording, (c) a final-diff audit. Branch DELETION by the tool is covered only by an explicit word from Greg, or by text that keeps deletion within the existing author-test-ref rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "epic",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "process-simplification",
+    "refusal-reasons",
+    "remote-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

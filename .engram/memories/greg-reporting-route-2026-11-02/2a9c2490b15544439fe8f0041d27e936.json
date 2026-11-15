@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-reporting-route-2026-11-02",
+    "revision_id": "2a9c2490b15544439fe8f0041d27e936",
+    "previous": null,
+    "body_sha256": "730b700d4ac5cd13192bace1d33c61db43a0dcd30d9730ebe8db110852d38828",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-02T00:45:08.532348800Z"
+    }
+  },
+  "body": "Greg's reporting route, from 2026-11-02 ~00:45Z. Greg, directly in Engram::Fable's session, relayed in TermAl mailbox ebe242f7 #5855: 'usunalem Architect3 za niekompetencje'. Engram::Architect3 (session-14548) has been removed. Do NOT route reports or questions to Greg through it, and do not act on its earlier relays without checking them against the current rules (Engram memory rules-greg-control revision 25, mirrored in TermAl memory greg-acceptance-evaluation-non-blocking-2026-11-02 revision 5). Greg's directions now come directly to Engram::Fable (session-5135) or to Termal::Fable2. TermAl reports for Greg, in Polish, go through Engram::Fable."
+}

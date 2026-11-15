@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "batch-order-fmt-lint-before-final-test",
+    "revision_id": "cbf00e3a7a414f5f8661044e1d0a63e5",
+    "previous": null,
+    "body_sha256": "23e7a83f8c031b9cab3d67d18d9830d96db446e49e7ed3edb51d64107c674526",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T12:42:59.628949600Z"
+    }
+  },
+  "body": "Until w-184d1c27edea lands (Fable2 #5572, 2026-11-11): when dispatching a registered (Central, --input commit) focused batch that will feed an acceptance evaluation, put fmt, clippy/lint and other unclassified checks BEFORE the final recognized test step. A passed run with only unclassified stages (e.g. cargo fmt --check) as the newest terminal run on the commit makes termal_evaluate_acceptance refuse 409 verification_record_unclassified_stages before spawn. Workaround if it happens: one recognized cargo test run on the same commit, then evaluate. Seen on 11334 w-33a1 0fa7b372 (run test-09164d5b)."
+}

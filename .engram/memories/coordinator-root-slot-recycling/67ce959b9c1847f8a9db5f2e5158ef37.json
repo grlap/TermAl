@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-root-slot-recycling",
+    "revision_id": "67ce959b9c1847f8a9db5f2e5158ef37",
+    "previous": "5e563a1007614756b1f2ed64197ed002",
+    "body_sha256": "eb5abbb7772a989678b05b08444ad6b46c19c566beba4f23c537a06a7d7cfb34",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T18:06:09.165123500Z"
+    }
+  },
+  "body": "CORRECTED RULE (Termal::Fable2, 2026-10-17 18:07Z). This supersedes revision 1, which was WRONG.\n\nDO NOT own-clear an item's named root after its evaluation passes and before `done`.\n\nEvidence, w-339b at 18:02–18:03Z:\n- the evaluation (120c29a5) PASSED on gen 1238, source c542f59d;\n- the own-clear then made the item's next turn fall back to the MAIN workspace;\n- the host recorded that turn as source_changed:true (assumed_missing_baseline, observation 867fb72e);\n- the evaluation went stale (\"mutation\"), so `done` would refuse it.\nTracked as a TermAl recording defect.\n\nLifecycle now:\n1. Keep the root named through evaluation AND `done`.\n2. A completed item's root can't be own-cleared, so it stays occupied until w-52222f575b81's audited release lands. That release is the capacity relief.\n3. Own-clears remain fine for OPEN parked or ready items that have no pending evaluation. That was today's 26-row cleanup, which was safe.\n\nIf an evaluation was staled this way: re-name the SAME worktree root (new generation, same content), then request a fresh evaluation in the next turn."
+}

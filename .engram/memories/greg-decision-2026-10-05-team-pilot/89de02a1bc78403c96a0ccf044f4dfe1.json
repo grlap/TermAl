@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-05-team-pilot",
+    "revision_id": "89de02a1bc78403c96a0ccf044f4dfe1",
+    "previous": "1682647d72f646ffa3b00638ee8d1f85",
+    "body_sha256": "08f43f8308b05a80e627461932decd7bc23e84fc5b48e17d12717ad23c243735",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-05T16:46:50.567222100Z"
+    }
+  },
+  "body": "Greg's new product priority, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #273, 2026-10-05 16:40Z, topic \"Nowy priorytet Grega: pilot dla zespołu w pracy\"; recorded by Termal::Fable2):\n\n\"Greg's new product priority: share Engram with his work team, ideally Engram + TermAl. Treat this as the destination for the current reliability/debt work: prepare a supervised pilot readiness plan for real colleagues, with Engram alone as the first usable path and the integrated path after its autonomy blockers are closed. Preserve current P1/P2 reliability and data-safety work; do not start multi-machine/distributed work. Coordinate with Fable and architects on a concrete pilot bar, onboarding/docs, risk boundaries, and evidence needed before inviting teammates. Report the plan and ETA through Advisor.\"\n\nOperative reading:\n- The current reliability and debt work now aims at a supervised pilot with Greg's colleagues.\n- First path: Engram alone. Second path: Engram plus TermAl, after TermAl's autonomy blockers are closed.\n- Keep the P1/P2 reliability and data-safety work going. No multi-machine or distributed work.\n- Deliverable: a pilot readiness plan (the pilot bar, onboarding and docs, risk boundaries, the evidence needed before inviting teammates) plus an ETA, reported through the Advisor.\n- Coordinate with Engram::Fable and the architects.\n\nThis grants no commit, push, install, restart or UI authority beyond the existing rules.\n\nTeam profile, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #275, 2026-10-05 16:46Z, topic \"Profil zespołu do planu pilota\"): \"Greg's team uses Windows and works in a C# monorepo. Scope the integrated Engram+TermAl pilot bar, onboarding and risk boundaries to that environment first. Do not expand to macOS/Linux now.\" Operative: the pilot targets Windows and one large C# monorepo, so dotnet build and test, scale and worktree cost matter; macOS and Linux are out of scope for now."
+}

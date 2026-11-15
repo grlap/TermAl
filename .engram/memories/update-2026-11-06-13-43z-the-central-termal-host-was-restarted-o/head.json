@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "update-2026-11-06-13-43z-the-central-termal-host-was-restarted-o",
+  "head": {
+    "state": "active",
+    "chain": [
+      "2ef0fd85126a4a0a8d116492958531e5",
+      "b8452a16306244d3b6bc7aa01b5c6ade"
+    ]
+  }
+}

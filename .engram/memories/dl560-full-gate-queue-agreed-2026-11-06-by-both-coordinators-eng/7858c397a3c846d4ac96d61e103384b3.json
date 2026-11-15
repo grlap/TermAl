@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "dl560-full-gate-queue-agreed-2026-11-06-by-both-coordinators-eng",
+    "revision_id": "7858c397a3c846d4ac96d61e103384b3",
+    "previous": null,
+    "body_sha256": "98db9f5289cfbd9d5c13c033b53cd00c21a2df45b505b2f78ea69e0df120e48f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-06T05:57:09.533607500Z"
+    }
+  },
+  "body": "DL560 full-gate queue (agreed 2026-11-06 by both coordinators, Engram::Fable #6697): ONE shared FULL queue on DL560 for TermAl and Engram. Opus2, the TermAl integration owner, places every FULL there; each Engram FULL START needs Opus2's named slot GO. Focused jobs keep the runner census across all users. Cause: at 05:48Z an Engram FULL (test-32fcac34) started on DL560 over TermAl's running N31 FULL (test-758df116). Codex 6 stopped N31 (exit 143) under the 'never two FULLs' rule. The interruption is classified as environment/scheduling, not a test failure."
+}

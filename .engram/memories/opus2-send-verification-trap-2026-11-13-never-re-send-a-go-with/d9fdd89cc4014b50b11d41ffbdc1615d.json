@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-send-verification-trap-2026-11-13-never-re-send-a-go-with",
+    "revision_id": "d9fdd89cc4014b50b11d41ffbdc1615d",
+    "previous": null,
+    "body_sha256": "c38cd7960b68221cf65c468b01a56e2ca208c71fd844d90d9b179bb3c425e875",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T16:25:01.774088Z"
+    }
+  },
+  "body": "Opus2 send-verification trap (2026-11-13): never re-send a GO with the same idempotency key just to check whether it was delivered. If the first send silently failed, the re-send DELIVERS it now, possibly after it went stale (this happened with GO-S4-ENGRAM-AB27-R4-FULL-1: first send at 16:17Z never reached s4, a 16:23Z delivery check re-sent the superseded GO, and an immediate withdrawal was needed). To verify delivery, read the recipient mailbox with `mailbox read --mailbox-id <id> --after <latestSequence-N>` and look for your own message (own sends are listed). Also never truncate send-one.sh output below ~40 characters: `head -c 12` hid the rc=/duplicate fields that would have shown the failure."
+}

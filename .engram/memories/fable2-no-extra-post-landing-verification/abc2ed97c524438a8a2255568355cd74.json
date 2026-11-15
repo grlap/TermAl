@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-no-extra-post-landing-verification",
+    "revision_id": "abc2ed97c524438a8a2255568355cd74",
+    "previous": null,
+    "body_sha256": "df6bf96de51a690a7b0e2e355911132cd3086882093fb669051c174ff0f0a42f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-08T01:12:55.287541300Z"
+    }
+  },
+  "body": "On 2026-11-08 I told the authors of the pieces in combined train fdd8d035 to close their items only after a NEW registered run on the landed commit itself. That condition goes beyond the standing rule, and I withdrew it. One author (Sol-a7bb, w-463c) had already closed correctly and was left believing its record was deficient. Rule: a piece of a combined landing closes on its own registered verification on its exact candidate, plus proof that its contributed paths are byte-identical in the landed tree, plus the same-tree FULLs and a clean pair. Ask for a new registered run only if `done` actually refuses for an open test obligation. Never add conditions beyond the agreed rule."
+}

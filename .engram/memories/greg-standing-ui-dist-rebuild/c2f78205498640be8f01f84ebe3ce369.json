@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-standing-ui-dist-rebuild",
+    "revision_id": "c2f78205498640be8f01f84ebe3ce369",
+    "previous": null,
+    "body_sha256": "fb161220d84c95771429340f1944b5224b52cb96c2584ec645a33fa58ebb1524",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T17:57:16.575851300Z"
+    }
+  },
+  "body": "Greg's standing approval, as relayed by Engram::Advisor in TermAl mailbox b9d13887 #906 (2026-10-16 17:55:46Z), verbatim: \"Greg's standing approval in this session remains: rebuild ui/dist after each landed UI change. Apply it to master 41a3f25e after the Engram gate window, with the identity and checks reported. No TermAl host restart is authorized or needed for this rebuild.\" How to apply: after every landed UI change, the integration owner (Opus2) rebuilds ui/dist from the clean master tip outside any gate window (ours or Engram's), and reports the build identity plus greps for the landed changes. It grants no restart. If Advisor's acting session changes, re-confirm the approval before relying on it."
+}

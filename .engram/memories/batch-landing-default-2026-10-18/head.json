@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "batch-landing-default-2026-10-18",
+  "head": {
+    "state": "active",
+    "chain": [
+      "e587fec59c1b4fe0878528d445f57a45",
+      "4eba49856fd848ba8ef90a19c6986548"
+    ]
+  }
+}

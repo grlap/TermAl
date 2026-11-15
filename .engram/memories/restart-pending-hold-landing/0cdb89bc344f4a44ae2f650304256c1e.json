@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "restart-pending-hold-landing",
+    "revision_id": "0cdb89bc344f4a44ae2f650304256c1e",
+    "previous": null,
+    "body_sha256": "1b93924d3a2c56cb9d1bf0dca65233ef651e01a39c95f63d518e253dba1bd261",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-03T21:18:42.383599300Z"
+    }
+  },
+  "body": "Rule (Fable2 #4133, 2026-11-03 21:18Z). While a TermAl restart is pending, NOTHING may be fast-forwarded on master: no landing, no push, no install.\n\nWhy: the host is `cargo run --release` from the master checkout (pid 3752). A restart rebuilds target/release from whatever master is at that moment, so a landing before the restart would make Greg start a build he wasn't told about. Holding only the install does not prevent this.\n\nThe procedure while a restart is pending:\n1. Gates may run, and a green FULL stays valid while master is still its parent.\n2. Hold the landing.\n3. After the restart, confirm the running build (sha of target/release/termal.exe, and the host process start time).\n4. Then land, push and install as usual.\n\nNever push without fast-forwarding the master checkout. On 2026-11-03 this applied to w-426d 7b153fc2 (land-7b15.sh) during restart #4, which was pending since 20:23Z."
+}

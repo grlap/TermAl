@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-w-e695-relay-word-landing",
+    "revision_id": "f1bd63d5a1b946e7a50ca814e4ec6dd9",
+    "previous": null,
+    "body_sha256": "ffd249e8d05273192d581e36badfd574320abddb4c9e2f2764d3ab1d4149a13b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-03T00:10:15.805588200Z"
+    }
+  },
+  "body": "Integration of w-e695378f6405 (Greg's word relayed verbatim by Engram::Asistant carries commit authority) by Termal::Opus2. State at 2026-11-03 00:10Z.\n- Candidate 1: b702e562097b3b82075a74ab5b28374fda9dc1f8 (tree 34aa3b9a, parent 87f49ed0, branch e695/relay-word-candidate-8111, worktree .tmp/wt-e695-cand-8111). Superseded and NOT landable.\n  - Review pair: Codex delegation-3f3edf6d clean; Claude delegation-f9b41093 found a HIGH, the src/tests/agent_commands.rs:3117 pin of the old sentence (verified), plus 3 Lows filed as w-8768c27fed88.\n  - Engram::Fable final-diff audit PASS on b702e562, recorded verbatim on w-e695 (3722b285); evidence only.\n- Fable2 rulings: #3944 (B), hold until the w-6bb54cae56aa fix (Sol-03d4, test-only) is on master, then a green FULL. #3946: land the wording AS APPROVED; the Lows go to w-8768.\n- TRIGGER: when the w-6bb5 fix is on master:\n  1. Fresh candidate on a new branch = new master + blobs 4f9294a84604b4f47c57d092d2736dc75d0009dc (AGENTS.md) / 764e1c454618e31b25620e80ea41196df9d19bf7 (CLAUDE.md), taken from tree 9391a758, + the pin in src/tests/agent_commands.rs:3117 updated to \"Outside the standing rule's three conditions above and the candidate-commits bullet, a commit or push needs Greg's own word, given in the acting session or relayed by Engram::Asistant,\".\n  2. Record BASE, COMMIT and TREE on w-e695; adapt the brief (.tmp/e695-review-brief.md) to include the test change; re-run the review pair.\n  3. FULL --input commit, detached, --notify session-8112. It must be GREEN.\n  4. Ask Engram::Fable (send by name \"Engram::Fable\") to restate the audit on the new COMMIT/TREE; record it verbatim with the FULL fingerprint.\n  5. Land, push and verify. Instruction text only, so no binary install is needed; a test file changes, though. Then remove .tmp/wt-e695-cand-8111.\n- Authority conditions: (a) concurrence recorded on w-e695 (264bc3c5); (b) Greg sent via Asistant #75; the widening word source is note 0d27426b; (c) the audit."
+}

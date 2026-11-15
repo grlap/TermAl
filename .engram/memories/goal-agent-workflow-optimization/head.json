@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "goal-agent-workflow-optimization",
+  "head": {
+    "state": "active",
+    "chain": [
+      "e577b1d7da2a4f3b91f77639ba820294"
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "fable2-no-criteria-edits-during-active-checks",
+  "head": {
+    "state": "active",
+    "chain": [
+      "8e52b28e673f491c88f98ed573caffb1"
+    ]
+  }
+}

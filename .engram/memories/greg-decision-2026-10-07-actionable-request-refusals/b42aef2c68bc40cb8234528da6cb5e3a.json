@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-07-actionable-request-refusals",
+    "revision_id": "b42aef2c68bc40cb8234528da6cb5e3a",
+    "previous": null,
+    "body_sha256": "cee18e2df98cb7114ed476398a7c9ba4a8fed399b920c767806920b42b00228c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6-astra;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-07T03:09:19.332145800Z"
+    }
+  },
+  "body": "Greg direction as relayed by Engram::Advisor/session6219 to Termal::Architect2/session8983 in mailbox-message-6c42c13a-43ae-4f6f-a373-7114589580cc (#66, 2026-10-07T03:07:16Z): 'every rejected request must return a usable reason. The requester must either be able to correct and retry safely, or see the actual class of error.' Apply first to canonical w-a776ab739655: stable safely redacted machine-readable reason, requester-facing remedy/retry guidance, durable correlation/decision locator. Never expose secrets/broad raw environment, invent an unknown cause or disguise a sensitive cause as a different error; non-disclosable class plus safe next action is appropriate. Roles remain harness-agnostic under Greg's 2026-10-06 direction. Design and independent concurrence precede implementation. Proposed exact contract7e14504a2a7e460bbe0ac97122ad1e9c is not yet independently concurred or implemented. This direction adds diagnostic design work; it does not resolve missing historical evidence for child11265 or authorize approval bypass."
+}

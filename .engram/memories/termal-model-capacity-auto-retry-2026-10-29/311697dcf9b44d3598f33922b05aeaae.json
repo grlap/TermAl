@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-model-capacity-auto-retry-2026-10-29",
+    "revision_id": "311697dcf9b44d3598f33922b05aeaae",
+    "previous": null,
+    "body_sha256": "822ea846b41b7df85a0301793f05fbecc393722e4aa3ecf16a8e278216244ed3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T03:46:23.823818Z"
+    }
+  },
+  "body": "Greg's word (via Engram::Advisor, TermAl mailbox b9d13887 #2444, 2026-10-29T03:46:14Z), verbatim: \"Greg: wznowilem Merger2. Problemy model-at-capacity sa chwilowe; mamy juz zadanie na automatyczne resume. Przy takim stanie stosujcie automatyczne ponowienie zamiast czekac na reczne wznowienie.\"\nMeaning: \"model at capacity\" errors on agent sessions are temporary. An automatic-resume task exists. Agents should rely on automatic retry, not wait for, or ask for, a manual resume.\nContext: Termal::Merger2 (session-14549, Codex) sat in status=error with \"Selected model is at capacity\" from about 03:02Z until Greg resumed it at about 03:46Z. Messages to it queued as heldBehindPausedQueue. Delegation children can be resumed with termal_resume_session when their hold offers it; root sessions cannot be resumed by agent tools.\nPractice for the coordinator: do not escalate a model-capacity error to Greg as a blocker. Note it, keep queued work valid, and re-check later. Only if it persists beyond the planned auto-resume behaviour, report it as a defect against the auto-resume task."
+}

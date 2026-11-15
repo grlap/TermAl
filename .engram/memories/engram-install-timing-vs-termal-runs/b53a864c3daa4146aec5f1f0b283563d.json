@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "engram-install-timing-vs-termal-runs",
+    "revision_id": "b53a864c3daa4146aec5f1f0b283563d",
+    "previous": null,
+    "body_sha256": "49bfb86ca317ac248a0f14cdfeae15916cfcdbcbc13012c8d59845a4f80590c3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-08T01:28:39.746043200Z"
+    }
+  },
+  "body": "Slot rule (Fable2 #4975/#4977, 2026-11-08): no Engram binary install on a host (Central C:\\Users\\grzeg\\.cargo\\bin\\engram.exe; DL560 /home/greg/.cargo/bin/engram) while ANY TermAl launcher run, focused or FULL, registered or hostless, is open on that host. Every launcher run pins the installed engram as its source owner, and a mid-run swap fails it closed (\"source owner executable no longer matches its pin\"). That's what happened to Sol-03d4's a23191eb at about 01:20:55Z on Central. Treat an Engram install like a cargo job: drain the host's run queue first. Opus2 (TermAl integration owner) owns that timing; Fable2's install exceptions stay the authority for the install itself. Installs use the atomic rename (w-916f)."
+}

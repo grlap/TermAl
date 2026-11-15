@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "test-hosts-cpu-class-2026-11-04",
+  "head": {
+    "state": "active",
+    "chain": [
+      "a3fd7ab40c85407f81341575a06a5f99",
+      "e6206ea40a674fdd9470dd6ce54db30e",
+      "000f50bbb4014a7184e9f06aa27d8878"
+    ]
+  }
+}

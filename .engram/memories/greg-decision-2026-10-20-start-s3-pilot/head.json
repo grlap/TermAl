@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-decision-2026-10-20-start-s3-pilot",
+  "head": {
+    "state": "active",
+    "chain": [
+      "ef48f44429ba46a1a206eefd95c61348",
+      "9861a329f8034db7ad463870f96c1b5c",
+      "1e1875a807a945acabf44d84e4c74be6"
+    ]
+  }
+}

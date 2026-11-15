@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-main-checkout-dirty-2026-11-13",
+    "revision_id": "fc1dcd72ca8c4766acbc7e8fe6783148",
+    "previous": null,
+    "body_sha256": "8af6b84f2922e1a226100aa360c644695bd647762b1fd614ff2d3341fd9ac7d6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T19:01:52.974174700Z"
+    }
+  },
+  "body": "2026-11-13 ~19:01Z: at Greg's direct word in Opus3's session (\"nie uruchamiaj code reviews, mozesz zrobic poprawki w main abym mogl to zobaczyc czy dziala\"), the main checkout C:\\github\\Personal\\TermAl (HEAD 05062f47) holds the UNCOMMITTED P0 scroll fix (w-84132b835175) in 6 ui/src/panels paths so the Vite dev server serves it. Opus2 must not fast-forward, checkout or land on main until Greg confirms and Opus3/Fable2 agree how to land it; landing scripts refuse a dirty master checkout. Same content in .tmp/wt-8413b-9474. Remove this memory once main is clean again."
+}

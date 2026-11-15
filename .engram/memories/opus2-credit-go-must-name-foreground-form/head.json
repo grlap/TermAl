@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-credit-go-must-name-foreground-form",
+  "head": {
+    "state": "active",
+    "chain": [
+      "786f874f874749d4acb613c9fca36fde",
+      "6d186863e0ea4aaca0f0ee2a936896e0",
+      "bc3f039ee9a44f8ea261a8c4f4a4ced8"
+    ]
+  }
+}

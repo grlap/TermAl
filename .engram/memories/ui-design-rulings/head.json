@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "ui-design-rulings",
+  "head": {
+    "state": "active",
+    "chain": [
+      "84beb4bc81e946ef8355d7ff39a9f91c",
+      "7417b3637358433e80b03d1d0aabffdf",
+      "06c522c51e1f43e9ba8e4f42a19c75cf"
+    ]
+  }
+}

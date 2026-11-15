@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rule-one-decision-owner-per-feature",
+    "revision_id": "7339dd66d80749d2a4bc9f8b5b793a5e",
+    "previous": null,
+    "body_sha256": "adb5d8babcf6efa922343c2411e8560e20a94abd960b7c1a1fe77961e9ea278a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-06T17:27:49.059611200Z"
+    }
+  },
+  "body": "Greg's rule, relayed by Kimi::Consultant (TermAl mailbox 852a55c9 #83, 2026-11-06 17:27Z), verbatim: „każdy feature ma przypisanego owner’a”. Every feature has EXACTLY ONE decision owner, accountable end to end. The owner may delegate code, tests and review, but the owner alone sets the scope, picks the existing mechanism over a parallel one, removes old paths, watches cost and complexity where it matters, rejects unrequested additions, and drives the implementation, with the author's tests, to a real result and its follow-up. Not every change needs a global performance analysis; the owner judges where it matters. Across several repositories a feature still has one decision owner; implementations may be delegated, but semantics must not differ. The coordinator assigns work and removes blockers; reviewers judge code. Neither becomes a second owner or adds its own conditions without the owner's or Greg's decision. The owner answers for the right result and for not producing unnecessary code. This is a current rule, not a new procedure. Lesson for Termal::Fable2: today's watcher addition to option B and the drifting source_id variants were exactly a coordinator acting as a second owner."
+}

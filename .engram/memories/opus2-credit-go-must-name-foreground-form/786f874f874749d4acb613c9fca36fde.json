@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-credit-go-must-name-foreground-form",
+    "revision_id": "786f874f874749d4acb613c9fca36fde",
+    "previous": null,
+    "body_sha256": "4ab23bb72a575206be9ff130714f8f051bb8228ce51ab76aabf0adbf26e5bd84",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T09:05:58.841227600Z"
+    }
+  },
+  "body": "Integration-owner rule (Opus2, 2026-11-14 09:06Z, my own miss). When I GO a Central run meant to EARN a registered record (a closure check, a current-root check, any `--input commit` credit run), the GO must name the FOREGROUND form explicitly: `node scripts/test-launcher.mjs focused --input commit -- <cmd>`, run as the owner's own foreground command with cwd = the named root (Claude: one Bash call `pushd \"DIR\" && ...`), with NO --detach and NO --notify. It must also forbid item writes (notes, status) between registration and END. Incident: d50d's W70 warm check test-438e8f8d used `--detach --notify session-8111`; the host replied \"--detach is not a foreground focused check; no Test or Build record will follow\", and d50d also wrote a START status note after registration. That ONE authorized run could earn nothing, and a corrected run needed a coordinator decision."
+}

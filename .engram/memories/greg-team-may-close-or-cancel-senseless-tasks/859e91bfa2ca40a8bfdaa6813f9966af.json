@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-team-may-close-or-cancel-senseless-tasks",
+    "revision_id": "859e91bfa2ca40a8bfdaa6813f9966af",
+    "previous": null,
+    "body_sha256": "96cfbe434affef4207e04ce1fa822f0b444e72a9bc705687b774a3811e20b734",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-08T19:47:35.933172200Z"
+    }
+  },
+  "body": "Greg, 2026-11-08 19:47Z, verbatim via Engram::Asistant (588693a8 #1015): 'zespol moze zamykac albo anulowac taski, ktore nie maja sensu'. As Asistant relays it, this also covers stale reported incidents and tasks about removed features: assess on the merits, record the real reason and any unresolved cause, and never present the item as fixed or tested. Don't ask him again about routine cleanup. This authority is not a literal waiver of evidence; for w-06fb, choose the correct available route for a task about a removed feature, without false evidence and without forcing a needless test. Prefer cancel, with the true reason, when the work was not actually proved; use done only when its criteria are really met."
+}

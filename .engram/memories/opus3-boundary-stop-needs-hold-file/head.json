@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus3-boundary-stop-needs-hold-file",
+  "head": {
+    "state": "active",
+    "chain": [
+      "a3ed5600cc5041bf93d92ceff0246705"
+    ]
+  }
+}

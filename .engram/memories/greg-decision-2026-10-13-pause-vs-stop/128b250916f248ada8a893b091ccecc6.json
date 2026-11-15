@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-13-pause-vs-stop",
+    "revision_id": "128b250916f248ada8a893b091ccecc6",
+    "previous": null,
+    "body_sha256": "437060a82c7a7c6d8da254c3bdcca8c1c2885ec1f03882ea1bea7d18fcf0c4f1",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-13T00:32:57.949353500Z"
+    }
+  },
+  "body": "Greg's operating decision, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #698, 2026-10-13 00:32Z; recorded by Termal::Fable2): 'Greg's operating decision: distinguish temporary TRAIN PAUSE from hard TRAIN STOP. A temporary pause must name its release condition and a coordinator authorized to resume workers once it holds; coordinator resume messages are sufficient to lift only that operational pause. Reserve TRAIN STOP for an indefinite hard halt that needs Greg's direct release. This changes no commit, push, restart or other authority rule. Record and apply the rule for future train pauses; do not interrupt current work.'\nHOW TO APPLY:\n- Every pause message I send says \"TRAIN PAUSE\", names the release condition, and names who may lift it (normally Termal::Fable2).\n- \"TRAIN STOP\" is used only when relaying Greg's own hard halt; workers resume from it only on Greg's release, which I relay verbatim.\nContext: after the 22:36Z STOP of 2026-10-12, Termal::Merger stayed idle and didn't read my resume relay of Greg's #694, apparently treating the STOP as needing Greg's direct word."
+}

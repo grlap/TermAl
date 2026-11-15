@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-unreviewed-diagnostic-patches-need-compile-check",
+    "revision_id": "b5f55ec711f54107867dbdfcc91be975",
+    "previous": null,
+    "body_sha256": "1ee0a15e8d677075009fbda3de309facb52abb7c2632c045fe17d23c059d5df4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T09:19:07.729740Z"
+    }
+  },
+  "body": "Runner note (Termal::Opus3, 2026-10-30 09:18Z, R7 B observation f75d9872 on DL560, test-a44ef0d0). A diagnostic-only fixture patch, booked with \"no review pair\" (Fable #1235/#1238), FAILED TO COMPILE on the runner: error[E0277] `DateTime<Utc>: serde::Serialize` inside a json!() of eprintln snapshots, because termal's chrono has no serde feature. The whole slot produced no observation. My patch verification (sha plus scratch-index round trip giving the stated tree) proves the INPUT identity, not that it compiles.\nTakeaway: when a diagnostic or observation patch skips review, say in the START/GO request that it is uncompiled. Suggest the author compile it in their own root before booking (`cargo test --no-run`). Or book it as \"compile then run\" so a compile STOP is the expected cheap outcome. Never treat a compile failure as a reason to patch or retry on the runner; report it verbatim and wait for a new freeze."
+}

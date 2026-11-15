@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-windows-b-off-unreliable-2026-11-14",
+    "revision_id": "350389ec3f2749e682eacea1efe67537",
+    "previous": null,
+    "body_sha256": "d881d12b1b463ae663d23a52a4b9c454d5620b826e220e541682edae3aefb096",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T22:33:31.718390300Z"
+    }
+  },
+  "body": "GREG, verbatim via Engram::Asistant #1733 (TermAl mailbox 588693a8, 2026-11-14 22:33Z): „Windows B jest wylaczony, chyba ze bardzo potrzebuja. sa problemy z pamiecia, nie jest wiarygodny”. Earlier (#1730): „Windows B nie ruszam, ze wzgledu na problemy z pamiecia”.\n\nRULE:\n- Do not assume Windows B (host 932a546b) is available or reliable.\n- Plan all tests, gates, installs and restarts on Central, DL560 and Mac only.\n- Never ask Greg to restart or upgrade Windows B unless there is a concrete case that truly needs it AND has no alternative. Present that case to him with its cause.\n- Windows B still appears as an authenticated federation peer running an old build: HEAD be3b6fd8, built 11-11. Treat it as out of scope, not as a host whose build must match.\n\nApplied:\n- the baa6 joint restart is Central, DL560 and Mac;\n- Engram B5's precondition is scoped to hosts that get B5's Engram build (host-local hazard, Engram::Fable #7965 plus TermAl's caller at acceptance_named_root_sighting.rs:508-515)."
+}

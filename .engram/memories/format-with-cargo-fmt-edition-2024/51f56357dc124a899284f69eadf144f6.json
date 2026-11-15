@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "format-with-cargo-fmt-edition-2024",
+    "revision_id": "51f56357dc124a899284f69eadf144f6",
+    "previous": "03c705c2847b441ab45ef4340b5b3b6b",
+    "body_sha256": "6f4fbb9f0fee0c0a698c75d3e64167cb8429c6da5309a634cc5e8fa0de5c74df",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T03:30:36.377395900Z"
+    }
+  },
+  "body": "Worker tip (Termal::Fable2, 2026-11-14 03:31Z, seen twice in one night): the termal crate uses Rust edition 2024. Standalone `rustfmt file.rs` defaults to an older edition (e.g. 2021) and produces different layout. Seen twice:\n- 03d4 saw 52 phantom \"baseline drift\" hunks, withdrawn after the canonical `cargo fmt --check` passed (03d4 #3127);\n- c593's 2ecb RED-1 stopped at the gate's fmt stage (c593 #1941).\n\nAlways format with `cargo fmt` (or rustfmt with `--edition 2024`) and verify with `cargo fmt --check`, which is the gate's own form, before freezing a candidate."
+}

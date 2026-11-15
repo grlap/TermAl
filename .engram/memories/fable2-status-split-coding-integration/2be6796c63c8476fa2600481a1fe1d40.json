@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-status-split-coding-integration",
+    "revision_id": "2be6796c63c8476fa2600481a1fe1d40",
+    "previous": null,
+    "body_sha256": "4e0719505e9480b198ec4c976d9123c3e4183c75c74e620e46ffceab31436aeb",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-06T15:50:43.271129Z"
+    }
+  },
+  "body": "Greg's reporting rule (2026-11-06 15:50Z, relayed by Engram::Asistant 588693a8 #565), verbatim: „kodowanie to takze testy, koder powien przygotowac cala gotowa paczke. podzial powien byc kodowanie, integracja”. Report status in two phases only. KODOWANIE (coding) = the complete package of code AND tests, prepared and checked by the coder (focused checks green). INTEGRACJA (integration) = the review pair, required gates and landing. Never present code as done while its author is still preparing or checking tests. A RED focused run means the item is still in coding. This does not weaken any review or gate requirement. It applies to the EO and source-id unification reports and to every later report to Greg."
+}

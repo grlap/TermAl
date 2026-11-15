@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-author-preflight-lessons-2026-10-30",
+    "revision_id": "72fb45322b8f4cfb8417e053826f3bc9",
+    "previous": null,
+    "body_sha256": "6b2418ac4aea3135e0fe6c16b2bc52925c8ce6280279212dc5c543e5f10d4370",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T04:48:43.575462600Z"
+    }
+  },
+  "body": "Author validation lessons, source Fable2 mailbox #1137 (message e2017f3f-c02c-4db0-a128-933a2a598144) and #1139 (message d1f9d8b4-9ca2-46b7-90ec-8f66cae56bbd), session-13169, 2026-10-30. This records validation practice, not new execution or commit authority. For new native/cross-platform code, verify the exact pinned binding symbols/types and run the authorized focused compile in the named author root before sending a candidate to a scarce remote slot. Host-utilization R1 reached Windows B before compiling: two missing PDH_FMT_NOSCALE symbols in windows-sys 0.60.2 and one uninferred JoinSet stopped the RED listing. This is a compile failure, not a RED assertion result or test validation. Preserve its original run; fix and refreeze before fresh controlled validation. Fable specifically directed the author command node scripts/test-launcher.mjs focused -- cargo check --all-targets on Windows for this candidate.\n\nFocused test counts prove only the selected names. Reset R6's five narrow filters (root_dispatch::project_reset_wait, project_containment, control_transport, changing_connection_settings, engram_mcp) selected 268 passes but excluded all seven later integration failures. Future focused filters list the affected exact names before execution; compare that list to the behavior/caller inventory rather than inferring coverage from the count or compiled file. A compile/zero-selection failure is not a negative control. Migrated async fixtures drive the actual scheduler and keep prior delivery/identity/debt guards; mutation-check that their target faults are still detected. Internal shutdown sentinels must be distinguished from actual wire frames, with a positive wire-frame control. Existing resource bookings, shared launcher, waits, standard pair and full-gate rules continue to apply."
+}

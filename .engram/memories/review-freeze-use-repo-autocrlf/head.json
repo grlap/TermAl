@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "review-freeze-use-repo-autocrlf",
+  "head": {
+    "state": "active",
+    "chain": [
+      "10f7d797d5e4477da67cc1d2cbf45721"
+    ]
+  }
+}

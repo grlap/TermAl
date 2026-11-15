@@ -1,0 +1,35 @@
+{
+  "id": "01a1de2d-b5a8-7d32-b42a-da1b0393291e",
+  "external_ref": null,
+  "title": "Build the remote-proxy persisted change view without cloning the session transcript",
+  "outcome": "The before/after change views that decide whether a mirrored proxy is stamped no longer clone record.session's message list (its Arc message pointers) on every broad snapshot; the stamp decisions are unchanged.",
+  "acceptance": [
+    "RemoteProxyChangeView's persisted component is built without cloning the session's messages, for example by projecting the persisted record without the transcript, and is still compared byte for byte as before.",
+    "The existing remote_sync_noop_stamp tests, all seven positive controls included, pass unchanged on the new code."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "performance",
+    "remote-sync"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

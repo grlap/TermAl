@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "codex-approval-policy-state",
+    "revision_id": "77f4d2eb33ef42008df06683bdb59510",
+    "previous": null,
+    "body_sha256": "b7e442b3d94820ea5f67cff09d48500f2e6d8a76ba750f787af0726f84f8dff1",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T02:29:29.995522900Z"
+    }
+  },
+  "body": "Codex approvalPolicy state, 2026-10-17 02:29Z (Greg-directed via Advisor #959–#962): ALL 16 Codex sessions are on \"auto-approve\". That's Engram 9860, 11323, 8581, 11312, 11334, 7899, 11330, 7305, and TermAl 12328 (the pilot), 7422, 11865, 12095, 12415, 12327, 11881, 12326. The P0 fix aeacfe69 is live on host 8cfe02d2: Codex on-request, with the host answering routine tagged MCP calls under guards at request time. The earlier \"never\" containment (#922–#942) is LIFTED. The pilot on Sol-edfd was clean (no cards, all routine calls completed). If a prompt waits for a human again, report it to Greg and consider reverting just that session to \"never\"."
+}

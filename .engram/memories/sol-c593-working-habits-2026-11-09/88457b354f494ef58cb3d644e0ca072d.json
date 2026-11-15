@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol-c593-working-habits-2026-11-09",
+    "revision_id": "88457b354f494ef58cb3d644e0ca072d",
+    "previous": "5408b916300649008f931ef99b18645d",
+    "body_sha256": "0ed8547be2349eccce37611d34a340d068ba42113eb9bde51be69210dca0db9e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T20:03:03.241414200Z"
+    }
+  },
+  "body": "Worker habits for Sol-c593, from Fable2/session-8112 mailbox 1a9f6a77 #1410, #1412 and correction #1415 (message95f223df-8444-43aa-ac52-69dcfd2d3cbd), 2026-11-09. These are habits, not new gates or authority. Write short mail in plain sentences with normal spaces and facts first. Report procedural work with no benefit in one line. Do NOT add cargo fmt --check or clippy to TermAl author runs: Fable2 withdrew that advice in #1415 because current master is not rustfmt-clean (coordinator reports436files fail). No formatting cleanup or extra checks are implied. The acceptance habit remains: write new acceptance criteria as one observable outcome each, without run IDs or volatile facts; run evidence belongs in notes/gates. Existing criteria, standing rules and frozen integration inputs remain unchanged.\n\nUpdate from Opus2 #576/messagecbbbc192-18fb-4aaa-a088-7d4f197e51f7, 2026-11-09T20:02:10.571327700Z: one-time whole-project rustfmt landed as master/origin/master0ab3319e839e9c804e1711fbfebbdc59107a78e4, tree2f6a01c9, including the test_temp_paths scanner repair. For future author changes, run cargo fmt on changed files before freezing. This supersedes the earlier reason to avoid formatting on an unformatted master; it does not request clippy or an extra author fmt --check gate, does not grant a compiler/test slot, and does not require unfreezing already frozen candidates. Existing single-Cargo GO discipline and exact-input validation remain."
+}

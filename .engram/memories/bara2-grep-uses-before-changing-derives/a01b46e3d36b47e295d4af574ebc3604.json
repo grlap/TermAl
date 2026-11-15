@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara2-grep-uses-before-changing-derives",
+    "revision_id": "a01b46e3d36b47e295d4af574ebc3604",
+    "previous": null,
+    "body_sha256": "127be022d717d0fa527272f2625d9e10b728c085fa38263080cf0da430712267",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T11:16:50.458769300Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA2, 2026-10-29, my own miss on w-c205 slice B round 4, freeze 1f56bc91; from Fable2 #1090). Before any refreeze, if a change replaces a type or changes its derives (for example Option<String> replaced by Option<NewStruct>), grep BOTH src/ and src/tests/ for every use of the type and of the field or tuple that carries it. Look especially for assert_eq!, ==, sorting, hashing and serde. Cost of skipping it: round 4 swapped `entries: Vec<(EngramOwedBind, Option<String>)>` for `Option<EngramOwedBindSettled>` with only #[derive(Debug)]. Two existing tests did `assert_eq!(line, &None)`, so the cold --list precheck failed with E0369. That spent a named Cargo GO slot, forced refreeze 8c8e29a4, and needed a full round-5 review pair, because the review pair binds to the exact tree. Typeck reports all type errors in one pass, but borrow checking runs only after typeck passes."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "ui-design-rulings",
+    "revision_id": "7417b3637358433e80b03d1d0aabffdf",
+    "previous": "84beb4bc81e946ef8355d7ff39a9f91c",
+    "body_sha256": "d58b71ebafed6bf373522a37365fcf35269140cbf11b52c438199346f96f3fbc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-03T02:28:55.967211600Z"
+    }
+  },
+  "body": "UI design rulings not written elsewhere.\n\nTranscript follow (Greg's design ruling, 2026-09-03, epic tm-7cu): one scroll state per pane, FOLLOW or STAY.\n- FOLLOW keeps the bottom in view on every transcript growth (messages, command and delegation cards, streamed text, the live-turn card), uniformly. STAY never moves on content changes; growth is signalled by New response only.\n- Only user gestures change the state: scrolling up gives STAY; reaching the bottom, End, clicking New response or sending a prompt gives FOLLOW. Content changes, resize, viewport clamps, hydration, reconnect and tab switches never change it.\n- The state is per workspace tab, persists across switches and is never re-derived from geometry.\n- There is no exception for approvals or user input: signal, do not scroll.\n- Resolve scroll bugs against this spec; do not patch them one by one. The current mechanics are in docs/features/session-virtualized-transcript.md.\n\nTheme token: --surface-white (and its strong and soft variants) is a translucent highlight wash, especially in dark themes. It is not a base surface, despite its name. Never feed it to canvas-rendered or portaled opaque surfaces such as Monaco editor and minimap backgrounds. Use a base token such as --panel-strong, and force alpha 1 where the consumer cannot rely on DOM compositing."
+}

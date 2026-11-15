@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "claude-bash-cwd-stays-in-root",
+  "head": {
+    "state": "active",
+    "chain": [
+      "f2d0adfeb0c745eaa1a25d1a906f2e34"
+    ]
+  }
+}

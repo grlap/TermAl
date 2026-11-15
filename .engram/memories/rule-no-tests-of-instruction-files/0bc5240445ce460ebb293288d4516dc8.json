@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rule-no-tests-of-instruction-files",
+    "revision_id": "0bc5240445ce460ebb293288d4516dc8",
+    "previous": "85dd2f669e774f78a7a79e6d37fa7951",
+    "body_sha256": "2762552c46842ca375c4b81a3b4f5a65c65ffcf82200efaec204047074c4ff98",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T01:07:01.710185200Z"
+    }
+  },
+  "body": "Greg's standing rules (2026-11-07, relayed by Engram::Asistant, TermAl mailbox 588693a8):\n(1) #652, 00:54Z, verbatim: „USUNAC TESTY sprawdzajace claud.md czy agents.md Natychmiast!! Nigdy ich niedodawac”. Never add tests that read, check or pin the content of AGENTS.md, CLAUDE.md or other agent instruction files (.claude/commands, .claude/reviewers, skills), in any of the team's projects. The files themselves stay.\n(2) #654, 00:57Z, verbatim: „Zero tautologi. Tak marnujemy cykle. Te testy nic nie wnosza. Teraz kazda zmiana wymusza zmiane testow. Czyli edycja 2 razy. O ile zlapiemy to odrazu. Absurd! Nigdy wiecej.” More broadly: no tautological tests, meaning tests that only pin text or mirror the implementation and force a double edit without verifying behaviour. Test observable behaviour where it is needed.\nDo not create automated checks of the rule's wording. Product tests that build temp AGENTS.md fixtures to exercise TermAl features are fine. TermAl deletion plus rule text: w-7dafeeae3cfe (owner Opus3); Engram: w-a577d36eba5c (Merger).\n\n(3) Widened 01:06Z (Asistant #656), verbatim: „Nie ma testów czytających pliki md i sprawdzania czy mają okreslone frazy. Usunąć natychmiast.” This covers ALL Markdown files, not only instruction files: no test may read a repo .md file and assert phrases, and such tests are not to be replaced with equivalents. Tests that read .md files they themselves created in temp fixtures to exercise product behaviour are fine, as is the doc link checker. TermAl's extra hits went into w-7daf: delegation_mcp_durability_pending_tests.rs, process_limits_tests.rs:241–253, coordination_instructions.rs:342/376."
+}

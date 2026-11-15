@@ -1,0 +1,31 @@
+{
+  "id": "01a1dec5-c2f9-77c0-acae-d0ed2b7c054c",
+  "external_ref": null,
+  "title": "Avoid an acknowledged name success followed by a conflict from unrelated session activity",
+  "outcome": "Naming another held claim reports a consistent outcome when unrelated session activity races the off-lock durable snapshot read.",
+  "acceptance": [
+    "A deterministic regression mutates unrelated session activity during the naming row read and verifies a consistent naming outcome without weakening exact predecessor membership or custody checks.",
+    "Any real custody or predecessor-set conflict is reported before a success notice, or explicitly reports which acknowledged state remains and how to retry safely."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "criteria-proposed",
+    "execution-observability",
+    "named-roots",
+    "review-low",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d6bd-7cb5-7f60-9b9f-4093c33dc14e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "worktree-node-modules-junctions",
+  "head": {
+    "state": "tombstone",
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "retire attributed project memory",
+      "remembered_at": "2026-10-03T02:37:58.938189600Z"
+    }
+  }
+}

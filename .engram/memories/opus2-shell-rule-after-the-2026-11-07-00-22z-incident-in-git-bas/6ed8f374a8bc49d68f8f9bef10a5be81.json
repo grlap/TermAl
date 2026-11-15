@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-shell-rule-after-the-2026-11-07-00-22z-incident-in-git-bas",
+    "revision_id": "6ed8f374a8bc49d68f8f9bef10a5be81",
+    "previous": "d9cc3f468bfd4abaa35d8c5c30e17d77",
+    "body_sha256": "233b302a6bdd12ff1e5a91f6f410ac36ffa924b3b3cdd0487b04a63e27bc2e2a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T05:09:44.148910200Z"
+    }
+  },
+  "body": "Opus2 shell rule after the 2026-11-07 00:22Z incident: in Git Bash, NEVER put message text inline in double quotes for \"$TERMAL_CLI\" mailbox send --message \"...\". Backticks (for example `cargo run --release`) or $(...) inside run as commands. That incident started a second TermAl cargo run in the main checkout; it was stopped before link and the installed binary was unchanged. Always write the body with a single-quoted heredoc (cat > file <<'EOF') and send it with --message-file.\n\nRepeat at 05:10Z. An UNQUOTED heredoc (<<EOF), which I used to interpolate ${HR}, also executes backticks: `--list` ran as a command, harmlessly ('command not found'), but the word vanished from the dispatch text. Rule: ALWAYS use quoted heredocs (<<'EOF'). Put variable values in with a separate echo or printf line, or with sed placeholders, never inside an unquoted heredoc that contains backticks."
+}

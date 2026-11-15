@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-interim-lane-rule-fable2-2026-10-23-from-bara2-s-w-869413",
+    "revision_id": "e642fc1cd0d940b2bfa87265f15bb1d0",
+    "previous": null,
+    "body_sha256": "09bccb7345cdb993eb31fbb11019f365158315aa47aa571f3b09c81e51856cb0",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T11:54:38.030701500Z"
+    }
+  },
+  "body": "TermAl interim lane rule (Fable2, 2026-10-23, from BarA2's w-869413a422e0 diagnosis): never `cd` into another session's worktree from a Claude Bash command, not even inside a ( ) subshell. TermAl then treats the session's shell as \"lost among\" places that include the peer root, and the session's later commands, even `cd /other && ...`, are fenced against that root, voiding the peer's carried gate credit. Use `git -C <root>`, absolute paths, or the Read and Grep tools. Engram MCP tool calls (notes) are not affected. The rule lifts when w-869413a422e0 lands."
+}

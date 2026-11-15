@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-dl560-checkout-build-is-in-repo",
+    "revision_id": "79215cb14054476883e63b281fcb9723",
+    "previous": null,
+    "body_sha256": "aceed3e9e1776ae2101260859b850f4b5f0de159f0c87b47e4c68559dfda3dfe",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T10:43:20.961912100Z"
+    }
+  },
+  "body": "Lesson (Termal::Fable2, 2026-11-07 10:43Z, my own over-caution, challenged by Engram::Asistant 588693a8 #819/#821). Fast-forwarding DL560's TermAl checkout (/home/greg/github/TermAl) to LANDED, gated master and building it into that checkout's target/release, with the running pid untouched and no restart, needs NO fresh word from Greg. CLAUDE.md:268 limits writes to the repository folder. The DL560 checkout is TermAl's repository on that host, the same clone class remote runners work in. CLAUDE.md:296–299 needs Greg's explicit word only for writes OUTSIDE the repository. The landing (:181–189) installs the gated tree's binary where the host runs it from. Restart 1's „Tak” was caution, not a rule. Do not ask Greg for this again. Restarts stay Greg's. Building an UNlanded tree, or anything outside the checkout, is a different matter."
+}

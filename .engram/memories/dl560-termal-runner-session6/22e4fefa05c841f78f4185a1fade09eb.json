@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "dl560-termal-runner-session6",
+    "revision_id": "22e4fefa05c841f78f4185a1fade09eb",
+    "previous": "5f3ddb888ab4441f89b3641e0e715dc4",
+    "body_sha256": "24a6fe95f812375d508ca3d6adf69f9531efb84a1cd47e6b3a18dc5afacc85b6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T03:02:43.470225100Z"
+    }
+  },
+  "body": "The second DL560 TermAl runner is session-6 \"Codex 6\", address host:e83d08f4-22ac-4655-a84d-941fc0eeb4f1::session-6, relay principal relay-principal-557b1d0fda0cdfa4a08e3424915ba854e10e701ccf676e42ca4e0d89ef400b16. Created 2026-11-04 about 02:34Z by Fable2 through POST /api/sessions on DL560's loopback API (127.0.0.1:8787 over ssh dl560), on Greg's word „Utwórz poprawnie nową sesję”, relayed by Engram::Asistant, who added: settings like Codex 3 and leave session-5 alone. Settings as returned: Codex, gpt-6.1-terra, high, approval never, danger-full-access, workdir /home/greg/github/TermAl, project-b7327333-6e78-4e54-9196-fc63ab99937b. First check passed at 02:35Z: it read and acknowledged its mailbox and replied, with no approval prompt, checkout HEAD 14b53e3b. First real job: N3 FULL test-fbed4e84, evidence only, from 02:45Z. session-5 stays held at the termal_read_mailbox MCP approval (on-request, workspace-write); nobody answered it; don't use it. Brief in its mailbox #1 follows dl560-termal-runner-session3. Corrections sent: never detach a job with nohup and end the turn, because nothing wakes the session on completion. Update #7 (02:49Z), not yet read as of 03:02Z: while a long FULL runs, check mailboxes at each poll, oldest first, and run focused jobs alongside within the census, at most three jobs, no second FULL. FACT LEARNED 03:02Z: during its first FULL it read no mail and did not acknowledge #7, so a message cannot reach a runner mid-job unless it was already told to poll. Don't route requests to a runner inside a FULL; check its state first over ssh dl560 with GET /api/sessions/session-N?tail=1 and read_mailbox_message. At 03:04Z Fable2 told Sol-03d4, Sol-license, Opus3 and Sol-8e1f to withdraw from Codex 6 and send to Codex 3. Whether the polling rule works is unproven until Codex 6 next runs a FULL having read #7."
+}

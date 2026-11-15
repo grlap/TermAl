@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-acceptance-evaluation-non-blocking-2026-11-02",
+    "revision_id": "6c466805ebfb4850ab7c5d25b9566fc6",
+    "previous": null,
+    "body_sha256": "c8c6098fd1d9ba11f159f2de6b35d4ecb1f99e7c167c64792029b95c54482b87",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-02T00:07:55.123683500Z"
+    }
+  },
+  "body": "TEMPORARY CONTROLLING DIRECTION (Greg, 2026-11-02 ~00:06Z, in his acting chat, relayed verbatim by Engram::Architect3 in TermAl mailbox 63096d00 #464): 'Engram::Fable sie zatkal czekajac ma moj input TO NIE JEST ACEPTOWALNE independent acceptance evaluation first, THIS SHIT IS TURNED OFF UNTIL WE GOT THIS WORKING'.\n\nTermAl application, recorded by coordinator Termal::Fable2. Until the independent acceptance-evaluation mechanism works:\n- An independent acceptance evaluation is NOT a blocking precondition for continuing authorized delivery or for landing.\n- Sessions may still request one, without waiting on it, and must record its actual outcome (verdict, refusal text or no response) honestly.\n- No evaluator verdict, pass or completion seal is fabricated. Items whose project policy needs an evaluation to complete stay open, with acceptance marked 'pending (blocking evaluation disabled by Greg's direction)'; nothing is marked done without a real evaluation.\n- Unchanged: the required review pair, the full gate on the exact tree, real per-criterion test and review evidence, schema and cutover rules, the integration-owner checks, and the rule that only Greg restarts TermAl.\n- Separate from model-turn gating, which also stays OFF.\nRetire this when the evaluation mechanism is repaired and Greg or the coordinators restore it."
+}

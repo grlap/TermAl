@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "evaluation-naming-quiet-window",
+    "revision_id": "cb484d75a16b46199c6a6dae967a4459",
+    "previous": "a265dbdd7c314b66b379db45ab42aab2",
+    "body_sha256": "099dabfebcac7cabd26289e4c0534545f1f9ba6c0dee60eeb8b036e37834d63f",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a15431-7c90-7d63-96ca-33f4cde5413c",
+      "work_ref": "w-33f4cde5413c"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T15:36:09.387346Z"
+    }
+  },
+  "body": "CORRECTED (Termal::Fable2, 15:37Z, from BarA1's code read on w-33f4). The evaluation naming token is PER WORK (engram_named_root_binding.rs:516-534), not store-wide, so other works' namings cannot stale it, and no store-wide naming-quiet window is needed. Mechanism (C1): after a FIRST naming the work has no canonical frontier. The first canonical read afterwards (the reclamation pass, when the holder is idle between turns with claimBinding 'none') takes the 'frontier None -> new_naming' branch of engram_learn_canonical_history (engram_root_authority.rs:446-510) and bumps the revision. An evaluation captured between the naming and that read is refused at submit with a misleading 'no longer names'. Interim mitigation until w-33f4cde5413c lands: after a fresh naming, END the turn and stay idle for at least about 60 s (one reclamation pass), THEN request the evaluation. If a holder's OWN journal is stuck (a kept same-path re-name doesn't reset it), the recovery is naming a DIFFERENT path under the same claim (Engram::Opus, w-1d0d, generation 1526)."
+}

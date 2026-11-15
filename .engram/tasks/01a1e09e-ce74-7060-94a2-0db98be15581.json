@@ -1,0 +1,31 @@
+{
+  "id": "01a1e09e-ce74-7060-94a2-0db98be15581",
+  "external_ref": null,
+  "title": "Unchanged test-run rescans redo history-sized compaction selection and republish state under the commit lock",
+  "outcome": "An idle test-run rescan with no changes no longer rebuilds the whole compaction population or republishes state while it holds the src/test_runs.rs:1126 commit lock. Compaction selection (A) and the publish step (B) land as separate candidates, A first. Live idle-backstop rescans hold that lock 371/460/686 ms (min/median/max), of which compaction selection takes 173-315 ms and the publish step 116-270 ms (w-e2972bb21221 note 09f9687e).",
+  "acceptance": [
+    "(A) An unchanged rescan does no compaction selection; a changed eligibility input, including each one the source list finds, is still compacted on the next pass.",
+    "(B) An unchanged rescan neither advances the state revision nor republishes, or else RED-B shows that this cost doesn't exist and B is dropped with that evidence.",
+    "The review pair is clean and the full gate passes on the exact landed tree.",
+    "A post-landing live trace is reported, with the cold first scan kept separate from idle passes, and without claiming the parent's live criterion."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a171bc-9eb2-7012-b3d2-e2972bb21221",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

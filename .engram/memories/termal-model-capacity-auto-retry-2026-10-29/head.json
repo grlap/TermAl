@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-model-capacity-auto-retry-2026-10-29",
+  "head": {
+    "state": "active",
+    "chain": [
+      "311697dcf9b44d3598f33922b05aeaae"
+    ]
+  }
+}

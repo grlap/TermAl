@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-shell-cwd-not-main-checkout",
+    "revision_id": "7b8aaa462d9d4f2ca539f70ce83dd118",
+    "previous": null,
+    "body_sha256": "4a09216fd2aced5ee50389df1417390d02e496d56833bfbdd7ba95ed5456d174",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-22T17:02:33.976314100Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-22 17:02Z, my own possible miss). My PowerShell and Bash tools start in the session's working directory, which was the MAIN checkout (C:\\github\\Personal\\TermAl). When a gate runs IN the main checkout (Merger landing gates do), my read-only status commands (curl, mailbox list, git -C, Get-Date) have that root as their process cwd. The host may then count them as \"another session's command there\" and withhold the gate's credit. This was seen with Merger's Mac gate test-32955e50 (no typed record after PASS) after test-60823638 was refused for Coder's pwsh in the root. RULE: keep my shell cwd OUT of every gated root. Run `cd /c/github/Personal/TermAl/.tmp` in Bash at session start, so the session's primary working directory becomes .tmp, and never run commands with cwd in a root that has a gate running."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "durable-not-woken-check-queue-paused",
+    "revision_id": "28c991ccac1b4a23af456ed706e3a4e5",
+    "previous": null,
+    "body_sha256": "9b2311e95d054f53822370d7b2f02e060860b278cd230f9c7895ec84c797ada9",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T23:08:41.256650800Z"
+    }
+  },
+  "body": "When a send to a worker returns notificationDisposition durableButNotWoken (or heldBehindPausedQueue), immediately GET /api/sessions/{id}. If it reads queuePaused=true with pending prompts and the session is idle, POST /api/sessions/{id}/queue/resume, then read back; the turn may take a second to begin. Since 2026-10-16 queues have been seen paused at ORDINARY turn ends with no stop (Coder 7422 at 23:07Z on build 12e16176), so a worker can idle forever otherwise. Record each occurrence on w-80e0cb2002da."
+}

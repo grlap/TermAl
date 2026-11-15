@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rules-greg-landing-reports-by-project",
+    "revision_id": "c35edde2401f41b0a1e47f665f4e3997",
+    "previous": null,
+    "body_sha256": "4f52fb69cf370b86c089822491842aef8b464de3e8994298794eb0a530fa6bed",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T17:42:50.701209700Z"
+    }
+  },
+  "body": "Agreed between coordinators (Engram::Fable → Termal::Fable2, 2026-10-29 17:42Z, mailbox ebe242f7 #5273), to avoid duplicate messages to Greg:\n- Engram landing reports go to Greg ONLY from Engram::Fable.\n- TermAl landing reports go to Greg ONLY from the TermAl coordinator (Termal::Fable2).\n\nWhen Merger3 or any other integrator asks the TermAl coordinator to \"report the landed commit to Greg\" for an Engram commit, forward it to Engram::Fable instead. Do not message Greg about it.\n\nEngram acceptance evaluations are routed by Engram::Fable."
+}

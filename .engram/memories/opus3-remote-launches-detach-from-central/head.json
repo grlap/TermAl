@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus3-remote-launches-detach-from-central",
+  "head": {
+    "state": "active",
+    "chain": [
+      "6b585501c05d4bbcaee81440ff5ce1e0",
+      "2dcb1b7d47714daa83503aea1c32a3b4"
+    ]
+  }
+}

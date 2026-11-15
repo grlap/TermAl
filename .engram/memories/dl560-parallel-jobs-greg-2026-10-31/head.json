@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "dl560-parallel-jobs-greg-2026-10-31",
+  "head": {
+    "state": "active",
+    "chain": [
+      "27c6870efaf5461c984b1e3344d2c2be",
+      "045df08c90284b2c9db614e0b55f8195"
+    ]
+  }
+}

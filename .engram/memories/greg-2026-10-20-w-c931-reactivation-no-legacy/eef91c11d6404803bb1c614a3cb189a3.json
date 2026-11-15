@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-2026-10-20-w-c931-reactivation-no-legacy",
+    "revision_id": "eef91c11d6404803bb1c614a3cb189a3",
+    "previous": null,
+    "body_sha256": "7a9f374d7e5a94727c4a3f12fc8f34038bedc46d005dfd2946031ac40b2e9cfe",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-20T21:04:09.392200Z"
+    }
+  },
+  "body": "Greg's word, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #1381, 2026-10-20 21:03:55Z), in answer to my #1380 about the w-c931 two-host rollout:\n\n\"Greg authorizes the required A↔Mac pair re-activation after the w-c931 rollout, provided both hosts run the landed compatible build and the fresh 9/9 pair verification passes. No separate activation prompt is needed at that point. He also directs: no legacy compatibility, silent downgrade, or shim path; mixed versions must fail explicitly as upgradeRequired. Keep ordinary exact-basis build/restart notices.\"\n\nApplication:\n- At the w-c931 rollout, the pair re-activation needs no new prompt, IF both hosts run the landed compatible build AND a fresh 9/9 verification passes.\n- Restart notices still go via Advisor with build hashes.\n- Implementation must not add v1 compatibility or shims."
+}

@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "sol03d4-codex-unarchive-review-replacement",
+  "head": {
+    "state": "active",
+    "chain": [
+      "6cff85262e81411996b120b28cd47099",
+      "0ae650eb82cf4136aec4d0aa6879a20b"
+    ]
+  }
+}

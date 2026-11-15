@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "bara2-reread-mailbox-before-slot-launch",
+  "head": {
+    "state": "active",
+    "chain": [
+      "b4842684b5f9488bb65e8ede84aadb04"
+    ]
+  }
+}

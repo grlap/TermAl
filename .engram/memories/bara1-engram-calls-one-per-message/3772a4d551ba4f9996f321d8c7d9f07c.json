@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-engram-calls-one-per-message",
+    "revision_id": "3772a4d551ba4f9996f321d8c7d9f07c",
+    "previous": null,
+    "body_sha256": "bbe8ab143d00eb274b521556e0bc8066a57ec37581d83fe809759f4a4cb3653a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-28T04:59:20.756945400Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA1, 2026-10-28, my own repeat slip after Fable2 #901/#921). Engram tool calls (claim, add, note, show and the rest) go ONE PER MESSAGE, never several tool uses in one message. Each time it happened, the batch was nine claim recoveries or three adds. Parallel Engram calls contend for the store lock. The parallel-tool-call default overrides good intentions, so before sending any message with an engram call, check it is the only engram call in that message. Non-Engram calls (TermAl delegation reads, Bash) may still go in parallel."
+}

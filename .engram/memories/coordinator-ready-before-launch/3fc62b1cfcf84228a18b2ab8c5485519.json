@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-ready-before-launch",
+    "revision_id": "3fc62b1cfcf84228a18b2ab8c5485519",
+    "previous": "ca92c782be244c50ab7293695a9ebdad",
+    "body_sha256": "c58a5932fd8ba12d7e74650af7357c9622b74c1ef83471c9569670dd81c0c411",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-11T22:05:43.086236500Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-11 20:46Z, learned from my own miss). Send Engram::Fable READY (or START) BEFORE telling the Merger \"LAUNCH NOW\" for any TermAl full gate, and wait for its ack or check that no Engram full gate has started. At 20:45:44Z TermAl's w-cfcf gate and Engram's w-30c2 gate nearly launched together, because I had sent the Merger LAUNCH NOW at 20:43Z without a READY to Engram. Engram held its gate in time. First launch wins; announce before launching.\n\nSecond pre-launch check (2026-10-11 22:05Z, my own miss on w-204186fe854d). Before LAUNCH NOW, also confirm that no TermAl focused test I granted is still running: termal_list_sessions, look for \"Test run (focused): running\", or wait for the grantee's result. I sent LAUNCH NOW while Opus3's combined cargo test for w-6c1d was still running, then sent HOLD, which reached the Merger mid-turn. One overlapping focused command is within the shared amendment's allowance, but it breaks TermAl's stricter zero rule. Revoke or finish outstanding grants first, then launch."
+}

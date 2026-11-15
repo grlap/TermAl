@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-uidist-backup-under-tmp",
+    "revision_id": "e90a28904d154d219b00e4cf6191b759",
+    "previous": null,
+    "body_sha256": "8be5edd28f3b3ce06ec91d16126f702c727ec59508fd8d5f40949c90abcc73fe",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T21:35:09.499271400Z"
+    }
+  },
+  "body": "Integration-owner rule (Fable2 #5211, 2026-11-09). When swapping ui/dist in the master checkout, put the backup of the old dist under .tmp/, never as a sibling like ui/dist.<date>-before-<c8>.bak/. An untracked directory in the tracked tree makes the master checkout dirty, and `engram source` hashes it, so no committed-input run from master can be clean. Remove the backup once the new UI has served and no open item records a need for it, after the path check."
+}

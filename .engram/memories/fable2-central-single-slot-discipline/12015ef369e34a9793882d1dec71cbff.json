@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-central-single-slot-discipline",
+    "revision_id": "12015ef369e34a9793882d1dec71cbff",
+    "previous": "c2ca3f38b5be47669c0848f6a36f9feb",
+    "body_sha256": "a39dd2b9d1f283f326fcd6ad85c0ebbb5d1d83ff4e7f695d0c11d6bc91ed31be",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T20:15:18.045572200Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-30 15:33Z, my own repeated slip). Twice in 15 minutes after restart 1, I gave the Central cargo slot to two sessions at once. First, Coder 7422's c7e0 focused run and Merger3's Engram release build overlapped at 15:18–15:20Z. Then my \"Central GO\" to Merger3 at 15:28Z was followed by me authorizing Coder's next focused check at 15:31Z, and both launched around 15:32Z. Cause: I hand out GOs per conversation without one ordered Central queue, and a hold message arrives too late when the recipient is mid-turn. Rule: keep ONE explicit Central owner at a time. Before ANY GO or step that implies a cargo run on Central (including \"run one focused check\" inside a continuation), check who holds Central. If someone else holds it, put the next job in a queued position and give no GO. Release only on that job's END mail.\n\nCensus exemption (2026-10-30 16:54Z): since Greg's restart about 15:03Z, a standing `cargo run --release` process (pid 84896 under rustup pid 44944, CPU near zero) is the RUNNING TermAl host's wrapper. It rebuilt termal.exe 0ba6f3b5 at 15:07Z. It is NOT a build: exempt it from the \"no other cargo\" census, and never kill or touch it. Only rustc processes, or a cargo whose CPU is climbing, count as a competing build. After each Greg restart, re-check that pid.\n\nUpdate 20:15Z: after Greg's 20:00Z restart, the host's `cargo run --release` wrapper is now pid 37204. That's the same exemption as before, under a new pid."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-lane-practice-fable2-2026-10-23-after-a-focused-run-ends",
+    "revision_id": "cf8d8339401447e98503f8fc104e296d",
+    "previous": null,
+    "body_sha256": "c46ca71060deb7b88525b764811b2fc33c12a382da3366d4e6f9b43d80462c16",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T10:33:55.702345800Z"
+    }
+  },
+  "body": "TermAl lane practice (Fable2, 2026-10-23): after a focused run ends, a lane that wants to act once the host record settles MUST register termal_resume_after_test_runs (the settle wake arrives about 2 min later) or simply proceed in its next turn. Ending the turn and \"waiting for the settle\" without registering leaves the lane idle indefinitely: BarA2 idled 8 and 29 min, and Sol-edfd 16 min, on 2026-10-23. Coordinator: include this in GOs."
+}

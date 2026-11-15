@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-no-silent-end-turn",
+    "revision_id": "a205ec29b1264f4f8b6c42925f37803a",
+    "previous": null,
+    "body_sha256": "094a7032f853659752b9367c6f385f4f7b0d49d717065211bfffc777726d393e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T15:38:17.383166200Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-17 15:40Z; the costliest miss so far). On 10-17 I ended a turn at 08:34Z with Merger waiting for my \"step 2\" wake after TRAIN-4's carrier PASS. No other message arrived to re-invoke me, and every lane sat idle until 15:36Z, when Greg's #981 arrived (\"maintain continuous productive throughput\"). RULES:\n(1) Never leave a worker waiting for a coordinator wake. Give multi-step procedures as AUTONOMOUS instructions (\"proceed through the steps on your own queued wakes; mail me only results or blockers\").\n(2) Before ending ANY turn, check that every lane is either working or waiting on something that will wake ME: a gate --notify, a pending reply, or a worker's own mail.\n(3) Keep idle lanes assigned to ready items, using Sol 6.1 lanes first, with edits and read-only work between gates."
+}

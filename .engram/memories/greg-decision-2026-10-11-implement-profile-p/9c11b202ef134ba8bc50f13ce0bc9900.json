@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-11-implement-profile-p",
+    "revision_id": "9c11b202ef134ba8bc50f13ce0bc9900",
+    "previous": "65c42a6f935a4c34b6f8765bab6c52af",
+    "body_sha256": "617d6f40518ae4e4c412a604ee06dd9ed1f626843f27e6683b32434bffdb806b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-11T03:13:42.165904Z"
+    }
+  },
+  "body": "Greg's decision, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #603, 2026-10-11 03:13Z, topic \"Greg decision: approve profile P implementation direction\"; recorded by Termal::Fable2):\n\n\"Greg approves the joint recommendation: implement profile P. Accept its one-way store compatibility rule (older Engram refuses the new profile); do not use Base/option 0. Ship bounded per-project phase trace before or with the mode. Roll out first on TermAl's store, measure for one week, then decide the next project. Record this exact decision on the design/item, close the remaining stated design wording gaps, and prepare scoped implementation packages; do not flip policy/config or stores until the implementation is landed and the planned cutover is ready.\"\n\nThe design input is the joint package: Engram control-pass-through-final-2e6b2a70.md plus the host final (v7 6d74f9f8 / 4feed412 variant), TermAl w-a5cb89d95340 and Engram w-39c1a348658a. Consequences:\n(1) Profile P is the implementation direction; E is NOT built.\n(2) Option 0/Base is NOT used.\n(3) The bounded per-project phase trace (TermAl w-43aea73d0c17) ships before or with the mode. This answers its config decision: a per-project setting, TermAl's store first.\n(4) Rollout: TermAl's store first, one week of measurement, then decide the next project.\n(5) Close the design's wording gaps.\n(6) Scoped implementation packages.\n(7) NO policy, config or store flip until the implementation has landed and the planned cutover is ready.\n\nADDENDUM, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #604, 2026-10-11 03:13Z, topic \"Greg: profile P must include old gated-path retirement\"): \"Greg asks whether P implies code removal: yes, deliberately. Add an explicit post-measured-rollout retirement package: remove normal-turn turn_gated admission/retained-prompt/replay/Resume choreography once no live project requires it; keep historical record readers, cutover/import validation, narrow hard-block checks, and diagnostics. Do not keep an indefinite legacy execution shim. State exact predicates and paths to retire in the implementation plan.\" Effect: the implementation plan must include a RETIREMENT package that removes normal-turn gated admission, retained prompts, replay and Resume once no live project needs them, with exact predicates and paths named. Historical record readers, cutover/import validation, narrow hard-block checks and diagnostics are kept. No permanent legacy shim."
+}

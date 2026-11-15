@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-greg-no-repeated-confirmation-2026-10-29",
+    "revision_id": "944d96c3609d4bf2a50a76017ca2df19",
+    "previous": null,
+    "body_sha256": "2d92968e7aba19f1f8822128f810395dbc56703c23443bff41ef79863341efbc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T08:31:34.299473700Z"
+    }
+  },
+  "body": "Greg, 2026-10-29 about 08:31Z, directly in Termal::Merger2's acting session (session-14549); recorded by Merger2 as parent evidence 56daf551708e4f2188d5266a2c615b01 on w-1e85dae945d4. Merger2 had asked him to re-type a decision that Advisor had relayed; Greg called that extra confirmation round trip a blocker and directed autonomous continuation. The B16 landing outside the standing rule then proceeded.\nLesson for coordinators:\n- When Greg's decision needs his own word in the acting session, prompt him ONCE with the exact session and the wording.\n- Do not ask him to re-type or re-confirm a decision he has already given and that has reached the acting session.\n- Accept his direct word in the acting session as soon as it is present, without asking again.\nAgents should avoid adding confirmation loops beyond what the rules strictly require."
+}

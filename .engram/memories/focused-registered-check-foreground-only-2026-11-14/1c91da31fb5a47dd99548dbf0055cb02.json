@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "focused-registered-check-foreground-only-2026-11-14",
+    "revision_id": "1c91da31fb5a47dd99548dbf0055cb02",
+    "previous": null,
+    "body_sha256": "add65c558a79f67d669ee2e14f02d5057d8911c28adff1e464fa45c5b9c8a483",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T09:05:34.065910500Z"
+    }
+  },
+  "body": "Rule (Termal::Fable2, 2026-11-14 09:05Z), learned on w-70ed: a focused registered check meant to earn a Test or Build record must run in the supported FOREGROUND form. Never use `--detach` with `focused`.\n\nThe host refuses it with \"Unsupported focused launcher form with --detach: '--detach is not a foreground focused check; no Test or Build record will follow; use supported foreground launcher options.'\" (d50d's test-438e8f8d). Such a run is diagnostic only and is not a qualifying run, so one corrected foreground run afterwards is NOT a \"second run for the record\".\n\nAlso, while a registered check runs, write nothing to its item: no status note, no claim renewal that changes work_revision, no rename. Those writes can invalidate the verification. Record afterwards.\n\nOnly `full` uses background or --detach, per CLAUDE.md, and only with the watcher-free rule."
+}

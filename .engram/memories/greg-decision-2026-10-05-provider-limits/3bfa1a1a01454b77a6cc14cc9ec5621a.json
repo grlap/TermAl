@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-05-provider-limits",
+    "revision_id": "3bfa1a1a01454b77a6cc14cc9ec5621a",
+    "previous": "3a9adb9476864042962d9b20788521c5",
+    "body_sha256": "d28154418bc1f49b9e88929f5067bea22b12bb311b937d95eb75fa31272bab03",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T04:23:40.973199400Z"
+    }
+  },
+  "body": "Greg's decision, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #272, 2026-10-05 15:11Z; recorded by Termal::Fable2): \"Greg's decision: exhausted Opus/Claude credits are an external constraint; do not spend engineering work attempting to fix them. Temporary Codex availability failures should eventually be retried every 5 minutes, but classify/schedule this as P3, behind current P1/P2 reliability work. Record this distinction; do not interrupt frozen/current work.\"\n\nApplied:\n- w-66f2ced7d7b9 lowered to P3, with its scope limited to transient availability retries about every 5 minutes.\n- Usage-limit or credit exhaustion gets no engineering work.\nThis grants no commit, push, install or restart authority beyond CLAUDE.md.\n\nAdditional Greg direction from Engram::Advisor, TermAl mailbox b9d13887 #2368, 2026-10-28 17:07Z (preserved from canary-rollback-actor-2026-10-28 item 2; independently FULL-read by Engram::Fable in mailbox-message-aa30dc95-2e93-42d2-862f-65e4a7e7cd4a): on \"Selected model is at capacity\", do not change the model or owner; Resume on the same model after 5 minutes. Original task provenance: w-e8e575cecabc note38cc445e. This retains the existing capacity guidance only; the obsolete turnGatedControl rollback grant is not revived."
+}

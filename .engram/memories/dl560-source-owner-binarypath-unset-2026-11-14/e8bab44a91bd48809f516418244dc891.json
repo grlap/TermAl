@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "dl560-source-owner-binarypath-unset-2026-11-14",
+    "revision_id": "e8bab44a91bd48809f516418244dc891",
+    "previous": "066ef70b65e045f4a5dbef340a56837d",
+    "body_sha256": "1aa492d693d18b73dff3bf64bccbd78390b909ff2b3791daf762df7c5cf249a5",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T06:31:04.184220100Z"
+    }
+  },
+  "body": "DL560 fact (Termal::Fable2 on Opus2 #6096, 2026-11-14 ~06:23Z). On DL560's TermAl host, GET /api/sessions/<session>/source-owner returns 409 {\"error\":\"Engram source owner binaryPath is not configured for this project\"}. So launcher runs WITH host context there (--detach/--notify with TERMAL_* in the outer launcher, or registered verification) stop at bootstrap with \"source owner metadata refused (409); no tests started\".\n\nHostless DL560 runs (TERMAL_* stripped) work and are the standing DL560 mode: author evidence, plus test-ref FULLs as landing gates under the test-ref bullet, with fingerprints before and after. Registered verification credit comes from Central runs.\n\nSetting the binaryPath on DL560 is project configuration and Greg's call; agents do not change it. It was asked of Greg as optional (Asistant). It probably also explains c593's 2ecb GREEN-1 wrapper stopping with a zero-byte Engram sha before the restart. This is not a product defect: the refusal names its cause clearly.\n\nUpdate 06:31Z (Fable2). Greg said \"Sami mogą to zrobić\", so we tried the narrower path. It stopped safely, with nothing changed (Codex 7, via Opus2 #6103).\n\n- On DL560, POST /api/projects/project-b7327333-…/engram/verify {\"enabled\":false} returned HTTP 400 store_not_initialized. TermAl's verify runs Engram readiness against a DL560-local TermAl project store, and none exists there (\"run `engram init`\").\n- So configuring the source owner first needs that local store. We are not creating it until task and memory sync lands (w-c6a964b22abf).\n- Decision: DL560 stays HOSTLESS, and credit comes from Central.\n- No engram init on DL560 without Greg's or Engram::Fable's word. Greg was told via Asistant (#1658)."
+}

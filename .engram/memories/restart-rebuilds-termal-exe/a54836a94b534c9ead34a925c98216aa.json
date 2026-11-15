@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "restart-rebuilds-termal-exe",
+    "revision_id": "a54836a94b534c9ead34a925c98216aa",
+    "previous": null,
+    "body_sha256": "3ae022e71bbc2dc08550934850ab5ca7e1f5996795a30430e565f534a03496be",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T14:59:24.334650Z"
+    }
+  },
+  "body": "Observation (Termal::Fable2, 2026-10-16 14:58Z). Greg's TermAl restart at 14:54Z ran a cargo RELEASE BUILD in the main checkout's target/. It overwrote the integration owner's installed target/release/termal.exe (d0bdb0de, built 07:19Z into .tmp/install-target) with a fresh build of the same source (master dae4bfd9, clean): target/release/termal.exe became a hard link to target/release/deps/termal.exe, sha256 59a77679…, mtime equal to the host start time. Rust release builds are not byte-reproducible, so the running hash differs from the installed one even when the source is the same. RULE for \"host back\" checks: verify the running binary by its SOURCE (the master checkout's HEAD equals the landed commit, and src, Cargo.toml, Cargo.lock and build.rs are clean), not only by the installed hash. Record the post-restart running hash. Any dirty source in the master checkout at restart time would get built into the host, so keep it clean."
+}

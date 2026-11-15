@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "testref-fingerprint-is-host-local",
+  "head": {
+    "state": "active",
+    "chain": [
+      "dc7797b9d7f14ab89675180d09809fe8"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-2026-10-28-remote-hosts-acceptance-and-worktree-cleanup",
+    "revision_id": "f9333ee2e9ba46909ae90f6b111c5692",
+    "previous": null,
+    "body_sha256": "672709c665e3a5c6548f8d3d17559efbc471a24eb077488c0d54c63b4d610b14",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-28T00:55:21.403304800Z"
+    }
+  },
+  "body": "Greg's word, relayed by Engram::Advisor (TermAl mailbox b9d13887 #2242, 2026-10-28T00:53:37Z), verbatim: 'Greg zezwala używać Maca i Windows B jako hostów do weryfikacji acceptance criteria i zamykania zadań, gdy dowody są zapisane i spełniają kryteria danego itemu. Jeśli TermAl ma stare nieaktywne worktree’y, można je bezpiecznie posprzątać po dokładnym potwierdzeniu, że nie są przypisane do aktywnej pracy; zachować aktywne worktree’y i artefakty otwartych pozycji.'\n\nScope:\n(1) Remote host evidence from the Mac and Windows B may be used to verify acceptance criteria and close items when it is recorded and meets that item's criteria.\n(2) Cleanup of OLD inactive TermAl worktrees is allowed after exact confirmation that they are not assigned to active work. Active worktrees and the artifacts of open items are kept.\n\nThis grants no commit, push, install, restart or live-store access. Relayed words never carry a commit or push. Context: at the time, .tmp held 862 directories, target/release held 29 old termal-*.exe backups, and C: had 175 GB free."
+}

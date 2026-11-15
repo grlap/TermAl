@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-full-gate-precensus-rule-2026-11-01",
+    "revision_id": "09953706baaa44a296fa4f6e525b6352",
+    "previous": null,
+    "body_sha256": "48ce5b5ab015f9ae51b16cde203b27b668d6f46f4dc3dadc9ef41be5c962c0c3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-01T10:51:41.785062100Z"
+    }
+  },
+  "body": "Fable2 #3599 (2026-11-01): run a PROCESS CENSUS on Central (cargo, rustc and test-binary processes plus their roots/command lines) IMMEDIATELY before every full-gate launch, and record it. Checking master, HEAD and the worktree is not enough. Cause: the w-135181 R12 gate test-fe3503b6 overlapped Opus3's w-2d99 focused run test-d6288bbc (started 11 s earlier) for 9.4 minutes. Overlaps are recorded on the item; a timing failure inside an overlap is investigated with the overlap as a candidate cause, with no automatic rerun. Census command idea (PowerShell): Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(cargo|rustc|termal|node)' } | Select ProcessId, Name, CommandLine."
+}

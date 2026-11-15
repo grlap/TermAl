@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "next-all-host-restart-checklist-2026-11-13",
+    "revision_id": "c9cd18a289374887b126dece47c4639e",
+    "previous": null,
+    "body_sha256": "485f2a8b2f0a12765c92d1ba38996a719350e8bdd5a8b5a93ab1fdf1ce61244f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T07:09:25.159809200Z"
+    }
+  },
+  "body": "Next coordinated all-host restart: what to bundle and ask (Termal::Fable2, 2026-11-13 07:10Z). Remove this memory after that restart is verified.\nTIMING: after Engram's rollback hold ends (~09:00Z review) and the pending landings install, agreed with Engram::Fable.\nGREG-ACT WINDOW: this restart is also K3 S2b's reader-floor window (Engram::Fable #7784). That means: no drain before Greg's „zaczynam”; one RESET NOW from Fable2 through Engram::Asistant; a one-shot wake at start+15; and before anyone resumes, a check that every host's running engram meets S2b's floor (c593 is sending Engram::Fable the exact check; w-180d may have to install on every host first).\nHOSTS: Central, DL560, Mac. DL560 still runs 42851443; the Mac runs 62a4785a.\nBUNDLED TermAl landings to carry: w-0419, aa01 (combo87), the 4bd8 trace, K3 S2b, plus whatever lands before.\nASK GREG in the RESET NOW message: after start, paste 60-120 s of the RAW Central console, or a lines-per-minute count, for w-c490bb137423 C5 (console rate after the landing).\nAFTER: tell Engram::Fable \"all hosts carry <master>\" (unblocks its w-a82d). Opus2's combo closures need the release binary on Central and DL560, so they request evaluations one at a time."
+}

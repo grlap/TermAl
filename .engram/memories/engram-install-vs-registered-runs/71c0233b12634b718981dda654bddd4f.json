@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "engram-install-vs-registered-runs",
+    "revision_id": "71c0233b12634b718981dda654bddd4f",
+    "previous": null,
+    "body_sha256": "a5e5d89aad9565121fcce6bf42216bec631637a82475748e3bae21e559957e3e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-08T01:25:27.024149400Z"
+    }
+  },
+  "body": "A TermAl registered run, focused or FULL, pins the Engram source-owner binary (path plus sha256) at the start of the run and verifies it again after the run (src/engram_source_owner.rs:96-106). Replacing engram.exe on that host mid-run makes the after-capture fail with \"executable no longer matches its pin\", and the run becomes ineligible. Observed on 2026-11-08: Central's Engram install of 0c012df9 at about 01:20:55Z killed Sol-03d4's registered run a231, even though its 23 tests passed. Rule: never install Engram on a host while a registered TermAl run is active there; drain the host's run queue first, like a cargo job. A fresh run after the install pins the new binary, which counts as validation, not a retry."
+}

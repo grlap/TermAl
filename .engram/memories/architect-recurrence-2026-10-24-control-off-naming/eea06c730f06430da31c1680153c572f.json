@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "architect-recurrence-2026-10-24-control-off-naming",
+    "revision_id": "eea06c730f06430da31c1680153c572f",
+    "previous": null,
+    "body_sha256": "c118060b678d921d3756d5210ffc00aed26f9a59cf0d89335e0d3cfb8cd833f2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=claude-fable-5-1;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-24T17:34:06.161476700Z"
+    }
+  },
+  "body": "Recurrence record (Termal::Architect1 for Greg, via Engram::Advisor bac6ea2a #80/#81, 2026-10-24 17:3xZ; Greg: STOP EVERYTHING, record as a structural design failure). Evidence only; no fix proposed.\n\nEVENTS: 06:28Z Greg sets the Engram project's turnGatedControl=false (after the begin-path grant_expired/grant_scope_mismatch regression under writer latency, w-d428620a6474; 8112 12:40Z/13:05Z). 06:43:32Z lane 12325 (w-bafe) and ~06:48Z Engram::Merger (w-66c2): termal_name_source_root → 409 \"Engram control is not enabled for this session or its project\" (Advisor #1695); filed as w-4af0c7eb90ac (Fable2 06:53Z, source read) with Architect2's full design decision at 06:58Z (note 4fc1a33c…: decouple naming/observation from admission; credit needs a producer-supported grant-free path; replacement C1–C3). No source change followed (w-cce8 exclusive priority, then STOP). ~16:5xZ the same cause stops the TermAl Merger (\"Merger has no named source root\"): a gate must run in a named root and no new root can be named while control is off; roots named before the switch keep working. The 10-22 containment case (8581 unreachable while control off) was the first visible form of the same coupling.\n\nASSUMPTIONS THAT ALLOWED IT (anchors on master): A1 \"a name counts only for turns Engram mediates\" (engram_source_roots.rs:1965-1974, require_runtime_enabled=true). A2 one predicate for three concerns: is_control_enabled = is_base_enabled() && turn_gated_control (engram_host_adapter.rs:208-210) gates admission, naming (engram_session_is_enabled_locked :3888) and check diagnostics (engram_turn_checks.rs:1900/2415/2657); no \"base service\" level exists between disabled and turn-gated. A3 credit requires an admitted grant (engram_turn_checks.rs:1668ff, 2010-2029, 2633ff); the grant-free ExecutionObserve shape is defined uncredited (engram_unadmitted_observation.rs:1-18, :348-383) and unwired. A4 the merge train rests on that credit (standing rule condition 3; `done` needs a host-recorded passed check), so control OFF makes every landing impossible except by Greg's override (10-22, w-06fb). A5 the switch was treated as safe containment without an inventory of what the predicate controls; the inventory appeared only after the fact (06:53Z/06:58Z). A6 the coupling is deliberate in the code comment and no test asserts the opposite; the first regression test is only proposed (w-4af0 C2). Conclusion: \"may this turn run\" was fused with \"may this work be measured\"; pulling the safety lever stops measurement, and measurement is what merging requires."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-greg-batch-landing-rule-2026-10-18",
+    "revision_id": "efff6661549b4d3ca56b610786dcbb4f",
+    "previous": null,
+    "body_sha256": "78a9f04cbc8ffca4b44c6e8b327c00673e11510c743d1565f82a2f5b038069ee",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-18T21:27:32.641199800Z"
+    }
+  },
+  "body": "Greg's rule (2026-10-18 21:20Z, via Engram::Advisor b9d13887 #1189, verbatim): 'Greg direction: Merger should batch 2–3 independent ready changes per integration instead of serial single-item landings. Select disjoint paths/no ordering dependency, carry each onto the same current master, resolve any actual conflict, then run one gate/review on the exact combined freeze. Keep conflicting/dependent changes separate. Make batch fan-in the default at next boundary.' Coordinator practice: when 2–3 GREENs pass with disjoint paths and no ordering dependency, propose one batch to the integration owner (Opus2). One carry onto the same master, one gate and one review pair on the combined freeze, and each item's evidence. The first candidate set: M1c + P-mac Windows slice + the w-31fe probe fix (+ w-070a S1)."
+}

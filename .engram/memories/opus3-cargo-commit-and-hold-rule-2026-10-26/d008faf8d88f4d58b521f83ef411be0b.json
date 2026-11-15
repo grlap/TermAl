@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-cargo-commit-and-hold-rule-2026-10-26",
+    "revision_id": "d008faf8d88f4d58b521f83ef411be0b",
+    "previous": null,
+    "body_sha256": "eb8e6994cc3c9e8f9f80a8c8fc90426b1e0b65c740ff468f8cfebc604f0e7038",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-26T06:49:26.199666Z"
+    }
+  },
+  "body": "Fable2 interim cargo rule, from #3569 at 06:49Z on 2026-10-26, after the 06:12Z host crash on commit exhaustion (w-002b151e7b26). It REPLACES #3567's 35/45 GB.\n\nMeasure free commit with (Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory/1MB, in GB.\n- A focused cargo start needs at least 20 GB free commit, with -j at most 4.\n- A full gate needs at least 25 GB plus an exclusive window.\n- If the threshold isn't met, don't start; mail Fable2.\n\nHOLD: from Engram's gate START until Fable2 relays \"Rust stage done\" (about 20-25 min), start NO new cargo build or test. Edits and analysis are fine.\n\nRecover any run in flight at a crash from its saved result (summary, then recover); never assume."
+}

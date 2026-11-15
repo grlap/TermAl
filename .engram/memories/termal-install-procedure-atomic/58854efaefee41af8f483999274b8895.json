@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-install-procedure-atomic",
+    "revision_id": "58854efaefee41af8f483999274b8895",
+    "previous": null,
+    "body_sha256": "728bfbe90bb9b9e4346b251100b7e792bd8587163bd6cec6dce66159a86d9b28",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-08T00:17:05.815204800Z"
+    }
+  },
+  "body": "TermAl install procedure (integration owner): never rebuild in place in the live master checkout's target/. On DL560/Linux, `cargo clean --release -p termal` plus an in-place build left /home/greg/github/TermAl/target/release/termal ABSENT for about 4 min (seen at 00:14:42Z on 2026-11-08, during the ba6c9846 install), so sessions' TERMAL_CLI path was missing. Correct procedure:\n- build in a separate CARGO_TARGET_DIR (e.g. target/install-target);\n- copy the new binary beside the live one as target/release/termal.new;\n- back up the old one with a hard link or copy (termal.<sha8>.bak);\n- `mv -f termal.new termal`, an atomic rename, so the path never disappears.\nOn Windows: rename the running termal.exe aside, then immediately copy or rename the new one in from the same volume."
+}

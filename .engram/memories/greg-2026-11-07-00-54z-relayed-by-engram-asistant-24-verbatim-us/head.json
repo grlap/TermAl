@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-2026-11-07-00-54z-relayed-by-engram-asistant-24-verbatim-us",
+  "head": {
+    "state": "active",
+    "chain": [
+      "5bc8c4c77dce499cba7e29c7542aaa60",
+      "e659cef8c386417ea2b9502cbd80cb57",
+      "cbe7e1efb8454e8393dbedc2614dac60"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-greg-remote-runners-m4m6-2026-10-19-public-2026-11-15",
+    "revision_id": "91f00c48c7bd4a9b99ca4340137193db",
+    "previous": null,
+    "body_sha256": "cc682d3ff214bdd7ed4c9177168c138cc22191947b5346738101e08106e76061",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-15T17:45:54.308994800Z"
+    }
+  },
+  "body": "Greg's direction (Engram::Advisor #1250, 05:41Z on 10-19): use the validated Mac and Windows B runners to accelerate M4–M6. Dispatch independent focused checks and full gates to those hosts whenever each merge-ready candidate is available. Keep each host's ordinary checkout/worktree/launcher workflow and evidence fingerprints. This is parallel test capacity, NOT a relaxation of review, ref or attested-import requirements.\nStatus at 05:47Z:\n- Mac validated (GREEN9, 61/0/1). Windows B validated (test-5311bd7b, 43/0/0; Greg's GO #1247).\n- Bottleneck 1: TermAl test-ref authority text w-edb79ddbf033, assigned to Opus3; its criteria need revising from v5 to v6.3.\n- Bottleneck 2: attested import w-c3f102d77999.\n- Plan: M5 (Coder, carried on d520) full gate goes to Windows B; M4 (Sol-a7bb, needs a carry onto d520) goes to the Mac. Engram's copy w-121f passed audit (Fable2), and Engram's Merger lands it after Batch A.\n\nGreg (Advisor #1257, 08:51Z): \"Jak będziemy mieli remote msg będzie prościej.\" Native bidirectional remote mailbox is the key simplification: continue M4→M6 after the current BarA1 cap-fix priority. Treat the proxy transcript only as temporary, and add NO separate workflow around it. He also endorsed the GREEN-7 approach: keep the filed temp-guard defect, the worker delivers the fix, re-gate, no hope-retry."
+}

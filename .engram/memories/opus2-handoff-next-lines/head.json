@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-handoff-next-lines",
+  "head": {
+    "state": "active",
+    "chain": [
+      "b62446bd0dc44830bd337ee61a24ee10"
+    ]
+  }
+}

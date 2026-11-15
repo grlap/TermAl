@@ -1,0 +1,29 @@
+{
+  "id": "01a1e054-c508-7e80-bdd5-fef1f1ca4933",
+  "external_ref": null,
+  "title": "Read-only reviewer Git guard refuses read-only `git branch --list <pattern>` and `git worktree list`",
+  "outcome": "In a read-only (reviewer) Claude delegation, `git branch -a --list <pattern>` and `git worktree list` are accepted as read-only. They only list and change nothing, while the guard keeps refusing branch creation, deletion and renaming and worktree add/remove/prune.",
+  "acceptance": [
+    "In a read-only Claude delegation, `git branch --list <pattern>` (with or without -a or -r) and `git worktree list` run without refusal, shown by a test of the guard's classification.",
+    "Branch-mutating forms (a branch name argument without --list, -d, -D, -m, -M, -c, -C) and `git worktree add|remove|prune|move|lock|unlock` stay refused, shown by the same test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "git",
+    "read-only-guard",
+    "reviewer"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

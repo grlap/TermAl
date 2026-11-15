@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-operating-procedure",
+    "revision_id": "e615fed4ecf248169666a0b53a1d1e88",
+    "previous": null,
+    "body_sha256": "2ae5dbc3777822fa9a3fc40af467d5d73e8177cdb77c54db08484c1fbfb6b813",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-25T04:51:39.747997600Z"
+    }
+  },
+  "body": "TermAl coordinator operating procedure: the canonical home for current coordinator rules, created 2026-10-25 by Fable2. It mirrors Engram rules-roles-and-council r7, MEMORY UPKEEP. Memory grants no authority. Older single-incident coordinator-* memories remain as history; fold current guidance in here when one is next revised.\n\nMEMORY UPKEEP (Greg DIRECT to Architect3, 2026-10-25: \"jezeli dostaniesz raport bledow wspolpracy, zmien reguly\"; follow-up: \"i upewnij sie, ze inni je otrzymali\"; relayed in TermAl mailbox 63096d00 #23):\nOn a collaboration-failure report, inspect the facts and correct the responsible operating rule without another request from Greg. Revise its existing canonical memory; retain only current guidance in the body. Keep incident evidence and discarded assumptions in task notes/history. Check the current full readback and communicate the correction to affected agents. Verify its effect on the next real handoff. Preserve Greg's decisions and reserved authority. Retire ended workarounds and update references; each workaround names its retirement item.\nCoordinators convey relevant corrections to affected active coders when a concrete incident requires them, using the complete current rule.\n\nREPORTING (applied 2026-10-25): report a memory, tracker or config write only after the tool's actual success response and a readback. Never report intended revisions."
+}

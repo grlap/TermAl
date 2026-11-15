@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-direction-crate-split-2026-11-03",
+    "revision_id": "1fe0be891511456abce6e42ce5a50867",
+    "previous": "96121c4cec35435695eb40a1b6f1183b",
+    "body_sha256": "b05258a9eec40539b40bd9c6b6a171393611d9e6d090ec0264e75b5969c840ce",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-03T06:41:41.221717400Z"
+    }
+  },
+  "body": "Greg's direction on the crate split, 2026-11-03, relayed verbatim by Engram::Asistant in TermAl mailbox 588693a8.\n\n#121 (06:35Z): „Ok. To bedzie następna rzecz po poprawkach.” Splitting the backend into smaller Rust crates is the NEXT work stream, once the current fix queue has landed.\n\n#125 (06:41Z), the GOAL: „Bardziej chodzi nie o zysk kompilacji a testy. Crate miały by unit testy. Termal main unit testy i integration tests(cięższe). Można by je uruchamiać równolegle.” The primary objective is test structure and parallel execution, not compile time. The target shape:\n- per-crate unit tests;\n- main-crate unit tests kept separate from the heavier integration tests;\n- isolation boundaries for shared resources;\n- a safe parallel-run plan that runs no test twice and still runs every needed integration test;\n- measured wall-clock time.\n\nHow it is being handled:\n- The spike w-ae109290885c (Termal::Architect2) produces the executable plan. Fable2's preliminary draft went to Greg in #124, labelled as a hypothesis.\n- The team proceeds autonomously after the fix queue."
+}

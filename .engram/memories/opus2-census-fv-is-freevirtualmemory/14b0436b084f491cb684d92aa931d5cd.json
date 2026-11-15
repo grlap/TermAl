@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-census-fv-is-freevirtualmemory",
+    "revision_id": "14b0436b084f491cb684d92aa931d5cd",
+    "previous": null,
+    "body_sha256": "08e25247065f444f0db89c616cf8d8234aba1f549c2bdd8dde0719efb1db2927",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T07:50:42.859293900Z"
+    }
+  },
+  "body": "Integration-owner trap (Opus2, 2026-11-14 07:51Z, my own slip). The Central memory budget's \"FV\" is the raw Win32_OperatingSystem FreeVirtualMemory, in KiB: the value every owner reports in its census. It is NOT FreePhysicalMemory. My PowerShell census had read FreePhysicalMemory and called it FV, which reads about 3-4 GiB LOWER (07:51Z: FreePhysical 18,631,944 vs FreeVirtual 22,541,184 KiB). Census command: `$os=Get-CimInstance Win32_OperatingSystem; $os.FreeVirtualMemory` (and report FreePhysicalMemory separately only if it is useful). Floors are compared against FreeVirtualMemory: cold 25,165,824 KiB (24 GiB), rule (b) 23,068,672 KiB (22 GiB), LLM spawns 16,777,216 KiB."
+}

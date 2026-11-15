@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-wake-parked-on-landing",
+    "revision_id": "a64a217ecb824f9ebd2d34b2683b6c98",
+    "previous": null,
+    "body_sha256": "d319c3ba2c586c178ba8deabf7b4d0b854bdb74988e7601d85a11c3e8821ccc2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T06:24:18.140944300Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-17 06:26Z; my own miss). When I tell a worker to \"park until X lands\", I write X → [workers] into the current queue memory at that moment. When X lands, I wake EVERY worker parked on it in the same turn I record the landing. On 10-16 about 20:00Z I parked three clean-reviewed packages \"until train-3a lands\": Sol-a7bb w-e803, Sol-03d4 w-2634 and UI w-7db7. They then sat idle for about 10 h, until I found them by accident through a mailbox sequence gap. Audit check: termal_list_mailboxes, then look for any worker whose latest message is THEIRS and says READY or WAIT with no reply from me after it."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-2026-10-28-evaluations-on-remote-hosts",
+    "revision_id": "6a82c5d2b8b04d42bf7faaf9409233a3",
+    "previous": "6fb9c5ac9436425ebd3dc224c8d8b7a9",
+    "body_sha256": "28d1cdc9c4707816b03ad905076c21d84c03c00f876b09f225dc6c87420de42d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-28T01:11:45.293186800Z"
+    }
+  },
+  "body": "Greg's word, relayed by Engram::Advisor (TermAl mailbox b9d13887 #2247, 2026-10-28T00:57:25Z). Greg, verbatim: 'chciałbym aby ewaluacje były przeprowadzane na maszynach remote'. Advisor's statement of its effect, verbatim: 'To znosi wcześniejsze wstrzymanie formalnych ewaluacji acceptance dla bieżącej kolejki. Organizujcie je na Windows B i/lub Macu, zapisujcie evidence bound do dokładnego drzewa/builda i zamykajcie tylko po spełnieniu acceptance. Lokalny wynik nie zastępuje wymaganej zdalnej obserwacji.'\n\nEffect: the earlier hold on formal acceptance evaluations is lifted for the current queue. Evaluations are organised on Windows B and/or the Mac. Evidence is bound to the exact tree or build. Items close only when acceptance is met. A local result does not replace a required remote observation.\n\nThis grants no commit, push, install or restart.\n\nRevision: Greg chose the council's hybrid (Engram::Advisor → TermAl b9d13887 #2256, 2026-10-28T01:10:51Z), verbatim: 'Greg: TAK, akceptuję rekomendację rady — hybryda teraz dla obecnej kolejki. Windows B/Mac wykonują testy i obserwacje na dokładnym drzewie/buildzie; niezależny centralny ewaluator zapisuje werdykt w głównym store na podstawie zweryfikowanych hashami dowodów. Kryteria wymagające typowanego wyniku zdalnego pozostają otwarte, bez skrótów. Uruchomcie kolejkę ewaluacji.'\n\nThe council recommendation is on Engram w-bc25336d4389, and it adds staleness rule R7: a remote observation counts only for the tree or build it names."
+}

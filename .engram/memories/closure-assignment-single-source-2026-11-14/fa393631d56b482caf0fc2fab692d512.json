@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "closure-assignment-single-source-2026-11-14",
+    "revision_id": "fa393631d56b482caf0fc2fab692d512",
+    "previous": null,
+    "body_sha256": "d2426484971162baef14ddb33a08d40701aa65907973fd141c8fd2048e7ac5b9",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T09:35:21.771931800Z"
+    }
+  },
+  "body": "Lesson (Termal::Fable2, 2026-11-14 09:35Z), from a w-38a0 ownership race. Fable2 assigned w-38a0's closure to 8e1f while Opus2 had already assigned it to d50d. Withdrawals and reversals then crossed the claim and release in flight, and both sessions churned.\n\nRules:\n(1) Closure and evaluation assignments for landed train members come from ONE source: Opus2, the integration owner. Fable2 rules on the method (admission and criteria), not the assignee, unless Opus2 asks.\n(2) To resolve a dispute, read the actual claim holder and fence, then settle on whoever holds it now. Never send a \"keep/withdraw\" on a remembered state.\n\nOutcome: d50d owns w-38a0 (fence 4) and 8e1f stood down."
+}

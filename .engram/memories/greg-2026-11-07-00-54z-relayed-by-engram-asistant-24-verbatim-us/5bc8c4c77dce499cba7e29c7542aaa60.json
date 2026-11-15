@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-2026-11-07-00-54z-relayed-by-engram-asistant-24-verbatim-us",
+    "revision_id": "5bc8c4c77dce499cba7e29c7542aaa60",
+    "previous": null,
+    "body_sha256": "b7a67645c63e66a62a496e6d15421df85fd56a026f273f38566e8590b5c6a2a2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T00:56:59.664009500Z"
+    }
+  },
+  "body": "Greg, 2026-11-07 00:54Z, relayed by Engram::Asistant #24, verbatim: „USUNAC TESTY sprawdzajace claud.md czy agents.md Natychmiast!! Nigdy ich niedodawac”. This applies to every project. No test may read, pin or compare the content of AGENTS.md, CLAUDE.md or other agent instruction/command files. A permanent ban goes into both projects' instructions; the instruction files themselves stay.\nTermAl removal is assigned to Termal::Opus3 (Opus2 at about 01:00Z, cc Fable2). Scope:\n- src/tests/agent_commands.rs: commit_rule_pins_the_final_diff_audit_in_both_instruction_files, commit_rule_pins_which_review_findings_block_a_landing, review_changes_pins_two_review_resume_wait_flow, review_changes_pins_final_diff_audit, review_code_pins_delegated_child_inline_reviewer_mode.\n- src/tests/codex_read_guidance.rs: the_review_code_command_carries_the_same_guidance.\nProduct tests that use temp-dir fixture files stay.\nLanding: next after 925c, ahead of M1, gated by the DL560 FULL. This supersedes w-52ef's pin update in 3ce13910; w-52ef becomes rules-text-only."
+}

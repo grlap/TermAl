@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "integration-carrier-closure-route-2026-11-10",
+    "revision_id": "c4b1c517cdbc4af2b1e2f9e169b7862b",
+    "previous": null,
+    "body_sha256": "a4ac0da0115d3ff1dab058953b361ba6e33a061e57edd714dc09c759847ff62b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-10T22:09:01.420820900Z"
+    }
+  },
+  "body": "How an integration carrier (combo item) closes under evaluation, learned 2026-11-10 (Opus2; w-b785 done 3/3, w-9219 crit 3 failed).\n1) The evaluator needs the claim's NAMED root to have a passing, eligible, REGISTERED committed-input run at that root's current HEAD. The DL560 FULL on the test ref does not count: same tree, but a different commit and claim.\n   Cheapest route, no cargo slot: in the named root, run `cd ui && npm ci --no-audit --no-fund` (15-35 s; ui/node_modules is ignored, so the root stays clean). Then, from Claude in one call:\n     pushd \"<root>\" && node scripts/test-launcher.mjs focused --input commit -- node ui/node_modules/typescript/bin/tsc -p ui\n   The host notice says \"not a recognized test runner; no Test record will follow\", but the run is TRACKED and eligible, and the evaluation request was ADMITTED (w-b785, w-9219).\n   Do NOT use direct `node vitest.mjs`: it has no verification kind, so the request is refused with verification_record_unclassified_stages (w-6e810a28b300).\n2) The install criterion must be written in the PAST tense: \"was installed ... a later landing's install may since have replaced it, in which case this binary is kept aside there\".\n   The present-tense \"is installed\" FAILS once the next landing installs over it: w-9219 failed on this after combo42's install.\n   Otherwise, evaluate and complete each carrier BEFORE the next landing's install.\n3) Order: holder notes for each criterion -> registered run in the named root -> termal_evaluate_acceptance in a LATER turn (criterionEvidence locators allowed) -> done with landing {commit, remote, branch, pushed_at}.\n   Re-name the root (termal_name_source_root) whenever a host notice says runtime_observation_scope_changed for that item."
+}

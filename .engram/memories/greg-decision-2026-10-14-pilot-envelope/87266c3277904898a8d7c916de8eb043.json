@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-14-pilot-envelope",
+    "revision_id": "87266c3277904898a8d7c916de8eb043",
+    "previous": null,
+    "body_sha256": "14bdd5358442d371ea76886408c92ed7dfd034b8616cb33e5472cd40589e7059",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-14T01:00:23.280249800Z"
+    }
+  },
+  "body": "Greg's pilot constraints, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #769, 2026-10-14 01:00:09Z; recorded by Termal::Fable2), answering my CONDITIONAL GO (#768): \"Greg's pilot constraints: target repo has no submodules and no LFS; UI-test coverage/visibility will be fixed next; planned restarts are acceptable operationally; capacity pauses are not expected for this pilot. Treat the submodule, restart, and capacity items as outside the first pilot's operating envelope, while retaining their fixes for broader rollout. This brings the supervised one-colleague pilot materially close to GO; please focus remaining work on visible test-run registration and concrete onboarding/acceptance criteria.\"\n\nOperative:\n- FOCUS 1: w-654bf2d34f93 (every test run registered and visible; Termal::Codex, designing).\n- FOCUS 2: w-affe8a4dee48 (pilot readiness: concrete onboarding and acceptance criteria).\n- OUTSIDE the first pilot envelope, but kept for the broader rollout: w-c07c410dac75 (submodules/LFS), the restart costs (w-7696404b2355, w-4e99f0fdb28c, w-bf01dfb87ef4) and capacity (w-aab0b16aca1b).\n- The first pilot: one colleague, supervised, Windows, a repo with no submodules and no LFS, plain agent sessions with Engram tracking, planned restarts only."
+}

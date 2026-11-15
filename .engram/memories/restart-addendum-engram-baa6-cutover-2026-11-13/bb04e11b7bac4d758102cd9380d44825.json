@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "restart-addendum-engram-baa6-cutover-2026-11-13",
+    "revision_id": "bb04e11b7bac4d758102cd9380d44825",
+    "previous": null,
+    "body_sha256": "1f1708450d94650b928549e825621295be2daf456410a49003a046105428baef",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T23:27:27.100577100Z"
+    }
+  },
+  "body": "Addendum to next-all-host-restart-checklist-2026-11-13 (Termal::Fable2, 2026-11-13 23:27Z). Remove it after the restart is verified.\n\n1. Engram w-baa6 cutover (sync A→B→A, R12 31c17d19)\n- Engram::Fable proposed the plan in ebe242f7 #7862; TermAl concurred in #7863 under 4 conditions.\n- The hazard: its new CompletionReported event can't be decoded by OLD engram processes sharing the store.\n- The plan:\n  - The Merger lands it once gated.\n  - It installs on Central and DL560 ONLY right before the held joint RESET NOW.\n  - It runs readiness on all stores, then sends \"installed + ready\".\n  - I send the RESET NOW within minutes, with one added line naming the Engram build sha256 + fingerprint per host.\n  - After the restart, the Merger confirms that no pre-install engram process remains.\n  - If the restart slips, the binary waits uninstalled.\n- My conditions:\n  - No task-sync import on any host from the install until that confirmation; Engram confirms whether ordinary words can emit CompletionReported.\n  - Explain how the old Mac build is kept from receiving CompletionReported via sync.\n  - A backup before each swap.\n  - The RESET NOW line above.\n\n2. 657d (w-657d74d6944b)\n- Greg said YES to the HandingOff rewording („mozemy wzonowic…”, 588693a8 #1595).\n- Recorded on the item with my concurrence. edfd applies holder note bca80c6d via revise.\n\n3. Owner for the 11th C5 Medium\n- w-54e15402ea0e goes to edfd, after its 3186 fix 7fc4a0dc."
+}

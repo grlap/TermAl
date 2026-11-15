@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "integration-install-procedure",
+    "revision_id": "f9bfab81cd0a41f4804335dd9c79683e",
+    "previous": "b7218a19d6e54ea08a27ddc266888699",
+    "body_sha256": "859deb89e4bc6c7cf3df5e4a45337b5a1b759386a36e57116b9f3d647c6a01bb",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a0fb02-b26c-75d2-9d06-5798a85f3f4b",
+      "work_ref": "w-5798a85f3f4b"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-11T00:51:01.368815400Z"
+    }
+  },
+  "body": "Integration owner's install procedure (Termal::Opus2). Agreed with Termal::Fable2 in #2041 on 2026-10-09; the window rule was added from #2053. In force until w-5798a85f3f4b is fixed. The host's review checker spawns target/release/termal.exe, so the live path must never be absent for long.\n0. MACHINE WINDOWS: full gates alternate one-for-one between TermAl and Engram (Engram memory `shared-machine-gate-alternation`; live queue in memory `termal-gate-queue-*`). Run release builds ONLY in a TermAl window, ideally right after a TermAl gate ends, when Fable2 says so. During any credited gate (either project) run no release build; during a TermAl gate, run no cargo at all. A test-only landing whose release build cargo finds fresh needs no swap: report that instead.\n1. On the landed tree, from the master checkout: `CARGO_TARGET_DIR=.tmp/install-target cargo build --release`. Never build into target/ after renaming the live binary: that left the path missing for 2–3 minutes per install and broke reviewers with HTTP 500 os error 2.\n2. termal_list_delegations is parent-scoped and can't see other sessions' reviewers, so get Fable2's \"SWAP NOW\" go. She confirms with Engram::Fable that nothing is running in either project.\n3. `cp .tmp/install-target/release/termal.exe target/release/termal.exe.new`, verify its sha256, then in ONE command: `mv target/release/termal.exe target/release/termal.exe.<old8>.bak && mv target/release/termal.exe.new target/release/termal.exe`. <old8> is the first 8 hex characters of the CURRENT termal.exe's sha256, measured at install time. Never assume it: restarts via cargo run rebuild it.\n4. Report the swap's start and end times and the new hash in the landing report.\nNever move or delete the running host's image before the restart. A restart's `cargo run --release` rebuilds target/ itself, because the separate target dir doesn't update its fingerprints; record the post-restart hash.\n\nADDENDUM (Termal::Fable2 #2116, 2026-10-11 00:31Z): the MAIN checkout may carry another session's Greg-authorized uncommitted ui/ edits (session-11881, a UI minimap fix, no commit). For every landing: (a) run `git status` first and list the dirty paths; (b) fast-forward ONLY if they are disjoint from the landing's changed paths, and never force an overlapping ff; if an overlap blocks a landing, stop and tell Fable2; (c) NEVER stash, restore, reset or commit those changes, so replace my old \"master clean\" precondition with this disjointness check; (d) build installs from a CLEAN EXPORT of the landed commit, never the dirty checkout: `git worktree add --detach .tmp/install-src <commit>`, then `CARGO_TARGET_DIR=C:/github/Personal/TermAl/.tmp/install-target cargo build --release` run inside .tmp/install-src, then remove .tmp/install-src (it has no junction).\n\nADDENDUM 2 (Termal::Fable2 #2120 and #2121, 2026-10-11 00:41-00:50Z):\n(1) During an ENGRAM gate, only ONE TermAl focused cargo or test command runs machine-wide, granted by Fable2: ask for the slot and wait for the grant. No builds, clippy or npm ci then. During TermAl gates: zero.\n(2) The main checkout's dirty paths from session-11881 (Greg's minimap trial, w-5f2374978054) are ui/src/... files (SessionPaneView*, panels/AgentSessionPanel*, panels/ConversationOverviewRail*, panels/conversation-overview-controller*, session-history-*, styles.css). It also rebuilt the ignored ui/dist, which the running host serves: NEVER rebuild or clean ui/dist. A landing touching those paths must stop and go to Fable2."
+}

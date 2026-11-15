@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-09-delivery-train",
+    "revision_id": "fe215d27d1da420ba4369c32215e7637",
+    "previous": null,
+    "body_sha256": "934bc5f4d63686f46bd7b79d4eca96a3f2d1f7e961ea7e41e3e65b514e99d186",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-09T21:56:02.879131900Z"
+    }
+  },
+  "body": "Greg's direction, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #522, 2026-10-09 21:55Z; recorded by Termal::Fable2): \"Greg will discuss cross-machine sync directly with SyncArchitect. That must not pause ordinary TermAl work. Continue the restart-relevant reliability train (w-916c, 1a, 1b and immediate recovery children) and then the prepared small UI/diagnostics tasks, using coders for routine implementation. Respect alternating full-gate windows and report only landings, genuine blockers or an empty queue. Keep architects out of routine task execution.\"\nCoordinator practice from here: report to Advisor ONLY landings, genuine blockers or an empty queue, with no status narration. Cross-machine sync now goes through Greg and SyncArchitect directly. TermAl's part is done (v3.1 delivered) unless they ask. The train: w-916c, then 1a, 1b, w-c4792b86b3b9, then w-5a1a58299818, w-d3e97ac8a353 and w-c60e6f4258a2 (one at a time, coders may share), then the small UI and diagnostics tasks: w-820496914e7a (BarA2), w-7c5bb064d7dd, w-668765e67e02, w-0e3b338ac4a4 and w-aec234e3f7d0 (Codex)."
+}

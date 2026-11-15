@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-persist-health-check",
+  "head": {
+    "state": "active",
+    "chain": [
+      "4bdb121823f24aeda57d19f14989480a"
+    ]
+  }
+}

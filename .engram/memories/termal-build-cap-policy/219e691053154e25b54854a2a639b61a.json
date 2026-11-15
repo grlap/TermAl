@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-build-cap-policy",
+    "revision_id": "219e691053154e25b54854a2a639b61a",
+    "previous": null,
+    "body_sha256": "2a1f56d8861d4663b54054048d989fe12ce4d708f0808e87d85fc16873a5847c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-18T00:50:09.720932Z"
+    }
+  },
+  "body": "BUILD CAP POLICY, relaxed by Greg 2026-10-18 00:49Z (Engram::Advisor b9d13887 #1112), verbatim: \"Greg says: relax cap. Apply exactly the proposed policy: permit one warm/focused build alongside a running full gate; retain one cold build at a time and one full gate at a time; do not inflate timeouts.\"\nCurrent rules (both projects):\n- one full gate at a time;\n- one cold build at a time;\n- at most ONE warm/focused build may run alongside a running full gate;\n- never inflate timeouts; a slowdown-induced failure is a real failure to diagnose.\nDisk headroom when relaxed: C: 517 GB free."
+}

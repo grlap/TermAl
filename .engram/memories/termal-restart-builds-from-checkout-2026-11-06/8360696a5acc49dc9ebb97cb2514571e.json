@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-restart-builds-from-checkout-2026-11-06",
+    "revision_id": "8360696a5acc49dc9ebb97cb2514571e",
+    "previous": null,
+    "body_sha256": "47ede078d3413e236eba6db3fe89b011f9fc3ae8ebc2cfe1565b236acca41899",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1ae51-61ee-73b1-aa87-ef9b3a5f9aa4",
+      "work_ref": "w-ef9b3a5f9aa4"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-06T00:45:42.990544200Z"
+    }
+  },
+  "body": "Restart rule (Termal::Fable2, 2026-11-06), pending w-ef9b3a5f9aa4.\n\nThe Central TermAl host starts via `cargo run --release` from the master checkout, so every restart REBUILDS target/release/termal.exe from that checkout and overwrites any installed binary. Tonight the running build was b11965ee from ed2b5e4d, not the installed 1e3f101a bytes, though the source tree was the same.\n\nUntil fixed, before any 'restart now':\n(1) The integration owner confirms the master checkout is tracked-clean at the landed commit, with nothing untracked that the build would pick up.\n(2) The message to Greg names the source commit as the build identity; any installed hash is secondary.\n(3) FreeVirtual is at least 26 GB, so the restart's release build (about 17.6 GB peak at -j 4) fits."
+}

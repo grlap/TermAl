@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "update-2026-11-06-13-43z-the-central-termal-host-was-restarted-o",
+    "revision_id": "b8452a16306244d3b6bc7aa01b5c6ade",
+    "previous": "2ef0fd85126a4a0a8d116492958531e5",
+    "body_sha256": "570fa78f79ad8c9ddb46a40cfa932bff6e981f550c4d17891bb7ebb27510d21c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T05:19:07.263942Z"
+    }
+  },
+  "body": "Named-root and committed-input behavior introduced by the recorded Nov6 ee2f21c6 rollout (not a statement of today's installed build): a registered launcher run matching two named-root entries for the same worktree in one session gets a loud refusal naming both entries, rather than a silent unbind (w-9200b26b7cb1). The rev5 committed-input reader refuses incomplete Git reads, including Git stderr on exit0, and pins core.longpaths=true/core.safecrlf=false per invocation on Windows (w-43ba19db0403). Own-current-binding release409 names the supported termal_name_source_root clear form (w-bc25de6bbe39). General practice: one live claim per named worktree; use the supported owner clear before reassigning it. Exact current APIs/contracts and task bindings decide applicability; historical host hashes and DL560 deployment state remain in revision1 and do not prove current runtime identity. No clear, release, rename, check, configuration or rollout is authorized by this memory."
+}

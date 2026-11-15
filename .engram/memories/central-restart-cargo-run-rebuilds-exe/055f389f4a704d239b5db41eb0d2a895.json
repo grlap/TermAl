@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-restart-cargo-run-rebuilds-exe",
+    "revision_id": "055f389f4a704d239b5db41eb0d2a895",
+    "previous": null,
+    "body_sha256": "01e29495c86358304d743b049fd9f10306452d351f5c0d1206d0d18c4d88d474",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T06:11:41.962638900Z"
+    }
+  },
+  "body": "Greg restarts the Central TermAl host with `cargo run --release` from the master checkout (seen 2026-11-07 06:03Z, Opus2 #4773). Cargo's fingerprint in target/release can treat the installed copy as stale and rebuild target/release/termal.exe in place, from master HEAD. When that happens, the running exe hash differs from the one the integration owner installed (06:06Z: b31c9ab9 instead of the installed d93351b9), although both come from the same source.\n\nAfter every restart, report the running exe hash read-only (pid, exe, sha) and name the source commit. Don't assume the installed copy is the one running. The install-target copy stays at target/install-target/release/termal.exe."
+}

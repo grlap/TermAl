@@ -1,0 +1,21 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-merger-model-2026-10-10",
+  "head": {
+    "state": "active",
+    "chain": [
+      "84663f67f09749fc81b81ffd748e10a3",
+      "e60aa2a1c62f421db7ae04e44b6518f7",
+      "c9289d8c783245539e1f888a12fe295a",
+      "fb8273fabd6f4343b0270276aa60ea13",
+      "7072af1e2da547d69e14d8b0606e05ae",
+      "054e569cb3284380b81b122ecd9afdfd",
+      "bb60d66117b0463da7fac1ac153d8483",
+      "2e445b109f4a41959bbf548b9ded5720",
+      "f9d3d42590b44627b2abe891d1932896",
+      "93a252afbd7b49df8467bf1a732bf725",
+      "8086f353caef4fbfbb9d0bd9928fb8c0"
+    ]
+  }
+}

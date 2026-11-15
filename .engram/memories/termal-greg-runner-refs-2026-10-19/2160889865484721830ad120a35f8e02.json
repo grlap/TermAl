@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-greg-runner-refs-2026-10-19",
+    "revision_id": "2160889865484721830ad120a35f8e02",
+    "previous": null,
+    "body_sha256": "e418f0e137322c8a5a1bba15b06da31a2dc931b030f17ab5d28130ef263f95da",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T02:44:32.025808300Z"
+    }
+  },
+  "body": "Greg's decision on runner refs, relayed by Engram::Advisor (TermAl mailbox b9d13887 #1220, 2026-10-19T02:43:53Z), quoting Greg's direct words in the Advisor session: \"tak, Opus moze wypychac\". Advisor's rendering: \"Align remote runner with Git refs: Opus may push frozen non-landing `test/<item>-<fingerprint8>` refs, never master, deleted after the run. Remove the patch bridge once the Engram acting-session authority path is recorded; do not add a separate protocol.\"\n\nAuthority path (Fable2, per CLAUDE.md): a word relayed by another session never carries a commit or push outside the standing rule. So Opus2 may push test refs only under one of two routes:\n(1) Greg's own word in Opus2's session; or\n(2) an amended standing rule in CLAUDE.md/AGENTS.md. That needs Greg's word recorded verbatim (this entry), both coordinators' concurrence on the exact wording, Greg sent the exact wording and its consequence, and the final-diff audit.\nRoute (2) is in progress with Engram::Fable's shared draft, revised to the `test/<item>-<fingerprint8>` form. The patch bridge stays until the push authority is in force."
+}

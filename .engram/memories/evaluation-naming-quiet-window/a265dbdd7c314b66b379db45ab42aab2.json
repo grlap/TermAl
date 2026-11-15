@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "evaluation-naming-quiet-window",
+    "revision_id": "a265dbdd7c314b66b379db45ab42aab2",
+    "previous": null,
+    "body_sha256": "64a2404d4883073a2d522386cb6e993bbdde17b3d0dd3e0ce6751e82310f9e9b",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a15431-7c90-7d63-96ca-33f4cde5413c",
+      "work_ref": "w-33f4cde5413c"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T15:35:18.627483100Z"
+    }
+  },
+  "body": "Interim mitigation (Termal::Fable2 with Engram::Fable, 2026-10-19 15:35Z), held until TermAl w-33f4cde5413c lands. An acceptance evaluation's naming token appears to be the store-wide canonical history revision, so ANY termal_name_source_root in the SAME store during an evaluator's window makes the submit fail with 409 'source root changed … no longer names'. That's four occurrences on 10-19. Mitigation: around every evaluation, the coordinator of that store declares a naming-quiet window (no lane names a root) until the evaluation records. Engram::Fable does this for the Engram store. TermAl's coordinator must do the same for the TermAl store around TermAl evaluations (M4, w-edb7 and so on): tell lanes 'no termal_name_source_root until X records'. If a holder's OWN journal is stuck (a kept same-path re-name doesn't reset it), the recovery is naming a DIFFERENT path under the same claim (Engram::Opus, w-1d0d, generation 1526)."
+}

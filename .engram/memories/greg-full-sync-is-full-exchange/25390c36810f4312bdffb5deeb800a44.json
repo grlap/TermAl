@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-full-sync-is-full-exchange",
+    "revision_id": "25390c36810f4312bdffb5deeb800a44",
+    "previous": null,
+    "body_sha256": "8c2779a4a48d3a6a9178a880df9c87cedb06b3b92a897996900aadc05bf59ce1",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T22:08:16.304889900Z"
+    }
+  },
+  "body": "Greg's direction (2026-11-07 22:08Z, Engram::Asistant 588693a8 #899), verbatim: „To jest duży task. Pełna wymiana.” This answers the question of whether Engram sync should carry verification records. Asistant's gloss: the scope is wider than planning task-sync and includes results and verifications between hosts. Don't limit the design to statuses, and don't assume a separate K3 transport is required. Preserve the actual provenance and semantics of results, and do NOT transfer active claims or live authority. Analyse the existing design (Engram git-task-sync.md, which today exports planning plus REPORTED outcomes only and never verification, gate, evaluation or observation records) against \"full exchange\", then order the scope in the existing items: Engram w-65fb79ead0c3 / w-42885a9ab4f4 / w-dd205a1454a3 / w-01a67dade6f5 / w-70c009dde0ec; TermAl w-358040469407 (G1–G3) and w-48c4a207f226 (K3, which may be superseded or reshaped). Engram owns the sync design; the TermAl design counterpart is Sol-03d4 (assigned 22:09Z)."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-keep-root-of-credited-check",
+    "revision_id": "4dd0012bae8445f5bb8d7226a78f3424",
+    "previous": null,
+    "body_sha256": "570b3d8afd9c2e94af204c8a9f533adfcae3294345821e90b17704cad870337a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T17:25:46.207017300Z"
+    }
+  },
+  "body": "Worker trap (Termal::Opus3, 2026-11-13 17:25Z, my own miss on e105). Never remove the worktree, or rename the named root, that holds an item's credited registered check while the item is still open, even when it's parked. After that, any evaluation is refused before spawning with `registered_check_root_rebound`: \"registered check <run> ... belongs to root <old> generation N; the current root is <new> generation M. Run a new registered check in the current root.\" A new worktree at the same commit does not help, because the generation differs. Under Greg #1547 there is no re-run for credit, so the item waits for the w-2ecb0cb4d6e6 fix. Keep the root until done; remove it only after done. Same family: w-70 and w-7845."
+}

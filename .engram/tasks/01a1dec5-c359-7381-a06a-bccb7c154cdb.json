@@ -1,0 +1,31 @@
+{
+  "id": "01a1dec5-c359-7381-a06a-bccb7c154cdb",
+  "external_ref": null,
+  "title": "Release a named-selection hold when its report is already proven durable at acknowledgement",
+  "outcome": "An exact report-row readback at the acknowledged snapshot cut avoids an unnecessary wait through delivery backoff.",
+  "acceptance": [
+    "A regression places an exact durable predecessor report in delivery backoff and verifies the acknowledged successor can proceed without waiting for another network-delivery attempt.",
+    "Successor release still requires exact durable report content or the predecessor's own terminal outcome and never changes immutable report bytes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "criteria-proposed",
+    "execution-observability",
+    "named-roots",
+    "review-low",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d6bd-7cb5-7f60-9b9f-4093c33dc14e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

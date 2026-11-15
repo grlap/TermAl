@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-nvme-stall-observation-2026-10-16",
+  "head": {
+    "state": "active",
+    "chain": [
+      "5b9a5f2fac8a445c9abc15186951b2a6",
+      "526e582e2e6a41e083ab96ada43db7f8"
+    ]
+  }
+}

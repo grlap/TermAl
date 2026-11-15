@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-09-cross-machine-engram-sync",
+    "revision_id": "79eaa78fe11d44f8ace08c38581b56f2",
+    "previous": "8e2befb4f7f443c3abfddcc3ede3a226",
+    "body_sha256": "37d499844ff2f4eff02cfe218eb8a7f372053b79f207e7b8647e64d9f52fcce2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-09T22:21:37.812589100Z"
+    }
+  },
+  "body": "Greg's direction, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #513, 2026-10-09 21:23Z; recorded by Termal::Fable2): \"Greg's direct direction: losing the read-only Beads fallback makes cross-machine Engram synchronization necessary. Engram is resuming its previously parked portable/cross-machine design as an explicit architectural decision. Please contribute TermAl host requirements: session ownership, writer admission, retained prompts, restart/cutover, UI visibility and failure modes. Do not implement or revive the Beads reader yet; send concrete requirements/risks to Engram::Fable via Advisor.\"\nHandling: Termal::Architect1 (session-8982) drafts the TermAl host requirements and risks; Fable2 reviews and sends them to Engram::Fable via Advisor. Implement nothing, and do not revive the Beads reader.\n\nCLARIFICATION, relayed verbatim by Engram::Advisor (b9d13887 #515, 21:25Z): \"Greg clarified the desired primary workflow: local work, then explicit GitHub push/pull between machines, like Beads. Please frame TermAl host requirements against that concrete transport and clear operator-visible exchange status. Assume sequential ownership/single active writer for the first safe version unless a simpler sound model is established; do not assume concurrent merge.\"\n\nNON-NEGOTIABLE REQUIREMENT, relayed verbatim by Engram::Advisor (b9d13887 #516, 21:27Z): \"Greg adds a non-negotiable requirement for the GitHub-backed Engram exchange: it must be explicitly configurable and optional. Local-only usage remains fully functional with no remote configured and no background network activity. Please include corresponding host/UI requirements: visible disabled/unconfigured state, explicit enablement and explicit exchange actions.\"\n\nSTATUS 21:37Z: TermAl host requirements v3, drafted by Termal::Architect1 and reviewed by Fable2, were delivered. Engram::Fable confirmed reading them in full (ebe242f7 #975); they supersede v2 and feed Engram w-8b9e6065a917 V2 (Engram Architect2 lead), which will answer the [Engram] decisions: writer and generation format, the non-active write refusal code, claim transfer, atomic apply or restore of a pull, and path-independent store lineage. RETENTION: copies are kept in .evidence/cross-machine-requirements/ (v2 and v3) until Engram's V2 lands as a docs draft; then remove them.\n\nMODEL CHANGE, reported 22:21Z by Engram::SyncArchitect (session-11355; TermAl mailbox 992d8a46 #1), relaying Greg's choice (not verbatim): \"Greg chose independently writable/offline hosts with external-agent task-text merge beside code\". This means:\n- no remote writer epoch, release, acquire or online admission;\n- sync imports planning and shared notes only;\n- claims, sessions, grants, retained prompts and private scratch stay local;\n- machine-qualified foreign provenance binds no local session or source root and earns no verification credit;\n- a stale or partial import is refused, and a live affected run basis is invalidated, reconciled or refused;\n- the main checkout exchanges task text, and worktrees share the local SQLite and omit .engram files.\nThe candidate spec is Engram's .worktrees/git-task-sync-spec-11355/docs/features/git-task-sync.md (design only). SyncArchitect asked for a TermAl host v4 DELTA from v3.1, covering architectural constraints only; Termal::Architect1 is drafting it. This supersedes v3.1's single-writer framing."
+}

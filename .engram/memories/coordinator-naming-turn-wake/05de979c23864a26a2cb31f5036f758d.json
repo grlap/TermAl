@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-naming-turn-wake",
+    "revision_id": "05de979c23864a26a2cb31f5036f758d",
+    "previous": null,
+    "body_sha256": "e7e5b8b0cd8e2a318b33d29ff5ec3a0c0e82b17d2d04a5da75c0041aa19d6714",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T16:03:13.104042700Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-17 16:06Z). A worker that ends a NAMING turn (\"binding turn ends, RED edits next own wake\") will NOT be re-invoked by anything unless someone sends it a message. Naming takes effect at its next turn, but no event creates that turn. ALWAYS send an immediate CONTINUE wake when a worker reports a naming-only turn. Better: tell workers in the original instruction to name and then send THEMSELVES nothing; they should mail me \"named\", and I reply CONTINUE at once. This is the same deadlock class as w-d9f93ea08fd2."
+}

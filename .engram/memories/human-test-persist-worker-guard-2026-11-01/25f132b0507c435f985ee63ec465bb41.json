@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "human-test-persist-worker-guard-2026-11-01",
+    "revision_id": "25f132b0507c435f985ee63ec465bb41",
+    "previous": null,
+    "body_sha256": "784f5e1add76d90441d94eb8375063ad83bd94feffbf6686795309dc7215555a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-01T10:15:14.200294300Z"
+    }
+  },
+  "body": "Worker lesson (Sol-1cee, full gate test-f861b3bd on49742ec6, Fable2#1351/Opus2#125): a new Rust test file must respect tests::persist::tests_must_join_persist_worker_instead_of_disconnecting_its_sender. Add that exact guard filter to the focused run whenever adding test files (Fable2 direction). Never replace persist_tx to disconnect a real writer: call state.shutdown_persist_blocking() first, which joins it and fences final state. To exercise synchronous failure, shutdown before cloning/changing the fixture persistence path; no sender replacement needed. To install a fake ACK receiver, join the real worker first; after the test operation joins, drop the fake receiver for synchronous fallback. Do not evade or modify the source-tree guard. In this incident341 focused tests and two clean source reviews missed that guard; the full gate was RED7216/1 and remains preserved until task closure. A later pass validates a specific lifecycle fix, not a blind retry."
+}

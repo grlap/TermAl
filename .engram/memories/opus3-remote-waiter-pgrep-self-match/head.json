@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus3-remote-waiter-pgrep-self-match",
+  "head": {
+    "state": "active",
+    "chain": [
+      "f86b807ece904ad7ab110244a9de5f9e"
+    ]
+  }
+}

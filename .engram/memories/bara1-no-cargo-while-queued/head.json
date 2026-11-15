@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "bara1-no-cargo-while-queued",
+  "head": {
+    "state": "active",
+    "chain": [
+      "f9c8f819116f48a290d104c8bb9af898"
+    ]
+  }
+}

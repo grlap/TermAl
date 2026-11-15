@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "slot-priority-from-fable2-4801-on-2026-11-07-under-greg-s-eo-fir",
+    "revision_id": "69258ede64f745ec9731f1a15c7f782a",
+    "previous": null,
+    "body_sha256": "8c537e1ec51c47dfb787b04ebabe6cc9f735b55427ca6e5a64ea1cd37c81f459",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T06:47:13.481633300Z"
+    }
+  },
+  "body": "Slot priority, from Fable2 #4801 on 2026-11-07, under Greg's EO-first word.\n- Central: every free slot goes FIRST to the EO lane, in this order: w-7ebf (30 s bound), then w-37d9's checks, then w-8f4c, if it needs Central. Phoenix and the other work come after.\n- DL560 Codex 7: an EO focused job or EO evidence transfer goes ahead of the non-EO focused jobs (w-2050, w-f5bb).\n- Don't stop a non-EO run that's already running; let it finish."
+}

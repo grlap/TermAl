@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "gate-worktree-is-merger-only",
+    "revision_id": "09c67f7f52034affb373e5ee4e09289c",
+    "previous": null,
+    "body_sha256": "0e5c0c8e618981347f4faf8c0428c4b07787885c1abd1e49e0429a16cb7518a3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T04:14:48.592622Z"
+    }
+  },
+  "body": "Rule (Termal::Fable2, 2026-10-23 04:16Z), from w-33f4 gate test-344041c2. Once a coder hands its worktree to Merger with READY and Merger gates it in that same worktree (as with wt-eval-token-11465 for BarA1's w-33f4), the coder must NEVER write there again; its follow-ups go in a separate worktree. A Claude Edit or Write leaves <file>.tmp.<pid>.<hex> during its atomic save, so the host refuses the gate's credit and the tested tree may change. Diagnosis: Get-CimInstance Win32_Process for the pid gives the claude.exe --resume id, which maps to a TermAl session through /api/state. Merger checks the gate tree against the reviewed tree after the run and relaunches only from restored, reviewed content."
+}

@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "coordinator-no-placeholder-sends",
+  "head": {
+    "state": "active",
+    "chain": [
+      "9eda7012bb674350b5f678c4ed25cb7f",
+      "02477bb12ce34bf5a966fe42ef960261",
+      "56bbf46e0eee4da2af7107973a5b0fd8"
+    ]
+  }
+}

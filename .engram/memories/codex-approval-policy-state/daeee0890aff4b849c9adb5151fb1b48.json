@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "codex-approval-policy-state",
+    "revision_id": "daeee0890aff4b849c9adb5151fb1b48",
+    "previous": "77f4d2eb33ef42008df06683bdb59510",
+    "body_sha256": "ac6a046a9328a817abb03a84bde4be00a58fa1e2acdfd75d68d47e041356a8d6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T02:38:35.335281500Z"
+    }
+  },
+  "body": "Codex approvalPolicy state, 2026-10-17 02:29Z (Greg-directed via Advisor #959–#962): ALL 16 Codex sessions are on \"auto-approve\". That's Engram 9860, 11323, 8581, 11312, 11334, 7899, 11330, 7305, and TermAl 12328 (the pilot), 7422, 11865, 12095, 12415, 12327, 11881, 12326. The P0 fix aeacfe69 is live on host 8cfe02d2: Codex on-request, with the host answering routine tagged MCP calls under guards at request time. The earlier \"never\" containment (#922–#942) is LIFTED. The pilot on Sol-edfd was clean (no cards, all routine calls completed). If a prompt waits for a human again, report it to Greg and consider reverting just that session to \"never\".\n\n02:38Z addition: Engram 12329 (Coder-VerificationWorkspaceSol, the new Git-sync B/P0 pilot lane) was switched to auto-approve at Engram::Fable's request (#2505), consistent with Greg's design. NEW Codex lanes should be created with approvalPolicy auto-approve, or switched on request."
+}

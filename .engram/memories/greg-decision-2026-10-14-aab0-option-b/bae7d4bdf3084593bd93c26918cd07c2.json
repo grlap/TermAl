@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-14-aab0-option-b",
+    "revision_id": "bae7d4bdf3084593bd93c26918cd07c2",
+    "previous": null,
+    "body_sha256": "13575e7ae6107e3a401e40b811c2f8c70a377601999720f78bf6e5525c34ef59",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-14T00:11:54.118696600Z"
+    }
+  },
+  "body": "Greg's decision, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #760, 2026-10-14 00:10:59Z; recorded by Termal::Fable2): \"Greg's earlier direct decision resolves w-aab0 option A/B: use B, automatic Resume for a capacity-paused session, with minute-scale backoff 2 min, then 5 min, then 10 min (not second-scale retries). Keep unknown delivery/manual-reconciliation cases manual; do not replay an uncertain request. Record the precise retry ceiling/terminal behavior in the item, consistent with the existing recommended bounded policy, and proceed with implementation under normal gates.\"\n\nItem: w-aab0b16aca1b, criteria revision 2: 8 attempts (2, 5, then 10 min each, about 67 min in total), ±20% jitter, terminal state \"Paused: provider at capacity, retries exhausted…; Resume to retry\". Holder Sol-edfd (session-12328) proposes any option-B wording change, and Fable2 concurs before the revise."
+}

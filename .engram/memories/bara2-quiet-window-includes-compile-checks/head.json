@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "bara2-quiet-window-includes-compile-checks",
+  "head": {
+    "state": "active",
+    "chain": [
+      "fd596661e90947029867398dcfc3a66d"
+    ]
+  }
+}

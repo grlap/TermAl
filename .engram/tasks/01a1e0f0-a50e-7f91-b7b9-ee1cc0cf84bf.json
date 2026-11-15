@@ -1,0 +1,32 @@
+{
+  "id": "01a1e0f0-a50e-7f91-b7b9-ee1cc0cf84bf",
+  "external_ref": "engram:w-57964ed89617",
+  "title": "Persistence delta selection and materialisation proportional to dirty sessions and delegations, not a full scan plus a linear find per tick",
+  "outcome": "Persistence delta selection and materialisation proportional to dirty sessions and delegations, not a full scan plus a linear find per tick",
+  "acceptance": [
+    "Persistence delta planning selects changed sessions and delegations through a dirty index, and materialises each by key, with no full scan of every session and delegation on each plan and no linear find per changed record. Per-tick work on an idle host is proportional to dirty records.",
+    "Unchanged, removed, racing and tail-trim semantics are preserved. A behavioural regression with a large history (thousands of sessions) and few changes asserts bounded work.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed tree that lands."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "greg-reported",
+    "performance",
+    "scaling",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a171bc-9eb2-7012-b3d2-e2972bb21221",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

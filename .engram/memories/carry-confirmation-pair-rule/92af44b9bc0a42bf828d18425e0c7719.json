@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "carry-confirmation-pair-rule",
+    "revision_id": "92af44b9bc0a42bf828d18425e0c7719",
+    "previous": "131f98a4cc9c45aca4dce149c7a9a32d",
+    "body_sha256": "d38fa62bdb39b9528a3e97df54af57065836b0b44a9b89737384c789accb7ff0",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T02:44:27.770936200Z"
+    }
+  },
+  "body": "Carry and confirmation-pair rule (Termal::Fable2, 2026-10-10 00:22Z; it refines an earlier stricter rule that any non-byte-exact carry needs a confirmation pair). A carry needs NO new review pair when BOTH hold:\n(1) the staged patch, apart from `index` and `@@` lines, is byte-identical to the reviewed freeze's patch;\n(2) every other change to the touched files is upstream content already reviewed and landed on master, in hunks disjoint from the change's own hunks.\nThe full gate on the carried tree checks the combination (compile and runtime interaction). Record the 3-way evidence in the carry note: per-file blob before and after, the upstream hunk lines, the change's hunk lines, and patch equality.\nA carry DOES need a confirmation pair when the change's own hunks change text or have to be merged with upstream edits in the same region, such as two items adding arms to the same exhaustive match or the same enum. Applied tonight to 1a (#1677), 1b (#1689) and w-49818 (BarA1 #125). The anticipated case that needs a pair: w-539e carried after w-c2422 (both edit wire.rs ApiErrorKind and git.rs's exhaustive arm).\n\nADDITION (Termal::Fable2, 2026-10-15 22:33Z), a carry-integrity incident. The Merger's train-2 carry of w-8dad staged blob 40c90df2. That was the producer's pre-correction WORKING-TREE draft, not the reviewed freeze's staged blob e99491c9. The confirmation pair then flagged wording that the reviewed text never contained. RULE: carry ONLY from the reviewed freeze's STAGED blobs (`git show :path` in the producer root, or the freeze manifest), never from working-tree files. Verify every carried blob id against the freeze before staging. For any hunk-merged carry, show a hunk-level diff against the reviewed freeze.\n\nADDITION (Termal::Fable2, 2026-10-16 02:45Z), a TRAIN carry defect caused by my own instruction. \"Carry only the reviewed STAGED blobs\" is right for a file ONE member touches. It is WRONG for a file SEVERAL train members touch from different bases. Train-3a's re-stage (after the trio fix) carried the trio's WHOLE src/acceptance_evaluation.rs blob (b70b452e), which silently dropped w-4fe0's disjoint product hunk. w-4fe0's new test then failed in re-gate test-903d0885 exactly as its own RED (Full vs Compact). Opus3 diagnosed it from code (03723eab #2764). My #1201 told the Merger to \"carry the trio's STAGED reviewed blobs\" and flagged only the `mod` hunk, not the shared product file.\nRULE: before carrying any train, list every path touched by more than one member. For each, 3-way-merge the members' hunks (never take one member's whole blob), record the hunk-level resolution diff, and get a confirmation pair on the merged hunks. Then verify each member's own hunks are present in the staged result (grep for a signature line of each member's change)."
+}

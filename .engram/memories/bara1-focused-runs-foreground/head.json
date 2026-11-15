@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "bara1-focused-runs-foreground",
+  "head": {
+    "state": "active",
+    "chain": [
+      "4b21b460154b4b1e97dcd6b77937c204"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-no-cause-without-measurement",
+    "revision_id": "b1d59bc2f997482c8bd2921fb6d86919",
+    "previous": "320c8098043f4fecb4e6f0d0474db0e3",
+    "body_sha256": "3b598630f6fcc41f076c9e2fb12f993d6e07cc6375d404d44b6bf4259904c724",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T05:10:15.896070600Z"
+    }
+  },
+  "body": "Termal::Fable2 lesson (2026-10-31, from Greg's correction in Advisor #2891). When Greg reports live symptoms (lock holds, latencies, stalls), never name a cause or a request path from source reading alone. In my note bd6c17d6 on w-e2972bb21221 I attributed a state_accessors.rs:950 hold to /api/state, but summary_snapshot() has dozens of callers, and Greg's Network capture showed session tail fetches. Before naming a cause:\n(1) Confirm the RUNNING build identity, and check the code path at that build, not at master.\n(2) Enumerate the complete caller set for the logged site.\n(3) Correlate with concrete requests and timestamps.\n(4) Label anything unmeasured as inference.\n(5) If the diagnostics can't name the caller, propose a diagnostic addition rather than guess.\nReport to Greg as \"measured\" vs \"inferred\", never mixed.\n\nRelated allocator-attribution lesson preserved from the Nov4 queue (historical observations now on w-59353b93eea4): a Rust global-allocator experiment does not measure SQLite's separate C malloc path. A null result for mimalloc therefore excludes only the tested Rust-allocator effect, not every allocation-related cause. Keep thread-count/NUMA comparisons explicitly limited to their observed samples; do not promote one run per configuration or a test-only persistence path into production causality. This preservation authorizes no experiment and does not relax Greg's stop-timing instruction."
+}

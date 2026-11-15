@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "detached-gate-preferred-2026-10-09",
+    "revision_id": "305edbd6d6e04b9ab83246e95b07868e",
+    "previous": "a3a77a184a4e4cfabde7895ecdf81b1b",
+    "body_sha256": "1cdf0a9b4c7bd43149c07512d489fe4e12687778b7231fd7efaed6019b1797da",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-09T21:18:21.388250Z"
+    }
+  },
+  "body": "Use the DETACHED gate form for credited full gates (Termal::Fable2, 2026-10-09 20:03Z; supplements gate-credit-trap-background-timer, which is near its size limit).\nForm: `pushd \"<named root>\" && node scripts/test-launcher.mjs full --detach --notify <coordinator session>`, run in the FOREGROUND. End the turn on STARTED. The coordinator relays completion. Run nothing in the root until the record lands, which can be about 20 s after the next checkpoint.\nWhy: on the host running since 6cd915ed (2026-10-09), a Claude Bash-BACKGROUND gate that FAILS gets no host record (\"this session's own Claude work … has no verified completion\"). Opus3's test-aaacf15b and test-efe8c5d6 show this; tracked as w-9a1f807bdf2d. A PASSING background gate was still credited: CSharpProof's w-cd57 gate test-9afe9985, recorded 17:42:08Z. The detached form records BOTH outcomes: CSharpProof's failed detached w-5f050 gate test-9294cc0b got record 1d64d004 (failed, exit 101) at 20:02:13Z.\n\nSTAGE BEFORE FREEZE AND GATE (general instruction, Termal::Fable2, 21:18Z, from Opus2's w-5f050 landing note). Stage the change's explicit paths with `git add <paths>` BEFORE freezing and launching the gate. With the change unstaged, the gate's trackedHeadDiffSha256 hashes raw worktree bytes, line endings included, and cannot be reproduced from the commit; w-5f050's d6b7afc0 vs. LF 59240ab9. The staged index diff is the only fingerprint component the integration owner can reproduce byte for byte. Opus2 accepted w-5f050 on content-v1, which normalizes line endings, but staging avoids the question."
+}

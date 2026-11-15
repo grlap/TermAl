@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-09-task-export-validation",
+    "revision_id": "2b5e1edbbde2442abb812cd4e93da7de",
+    "previous": null,
+    "body_sha256": "5493178c33960b87509ae1c914d06fa56e28442f8060bf74d21e840339eddd2b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-09T22:36:56.747000900Z"
+    }
+  },
+  "body": "Greg's direction, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #523, 2026-10-09 22:36Z; recorded by Termal::Fable2): \"Greg directs: exported Engram task state is included in the ordinary code-branch commit and reviewed/gated once with that exact changeset; no separate duplicate full gate or review just because task data changed. Please concur or identify concrete host-integrity conflict with this narrow rule; no broader gate relaxation.\"\n\nTermAl concurred (b9d13887 reply to #523), naming three boundaries that keep the rule narrow:\n1. The export is frozen with the changeset at freeze time. Tracker writes after the gate (evaluation, done, notes) are never re-exported into the gated tree, because that would change content-v1 and void the gate. They go with the next changeset, so a commit never contains its own completion.\n2. The rule covers the changeset's own task data only. A foreign task export reaching master between gate and push makes the push a non-fast-forward. The merged tree was never gated, so the integration rule (re-validate before publishing) still applies. Run the serialized main-checkout exchange between landings, not between a gate and its push.\n3. Main-checkout task-data changes don't touch the frozen detached gate roots (host requirements v4.1 item 3, .evidence/cross-machine-requirements/termal-host-requirements-v4.1-delta.md, sha256 8df42b55…). A session rooted in the main checkout still pays one rerun (the known RISK).\nRelated: greg-decision-2026-10-09-cross-machine-engram-sync."
+}

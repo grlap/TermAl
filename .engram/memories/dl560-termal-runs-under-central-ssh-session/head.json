@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "dl560-termal-runs-under-central-ssh-session",
+  "head": {
+    "state": "active",
+    "chain": [
+      "a320ac2ca0b3406e870961f333d90eee",
+      "e459c68336d845959e4c2cbdf119f085"
+    ]
+  }
+}

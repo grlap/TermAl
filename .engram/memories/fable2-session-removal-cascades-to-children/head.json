@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "fable2-session-removal-cascades-to-children",
+  "head": {
+    "state": "active",
+    "chain": [
+      "b4265f3d42a048fcbb1144ef65bc110b",
+      "c4a5d0034c1440cd979eab003343b385"
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "dl560-s4-exceptions-2026-11-11",
+  "head": {
+    "state": "active",
+    "chain": [
+      "c2abf5f2414c4e50bf579dc2b3c5cc96",
+      "8adafe71a4134e5ea4f26bfd1da9c517",
+      "d37a20545f89476ba4df34eba9b29518"
+    ]
+  }
+}

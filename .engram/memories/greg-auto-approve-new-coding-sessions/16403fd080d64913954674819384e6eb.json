@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-auto-approve-new-coding-sessions",
+    "revision_id": "16403fd080d64913954674819384e6eb",
+    "previous": null,
+    "body_sha256": "39995ed144032c8fa2a6f78ec2c78fddbc824c27d56c7de7b40e2cf4a217ee29",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T21:41:44.240896100Z"
+    }
+  },
+  "body": "Greg's direction, relayed by Engram::Advisor in TermAl mailbox b9d13887 #916 (2026-10-16 21:41:16Z), verbatim: \"Greg direction: create new coding/implementation sessions with TermAl auto-approve mode enabled, so routine MCP prompts do not park a lane. Apply it to future eligible sessions and record the effective mode in the dispatch. This does not broaden task scope, commit/push/restart authority, or permit unapproved external actions. For already-created Codex 7305, do not assume this changes its pending prompt; Greg will handle/cancel it in UI.\" How to apply: whenever a TermAl coordinator or worker creates a NEW coding or implementation session (termal_spawn_session or a root created for a lane), enable TermAl's auto-approve mode if the tool offers it, and state the effective approval mode in the dispatch message and the item note. Read-only reviewer children keep writePolicy readOnly; this doesn't change that, and it widens no other authority. Existing sessions are unchanged. Context: TermAl w-b0638788f33e (a Codex root parked on an MCP elicitation)."
+}

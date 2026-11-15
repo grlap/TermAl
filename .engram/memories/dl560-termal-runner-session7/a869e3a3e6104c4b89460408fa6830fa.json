@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "dl560-termal-runner-session7",
+    "revision_id": "a869e3a3e6104c4b89460408fa6830fa",
+    "previous": null,
+    "body_sha256": "18d0e5bd1c8c4b51d2da1ac5e670c1a107e562b669b1b3c5d90ea48fa9069cfc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T04:10:19.464081900Z"
+    }
+  },
+  "body": "Third DL560 TermAl runner: session-7 \"Codex 7\", address host:e83d08f4-22ac-4655-a84d-941fc0eeb4f1::session-7, relay principal relay-principal-94fa42b050239fa6e9d6432acf68a384d094c3c393e6d3646c1f2896cb800fde. Created 2026-11-04 about 04:09Z by Fable2 through POST /api/sessions on DL560's loopback API, on Greg's „Tak”, relayed by Engram::Asistant, to my proposal naming danger-full-access. Same settings as Codex 6. First check passed at 04:09:45Z with no approval prompt. Its mailbox #1 is the consolidated current brief, including polling mailboxes while jobs run; unlike Codex 6 and Codex 3 it had that rule from the start. See dl560-termal-runner-session6 for the routing lesson: check a runner's state before routing."
+}

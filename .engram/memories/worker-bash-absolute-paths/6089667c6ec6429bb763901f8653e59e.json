@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "worker-bash-absolute-paths",
+    "revision_id": "6089667c6ec6429bb763901f8653e59e",
+    "previous": null,
+    "body_sha256": "a89dcb7000373b2add723b60e1cac4a254efd355cb81372a0da631027677a1ea",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-11T23:30:38.697054100Z"
+    }
+  },
+  "body": "Worker lesson (Termal::Opus3, 2026-10-11 about 23:22Z, learned from my own slip). The Bash tool's working directory does NOT follow the worktree you are coding in. After a `pushd` in a background run, or a context reset, it can be the MAIN CHECKOUT (C:\\github\\Personal\\TermAl). A node or shell script with RELATIVE paths (`src/state_inner.rs`) then edits the shared master tree. I inserted one line into four clean main-checkout files that way and removed it within minutes (Fable2 verified: only UI2's approved ui files remained dirty). Rule: every Bash command or script that writes files uses ABSOLUTE paths (C:/github/Personal/TermAl/.tmp/<worktree>/…) or `git -C <absolute worktree>`. Write multi-line scripts to a .cjs file under .tmp with absolute paths inside, instead of `node -e` (shell escaping also mangles regexes there). Before a write, `pwd` costs nothing."
+}

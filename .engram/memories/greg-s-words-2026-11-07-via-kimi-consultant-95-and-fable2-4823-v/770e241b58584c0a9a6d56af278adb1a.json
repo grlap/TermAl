@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-s-words-2026-11-07-via-kimi-consultant-95-and-fable2-4823-v",
+    "revision_id": "770e241b58584c0a9a6d56af278adb1a",
+    "previous": null,
+    "body_sha256": "ac2e3bc5138fba65b934aa02c04f37aa0b02394bc97b537c2d8fc47b5b05672b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T07:38:03.692012100Z"
+    }
+  },
+  "body": "Greg's words (2026-11-07, via Kimi::Consultant #95 and Fable2 #4823), verbatim: „Wszystko, czego nie ma w uzgodnionej definicji credit, nie może blokować credit. Może zostać zapisane jako diagnostyka.” With #759: „Zadnych nowych warunków”.\n\nEvery review brief for Unified EO candidates must carry BOTH quotes verbatim. Reviewers judge correctness only against the agreed credit definition:\n- the declared command is the first tool action;\n- the host observes the result, and the artifact is the verdict;\n- the full source_id at S0 equals the one after, with a dirty tree allowed;\n- the existing identity, claim, root, store and committed-declaration checks;\n- the w-24a7 C3 start and chronology checks.\n\nAnything else may at most be recorded as a diagnostic, never as a refusal. A finding that asks for one is out of scope and is not a Medium."
+}

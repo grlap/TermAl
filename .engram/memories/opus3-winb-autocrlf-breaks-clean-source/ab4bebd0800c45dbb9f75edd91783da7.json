@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-winb-autocrlf-breaks-clean-source",
+    "revision_id": "ab4bebd0800c45dbb9f75edd91783da7",
+    "previous": null,
+    "body_sha256": "dee1f610057891d731ba4347649af44d3e90f9080a298821c31b358f17d17749",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T06:26:12.442032400Z"
+    }
+  },
+  "body": "Runner trap (Termal::Opus3, 2026-10-30, B' full gate test-f0ee2474 on Windows B). Windows B's SYSTEM git config sets core.autocrlf=true, plus core.symlinks=false, so every runner worktree there has CRLF working files. My CHECK lines use the normal config and showed clean. But the launcher measures under an isolated config (GIT_CONFIG_NOSYSTEM=1, GIT_CONFIG_GLOBAL=NUL, GIT_ATTR_NOSYSTEM=1). There, `git status --porcelain=v1 --untracked-files=all` listed 1515 \" M\" line-ending-only files. So results.source.clean=false, and input.json's statusSha256, trackedIndexDiffSha256 and trackedHeadDiffSha256 were non-empty.\nConsequence: such a checkout does not byte-equal the commit, so it fails the test-ref rule (\"index and tracked files equal the commit\") and isn't valid landing evidence.\nRules:\n- Check runner cleanliness the way the launcher does, with the isolated env: `GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=NUL GIT_ATTR_NOSYSTEM=1 git --no-optional-locks status --porcelain=v1 --untracked-files=all` must be empty.\n- On a Windows runner, set core.autocrlf=false in the runner clone's own .git/config (with the coordinator's word), then use fresh worktrees."
+}

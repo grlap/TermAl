@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara2-no-shell-in-another-sessions-root",
+    "revision_id": "f7b8a48d63fa476aa4c3409efb53e896",
+    "previous": null,
+    "body_sha256": "bd500edb1bc1f9f7a7b62951ae4de3942fb22adeb7d9ef71be73d78be3c2a82f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-28T17:24:42.509200900Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA2, 2026-10-28 17:27Z; my own slip while preparing a B16 slice). Never run a shell command with another session's worktree as the working directory, or aimed at it with `git -C`. That includes read-only commands like `sed`, `cat` or `git status`. Its runs may be in progress, and a command from another writable session in that worktree can refuse their credit; git status can even refresh the index. To read someone else's root, use only the Read and Grep tools, which run no commands there. If a command does land there, tell the coordinator and that session at once, naming the commands and their times."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "ui-design-rulings",
+    "revision_id": "06c522c51e1f43e9ba8e4f42a19c75cf",
+    "previous": "7417b3637358433e80b03d1d0aabffdf",
+    "body_sha256": "60f1dd91796cb9ec61c3d29c82e451b1f510444a8018624215dc1f6efab016d1",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T04:52:53.075884800Z"
+    }
+  },
+  "body": "UI design rulings not written elsewhere.\n\nTranscript follow (Greg's design ruling, 2026-09-03, epic tm-7cu): one scroll state per pane, FOLLOW or STAY.\n- FOLLOW keeps the bottom in view on every transcript growth (messages, command and delegation cards, streamed text, the live-turn card), uniformly. STAY never moves on content changes; growth is signalled by New response only.\n- Only user gestures change the state: scrolling up gives STAY; reaching the bottom, End, clicking New response or sending a prompt gives FOLLOW. Content changes, resize, viewport clamps, hydration, reconnect and tab switches never change it.\n- The state is per workspace tab, persists across switches and is never re-derived from geometry.\n- There is no exception for approvals or user input: signal, do not scroll.\n- Resolve scroll bugs against this spec; do not patch them one by one. The current mechanics are in docs/features/session-virtualized-transcript.md.\n\nTheme token: --surface-white (and its strong and soft variants) is a translucent highlight wash, especially in dark themes. It is not a base surface, despite its name. Never feed it to canvas-rendered or portaled opaque surfaces such as Monaco editor and minimap backgrounds. Use a base token such as --panel-strong, and force alpha 1 where the consumer cannot rely on DOM compositing.\n\nHistorical Work-view simplification, Greg via Engram::Advisor b9d13887 #833 (2026-10-15), preserved before retiring queue snapshots. Full authoritative source is w-270c4b1fa8bc note7f2636741e0540a99a5cb5a7f7dbeb10, coordinator revision3: \"existing Updated sorting is sufficient. Simplify the UI plan. Do NOT build a new closed-specific Engram API or a separate Closed-order UI surface. Revise w-270c4b1fa8bc to fetch the full Work set automatically via the existing --all cursor in serial pages of 200, then use the existing lifecycle data/filter and Updated sort to show closed work. Preserve minimal redraw: append/incrementally merge each page into the virtual store, one request in flight, no wholesale list replacement; maintain selection/scroll. Expose Closed through the existing lifecycle filtering path if it is not already reachable.\" This is the attributed design decision, not a new implementation instruction or permission; later agreed changes, such as byte-bounded pages and local filtering, retain their own task contracts."
+}

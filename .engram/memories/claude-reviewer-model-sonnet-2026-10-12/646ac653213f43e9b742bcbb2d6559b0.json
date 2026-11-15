@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "claude-reviewer-model-sonnet-2026-10-12",
+    "revision_id": "646ac653213f43e9b742bcbb2d6559b0",
+    "previous": "1a2c011400e34812b226d11655d8e679",
+    "body_sha256": "61130f94714cf57d289d05c93fa2ff97eee6d4680850926171407b42f7c4c85c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T15:24:01.154845700Z"
+    }
+  },
+  "body": "ACTIVE AGAIN on 2026-10-19 at 15:25Z (Termal::Fable2). Engram::Fable reports a Claude reviewer delegation (model opus) failed with \"You've hit your weekly limit · resets Oct 24, 4pm (America/Los_Angeles)\", which is Oct 24 23:00Z. The rule until then:\n(1) Spawn Claude /review-code children and Claude acceptance evaluators with model \"sonnet\". Sonnet is still the Claude vendor, so it satisfies the pair's \"one Codex and one Claude\". The limit was per model on 10-12, when Sonnet worked.\n(2) If Sonnet is refused too, Kimi stands in for the unavailable Claude reviewer under CLAUDE.md's commit rule (Greg 2026-10-15). Never for both reviewers of a round, and record the refusal text on the item.\n(3) Root Claude sessions running opus may also hit the limit. If the integration owner (Opus2) stalls, pushes wait. Report a stall to Advisor; no agent switches another session's model.\nHistory, 2026-10-12: Claude /review-code children on the default model ran as \"opus[1m]\" and failed from about 16:04Z with the weekly limit (reset Oct 17). Spawning with model \"sonnet\" worked (session-12249). Some root sessions briefly hit it too."
+}

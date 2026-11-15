@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "linux-check-via-wsl-launcher",
+    "revision_id": "463a04255d07499fb5ff5552411a0b73",
+    "previous": "cf324698404d4769b9f0f7da64cc2336",
+    "body_sha256": "d2af1a291f997d4ad0a304bbb30493b61ea3357d0616ced91fb899737d59fe0c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-03T01:37:55.912090100Z"
+    }
+  },
+  "body": "Native Linux check through the maintained Windows launcher, proven by Sol-03d4 on 2026-11-03 (Fable2 request2231). Run from your own named root. Exact successful PowerShell command for this lane:\nnode scripts/test-launcher.mjs focused --input commit -- C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -NonInteractive -Command 'wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/github/Personal/TermAl/.tmp/wt-remove-turn-gating-12327 && CARGO_TARGET_DIR=/mnt/c/github/Personal/TermAl/.tmp/linux-wsl-target-12327 cargo check --bin termal\"; exit $LASTEXITCODE'\nFor the test configuration replace the inner command with cargo check --bin termal --tests. Substitute your own source-root path and distinct repository-local .tmp/linux-wsl-target-SESSION target; do not share another lane's build lock. Ubuntu already has cargo at /home/greg/.cargo/bin and gcc; no installation/global change. Windows git supplies identity: WSL git cannot read the C:/ pointer in a Windows linked worktree.\nWhy the wrapper: direct launcher wsl.exe -d ... fails127 before Cargo because the Windows owner quotes every option, which WSL treats as a command: /bin/bash -d command not found. Exact quoted-option .NET probe reproduced it. Bare pwsh.exe is absent from the launcher PATH (UNRUN); the absolute existing Windows PowerShell path above works and exit LASTEXITCODE preserves native Cargo status. No output filtering pipeline required.\nProven production PASS: test-3d51611c-867d-4262-99f5-41652dc1fa7c END01:32:40.310Z, clean commit0c383ae852bc939e834ce4b3aa75d9648b92e9a0, before/after f89ac76e8212f230bc07087f2fee4069770d2957f8a808f202d4a1257d083f51. Same wrapper previously reached real Unix E0282 on ca3 (f8091dcf); explicit Result<Output> fixed that compile defect. Compile checks are evidence, not recognized Test records. Test-configuration compile8a378c1e is still pending at publication.\n\nFollow-up: native test-configuration command cargo check --bin termal --tests also PASS via this exact wrapper, test-8a378c1e-be7f-4f6c-a4c3-b8e061a939f0 END2026-11-03T01:36:35.609Z on same clean0c383ae8, before/after f89ac76e8212f230bc07087f2fee4069770d2957f8a808f202d4a1257d083f51 matched. The Unix E0282 repair is independently owned by w-91c2674a7e58, candidate314f180c; its exact form is `let result = (|| -> Result<std::process::Output> {` on the Unix twin only. Fable2233 requires c20 to match that hunk and land after314, not duplicate a competing compile fix. These compile PASS results do not claim executed Linux tests or a landing gate."
+}

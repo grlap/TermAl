@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "codex-approval-policy-state",
+  "head": {
+    "state": "active",
+    "chain": [
+      "77f4d2eb33ef42008df06683bdb59510",
+      "daeee0890aff4b849c9adb5151fb1b48"
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "integration-install-procedure",
+  "head": {
+    "state": "active",
+    "chain": [
+      "d14a7f30d6cc44bd9b3b7dee11217a6e",
+      "07bcf1e62e2749dfac731acbc12f757d",
+      "b7218a19d6e54ea08a27ddc266888699",
+      "f9bfab81cd0a41f4804335dd9c79683e",
+      "b209c3b3f72e43fd80b800a70cd799ca",
+      "f1290669e954400aa6b6e6a6851c3aef"
+    ]
+  }
+}

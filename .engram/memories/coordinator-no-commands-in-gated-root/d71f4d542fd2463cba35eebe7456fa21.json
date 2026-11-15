@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-no-commands-in-gated-root",
+    "revision_id": "d71f4d542fd2463cba35eebe7456fa21",
+    "previous": null,
+    "body_sha256": "e0cfeb4691a7860ef1b39fb445efc716d3f3b2d8026116fbc01ab7cdd2e18e33",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T15:40:55.597668100Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-17 15:45Z, my own miss). Never tell a worker to read, diff or inspect ANOTHER session's worktree while that worktree has a gate or check running. Even a read-only `git` or `pwsh` command whose cwd or -C points into that root counts as \"another writable session reached its worktree\", and the host refuses the gate's credit. Cost: TRAIN-4's carrier test-9cc1d81e PASSED 5/5 but earned no credit (Sol-a7bb ran pwsh in .tmp/wt-train4-… while it ran), so a full rerun was needed. To compare against another tree, give the worker OBJECT ids (commit, tree, blob) and have it run git in its OWN root."
+}

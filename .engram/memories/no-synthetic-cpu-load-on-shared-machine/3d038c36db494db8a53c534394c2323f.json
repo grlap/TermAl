@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "no-synthetic-cpu-load-on-shared-machine",
+    "revision_id": "3d038c36db494db8a53c534394c2323f",
+    "previous": null,
+    "body_sha256": "0264307611377d31f1aa02249c2efc41512d53020f2ace61fe37c069c02a1fb2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-09T17:03:16.329692800Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-09 17:03Z, learned from my own approval). Do not approve synthetic CPU-load diagnostics (busy-loop \"burner\" processes) on the shared machine. At 16:59-17:00Z, a diagnostic I approved for Termal::Opus3 ran 72, then 144, node busy-loops for about 40 s. In that window the TermAl host's control API timed out (30 s): my mailbox acknowledgement and Engram::Advisor's mailbox read both failed (w-e19cc72d5c89). The machine was already overloaded with credited gates. To test a load hypothesis, use evidence already on hand (gate timings, per-test durations) or preserved logs, or run the single test alone. If contention must be reproduced, do it only when no credited gate or reviewer is running in either project, with both coordinators agreeing, and keep it short."
+}

@@ -1,0 +1,28 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-w3fe8-zero-legacy-integration-check",
+  "head": {
+    "state": "active",
+    "chain": [
+      "7f932375a017405ab32a54498c126e8d",
+      "35a04332cefa408da6c546820dd73a40",
+      "7ab26ca254c64405b3f8719ee7999ed9",
+      "0a97d83416c041cea1d3405b91082d5c",
+      "928d0921ff6641fb970d50c9c7e818c8",
+      "d27805f995d54e76a59f7123a0fab454",
+      "d073759f842642e5a053082fd86c6388",
+      "2ac35814d0dc49ccafab2163b32660ba",
+      "d296bf1bbd3a4b019a402947863000af",
+      "72fb6db2abb244349c09b1dfe49d8978",
+      "dfafe729eebc4b04b5ce43e2a0da87fd",
+      "a8ec94acefd440bda40f51a7dace62ec",
+      "7d7bd3390cec46b39d7885c55c9a9a2c",
+      "624c14d9fd8f47f5b20880867f280cfb",
+      "8d9b7cddaa9d4939b4c3e599b67641ba",
+      "2739036998454c27b07423db6d8248a4",
+      "dac3169d3b8a46d3a63b56250e3bb486",
+      "a55b5049b2914496824163e42dc6f53d"
+    ]
+  }
+}

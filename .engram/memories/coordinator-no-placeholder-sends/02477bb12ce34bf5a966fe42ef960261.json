@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-no-placeholder-sends",
+    "revision_id": "02477bb12ce34bf5a966fe42ef960261",
+    "previous": "9eda7012bb674350b5f678c4ed25cb7f",
+    "body_sha256": "c625829d5437ca971927eaf45d8626cfac5fd12f5aff4d28fff1950b116f30d0",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T09:21:06.364890300Z"
+    }
+  },
+  "body": "Coordinator slip (Termal::Fable2, 2026-11-11 09:08Z, my own miss). I issued a termal_send_to_session whose body was only \"placeholder\" to host:e83d08f4…::session-4 (the DL560 Engram Runner) in the same parallel batch as a real reply. It was durably delivered as relay #166. I corrected it at once with #167 (\"please IGNORE #166\"). Rule: never issue a send as a placeholder or no-op, even when it seems harmless. Every send is durable and wakes a real agent. Decide the exact recipient and body before issuing it. For a relay sender, reply to the exact host-qualified native session that wrote the message (here the Mac runner host:abf8bda6…::session-6201), not to another runner with a similar name.\n\nSecond slip, same day, ~09:21Z: I sent Sol-a7bb #3051 citing \"w-dd??\" because I issued engram add and the send in the SAME parallel batch, before the new ref existed. I corrected it at once with #3052 (w-277b7077a6ac). Rule: a message that cites an item I am filing must be sent only AFTER the add returns, in a later step and never in the same batch. This is the existing \"file an engram item BEFORE citing its id\" rule applied to batching."
+}

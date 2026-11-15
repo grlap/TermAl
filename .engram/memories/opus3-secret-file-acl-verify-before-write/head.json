@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus3-secret-file-acl-verify-before-write",
+  "head": {
+    "state": "active",
+    "chain": [
+      "3aa9faaf6d0a4a259b3eed7523a2ceb6"
+    ]
+  }
+}

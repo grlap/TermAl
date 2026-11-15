@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "credit-refusal-w8678-landing-rule",
+  "head": {
+    "state": "active",
+    "chain": [
+      "c19a9bb4ab424d4facb17f172f1c56e3",
+      "13f66cfbee6e47c6a3026cfc9d670148"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-engram-busy-write-readback-2026-10-29",
+    "revision_id": "2e4db59c14f94b0f89387cca5885d263",
+    "previous": null,
+    "body_sha256": "b7f01c2ce79d16acb73e7c8ce10ba35c679e46e2c17045ecdb1e6ecaadb3ea0a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T01:14:49.328869800Z"
+    }
+  },
+  "body": "Workaround for every TermAl lane, from 2026-10-29 01:15Z until Engram w-b1ae95ab86d7 is fixed. An Engram write (note, gate, claim or update) that returns `busy_budget_exhausted` (SQLite begin_immediate, acquisition_not_started) MAY HAVE COMMITTED. READ BACK first, with `show … notes` or the matching read, and retry only if the record is absent. Never blind-retry: that writes duplicates. Evidence: Merger2's carrier note c9e4b719d46b4b0fa89a493d6ea69025 persisted at 01:11:04Z although the tool reported the busy error (Merger2 891850c6 #917/#918). Filed by Engram::Fable as Engram w-b1ae95ab86d7 (P1), ebe242f7 #5185."
+}

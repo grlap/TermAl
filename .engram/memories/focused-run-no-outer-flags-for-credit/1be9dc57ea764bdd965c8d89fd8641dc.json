@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "focused-run-no-outer-flags-for-credit",
+    "revision_id": "1be9dc57ea764bdd965c8d89fd8641dc",
+    "previous": null,
+    "body_sha256": "0681f861f3223b084366a18bec978596172fa5f6804dc01740f66b93dd1557e2",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a11144-f6a7-7742-8d83-fec83085cff0",
+      "work_ref": "w-fec83085cff0"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-31T12:50:32.656548Z"
+    }
+  },
+  "body": "Interim rule (Termal::Fable2, 2026-10-31 12:50Z), from Termal::Coder's w-fec83085cff0 diagnosis (note 03622570), proven from source at 972bc08c. The host's focused-check recognition (engram_focused_node_checks.rs:4-18) and the refusal helper (:176-212) require the exact argv prefix `scripts/test-launcher.mjs focused -- <command>`. Any launcher option before `--`, such as --notify, --item or --detach, makes the run unrecognized. It then gets NO host credit AND NO refusal: registered only, with observedAt null and verificationRecordIds empty.\nUntil the fix lands, a local focused run that must earn credit uses the bare form only: `pushd \"ROOT\" && node scripts/test-launcher.mjs focused -- <cmd>`. --notify and --item are fine only for runs where credit doesn't matter, such as remote runner evidence or release builds. Retire this memory when w-fec83085cff0 lands."
+}

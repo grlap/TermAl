@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "root-session-queue-resume-route",
+  "head": {
+    "state": "active",
+    "chain": [
+      "32c8bb165c964aea9c9f1d6c323a6914"
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "w-18a1-install-order-engram-first",
+  "head": {
+    "state": "active",
+    "chain": [
+      "cf7f90da8efd4fb18856199999100243",
+      "d9f83b88769347e4a6908cb492b469fa",
+      "6adb60f8c09146adacd6acd6cee2c64e",
+      "14d00b4e2fd5400a8d0f2c9eeb13d4b1"
+    ]
+  }
+}

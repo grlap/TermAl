@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-root-slot-recycling",
+    "revision_id": "5e563a1007614756b1f2ed64197ed002",
+    "previous": null,
+    "body_sha256": "6c52b6ab26b2453ede967a382bd2621cfb7213c9489434a5a162bc0c146c8f14",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T17:14:53.010266900Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-17 17:17Z). The global 64-slot named-root table fills because completed items keep their naming. A completed item cannot be own-cleared (claim recovery is refused), so only w-52222f575b81's audited release can free it.\n\nRULE for every lane and every train:\n- After the item's credited checks and evaluation PASS, and BEFORE `done`, while the claim is live, make ONE own-clear: termal_name_source_root(work=<item>), path omitted.\n- Then `done`. For train members, only after the push.\n\nToday's stuck examples: w-44a9, completed by Merger at 17:07Z with its naming kept; w-b201 (BarA1 g784); train-2's w-89ea and w-9fdf.\n\nThere is no read-only root listing API until w-52222 lands. A 409 body lists only project, work, generation and reason. CheckIn builds inventories from 409 bodies plus Engram show."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "engram-pinned-binary-current",
+    "revision_id": "03f2bbe9ce3943e58224edfd09397cfa",
+    "previous": "7237e2d8e02041289173b2d354b7f8f7",
+    "body_sha256": "335d44c57341db5c9a4fb6f4a49da048d4ca0db87ecad721f42576d6b962454a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-05T06:25:13.068885100Z"
+    }
+  },
+  "body": "Current Engram binary for pinned TermAl live runs (Fable2, 2026-10-05 about 06:26Z; supersedes eb17bcf3 for 92fc3d0, 690c5acf for bd2c5af and 2d0f7204 for 3abe2b2). Engram 08a04e0 (L-F1, w-63757ebca393: src/mcp.rs split) is installed: exe sha256 bcec822ae785fc97a16fcb66efae3f4205ded4f6cd6c60d33a29f008b7c23c13, build_fingerprint 081842231d48c5f4adac88d847e6098dc2b46ad5a66775171d07719327ca1eff (install notice: Engram::Fable, TermAl mailbox ebe242f7 #668). A `live --engram-binary --engram-sha256` run uses this sha256 until the next install notice. 08a04e0 is an output-preserving refactor: MCP initialize and tools/list metadata are unchanged, and there is no schema change. Behaviour since bd2c5af comes from 92fc3d0: opening a brand-new store is atomic; a cold store refuses as a typed busy (SQLite BUSY), which TermAl maps like any SQLite error; next's changes list same-session changes made as another kind or by another actor. Running MCP sessions pick up 92fc3d0 at the next TermAl restart (not urgent)."
+}

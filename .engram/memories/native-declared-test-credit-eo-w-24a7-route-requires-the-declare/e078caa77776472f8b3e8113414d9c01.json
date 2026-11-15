@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "native-declared-test-credit-eo-w-24a7-route-requires-the-declare",
+    "revision_id": "e078caa77776472f8b3e8113414d9c01",
+    "previous": null,
+    "body_sha256": "105796939981b8113309e572ea8adf493747e720bc89e23fa3d191e6759dc41d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T06:22:27.432084400Z"
+    }
+  },
+  "body": "Native declared test credit (EO, w-24a7 route) requires the declared command to be the FIRST tool activity of a fresh turn. A mailbox read, an MCP call or any other tool call before it makes the run ineligible (docs/features/execution-observability.md).\n\nSo never send a RUN GO as a mailbox body that the agent must read first.\n- Brief the agent in advance (prep message): when a wake shows a specific topic, run the exact declared command as the first tool call, and read the mailbox afterwards.\n- Then send the trigger with `\"$TERMAL_CLI\" mailbox send ... --topic \"C1-RUN-FIRST <id>\"`. The topic appears in the wake prompt itself.\n\nLearned 2026-11-07, from the Questly Linux run 1 on w-e072. It passed 1820/0 but was ineligible."
+}

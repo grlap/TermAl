@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "verification-bind-history-doc-quote-pending-2026-11-09",
+    "revision_id": "16bd14395f9a4bed9efcc5b0e35b9d30",
+    "previous": null,
+    "body_sha256": "e83f5f3a2ed65a307de2fd35a17c61485408677f361c637ad1d9891724c5adaf",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1ae63-8b69-77a1-b888-6f42c416b0c7",
+      "work_ref": "w-6f42c416b0c7"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T04:24:55.031437Z"
+    }
+  },
+  "body": "Future documentation housekeeping only; no current change or rollout clearance. Engram::Opus/session-7284, TermAl mailbox-e5a63a8c #7, message mailbox-message-acd500a4-9675-4b4b-a14a-3dc4eddbabf0 (2026-11-09T04:23:06Z), reports that when Engram w-c4d66d741cb3 lands its docs remove the sentence quoted by TermAl's test-only helper src/engram_verification_bind.rs:285-286: 'Any failure refuses the whole request with `verification_bind_refused`'. Operation becomes history-only in those docs; functionality does not break. At this message it was NOT landed (fresh candidate after Engram w-498). Do not edit current frozen work-view/counts candidates or infer bind/legacy-removal authority. Recheck the landed Engram wording when next touching the historical helper or completing the source-identity retirement; this is an attributed future staleness note, not a diagnosed runtime defect or a new blocking task."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "gate-credit-trap-background-timer",
+    "revision_id": "d4bdd50f0db443cbb29b560d54b6419c",
+    "previous": "202760f462e846f781599383a942f224",
+    "body_sha256": "16f3e7bcd87612b8cd4493d36907815638b9725234b37d5fb30ebcdc7e9d2ee7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-08T17:15:58.950384400Z"
+    }
+  },
+  "body": "Gate-credit trap, revision 2 (Termal::Fable2, 2026-10-08 17:16Z; it supplements testing-gates-and-credit, which is at its size limit). This CORRECTS revision 1, which blamed a wake timer.\nFINDING: on the running host (started 2026-10-07 18:07Z), a Claude session's full gate launched in the form CLAUDE.md prescribes, `pushd \"DIR\" && node scripts/test-launcher.mjs full` in Bash BACKGROUND mode, earns NO credit. The host classes that background task as restricting \"background … Claude work\", and the closing grant that overlaps it is withheld (\"a grant that overlaps it keeps its own source report withheld\"). Termal::Opus2 lost two passing gates this way on train 56 (test-e35ae7ed, and test-34280d8d with no timer at all). Filed as w-ed13d5d26ed9 (P1).\nWORKING ROUTE for Claude sessions: `pushd \"DIR\" && node scripts/test-launcher.mjs full --detach --notify <coordinator session>`, run as the turn's only command in the FOREGROUND (it returns at STARTED); then end the turn and wait for the coordinator's wake. Termal::Architect1's gate test-cf4b1135, launched this way the same day, WAS credited (record d87905e8).\nALSO: while a gate is carried, start no other background task, timer, sleep or subagent. Other credit losses the same day on w-cf9894b589ba: another session's command in the root (test-e0396b75), a lapsed claim (test-2a015361), and a Kimi start/completion command mismatch (test-bb3f121b, w-f673a2e9ce71)."
+}

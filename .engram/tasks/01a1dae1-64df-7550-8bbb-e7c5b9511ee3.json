@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed the concurred quote-free task-sync data-branch rule and reconciled its authority lists in AGENTS.md, CLAUDE.md and both command files. Independent post-landing evaluation a15da0317f2b43d5865118b699170599 is fresh3/3PASS onrevision3 at53baf7b8/tree2f11477b. Medium+ reviewclean, exactTREE FULL and independentfinal-diffauditPASS quoted inholderpacket396345ac. Originalgrant/correction/Gregnoticesrecorded. No newcheck or admissiontest. Completinginrequirednextturnafterverdictread; ownedcleanworktreecleanup follows.",
+    "completed_at": "2026-11-15T05:07:21.691503Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

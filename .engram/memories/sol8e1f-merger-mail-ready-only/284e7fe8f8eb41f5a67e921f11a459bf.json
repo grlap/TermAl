@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol8e1f-merger-mail-ready-only",
+    "revision_id": "284e7fe8f8eb41f5a67e921f11a459bf",
+    "previous": null,
+    "body_sha256": "afa5f393fc4067141cfda1c5f3e26fabd6572096ef8385894768cd31b95066df",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-25T04:04:02.142845600Z"
+    }
+  },
+  "body": "Routing instruction received by Sol-8e1f from Fable2/session-8112 on 2026-10-25T04:03:38Z, mailbox-f62b0593-82fc-4ee2-a638-0f32268e9102 #603 / mailbox-message-5def2ca1-a7ee-4dae-8452-78930dc72761, read in full. Greg DIRECT in Merger2's session, relayed verbatim: \"Coder powien cie poinformawac TYLKO WTEDY kiedy paczka jest gotowa do merge\". Send Merger2/session-14549 only completed READY-to-merge packages. Progress and coordination updates go to Fable2/session-8112; do not send Merger2 routine acknowledgements or progress. This grants no new coding, testing or landing authority. Existing new-fix STOP/conflicts-only restrictions remain."
+}

@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "source-identity-contract-2026-11-03",
+  "head": {
+    "state": "active",
+    "chain": [
+      "4fb53d4e60bb43e295e669a8aa001700",
+      "7ca6e286ba424ee2b2db3889a603cb0a",
+      "4e6ad1a719994a9c8ee095b58661acdf",
+      "64bef1392b3942cc9e670d8f9bca3be1",
+      "5adb7d9f31b543e9abb829283be994cd"
+    ]
+  }
+}

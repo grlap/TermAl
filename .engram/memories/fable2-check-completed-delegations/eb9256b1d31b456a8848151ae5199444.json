@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-check-completed-delegations",
+    "revision_id": "eb9256b1d31b456a8848151ae5199444",
+    "previous": null,
+    "body_sha256": "218a1c4a4afe0dc347b8b4c59b761363c13c34f47d8741ba8086dccb942fe365",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-03T07:25:15.261600700Z"
+    }
+  },
+  "body": "Lesson (Fable2, 2026-11-03 07:28Z). The Telegram md worker delegation (7b1578a1, session-15974, w-69bf) completed at about 03:14Z with candidate 597e2c37. It then sat unprocessed for about 4 hours across restart #3, because a worker delegation's completion does not arrive as mail and I never re-checked it.\n\nRule: after any restart, and at each status report, grep termal_list_delegations for my own completed worker delegations (parentSessionId session-8112), read each result, and hand the candidate to a Sol/Opus owner for carry, pair and FULL."
+}

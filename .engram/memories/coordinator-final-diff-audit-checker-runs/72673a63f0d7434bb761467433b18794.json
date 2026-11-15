@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-final-diff-audit-checker-runs",
+    "revision_id": "72673a63f0d7434bb761467433b18794",
+    "previous": null,
+    "body_sha256": "9194d5c672878d6e2cbfd360d568893131e53ac334a29dc6766bc8673f6e9f54",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-20T23:53:18.450107400Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-20 23:54Z, my own miss, caught by Engram's carry review: Claude fe804a35, Medium).\n\nA final-diff audit of authority text (/review-changes 412-466, condition (c)) is valid ONLY if the AUDITING coordinator itself does all of the following:\n1. Gets the holder's confirmation that no check is carried in the frozen root.\n2. Runs the COMPILED freeze checker BEFORE reading: `termal review-freeze-check ROOT MANIFEST EXPECTED_SHA256`. It must exit 0, with stdout exactly the independent fingerprint plus LF; keep stderr.\n3. Reads from the frozen worktree itself:\n   - `git -C ROOT diff --cached BASE` (plus the name-status form)\n   - `git -C ROOT diff` (must be empty)\n   - `git -C ROOT ls-files --others --exclude-standard`\n   - the --word-diff form\n4. Runs the passage script: whitespace-normalised, list and quote markers stripped, each changed sentence searched for in the concurred text; each removed passage judged.\n5. Runs the SAME checker again AFTER.\n6. Records: the checker and protocol version, base, root, manifest, fingerprint, both results, the governing messages (concurrence, the wording sent to Greg, his approval) and the script result.\n\nReading blobs via --git-dir from my own cwd, with no checker runs, does NOT close (c). That was my miss on Engram w-f2c3 (#4260); I redid it in #4263. A holder's own checker run doesn't substitute for the auditor's. The TermAl w-45bf audit (Engram::Fable #23) had the same gap, and a redo was requested at 23:54Z.\n\nScratch outputs go in TermAl .tmp/audit-*."
+}

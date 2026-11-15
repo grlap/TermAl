@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-2026-10-28-evaluations-on-remote-hosts",
+  "head": {
+    "state": "active",
+    "chain": [
+      "6fb9c5ac9436425ebd3dc224c8d8b7a9",
+      "6a82c5d2b8b04d42bf7faaf9409233a3"
+    ]
+  }
+}

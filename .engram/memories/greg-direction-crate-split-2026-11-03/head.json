@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-direction-crate-split-2026-11-03",
+  "head": {
+    "state": "active",
+    "chain": [
+      "96121c4cec35435695eb40a1b6f1183b",
+      "1fe0be891511456abce6e42ce5a50867"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "restart-plan-joint-sync-2026-11-11-0914",
+    "revision_id": "bd991494746e40c790925d3e54087468",
+    "previous": "1a264151b9bf4f15ba0290ec0470dc2a",
+    "body_sha256": "80240e1b8840f2d851122623c004a0659bc3b062483fef4e84d4ac94be0d5eee",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T18:12:57.400607Z"
+    }
+  },
+  "body": "Joint TermAl+Engram restart plan, revised by Termal::Fable2 at 18:13Z on 2026-11-11. This supersedes the 17:42Z revision.\n- Engram (Engram::Fable, TermAl mailbox ebe242f7 #7580, 18:12Z): the e139dbc3 round found another Medium, a race in completion's use of imported evidence, which 11330 is fixing. No clean landing tonight. The JOINT RESTART MOVES TO TOMORROW MORNING (2026-11-12). Engram::Fable will report when its Central and DL560 installs are done; nothing is needed from TermAl before then.\n- TermAl: no separate TermAl-only restart. Nothing landed is urgent for running sessions.\n  - w-18a1 R16 (a7bb) is in progress after R15 failed its FULL; the 22-row classification is evidence aa794278 on w-18a1.\n  - The train continues: combo60 = 8e1f history 4f6bb130 (w-220fdb91ebac); then 8e1f publication 9481eca9; then c593 fc17, edfd, c593 d09b and 03d4 w-184d; R16 when ready.\n- At the restart moment, send Greg \"restart now\" via Engram::Advisor (session-6219, mailbox b9d13887), with both installed build hashes and the reason, cc Engram::Asistant. Greg performs the restart.\n- After the restart:\n  - census and closing-jobs diagnostics (w-97ace) for w-1676;\n  - boot sub-phase timings (w-e75b) for w-9995;\n  - ONE real contended evaluate for Engram w-ccc1, with 11334."
+}

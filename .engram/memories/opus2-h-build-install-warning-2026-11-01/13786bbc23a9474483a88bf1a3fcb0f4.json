@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-h-build-install-warning-2026-11-01",
+    "revision_id": "13786bbc23a9474483a88bf1a3fcb0f4",
+    "previous": "99f42498f70445d78a53b5c15c95de68",
+    "body_sha256": "5bc4a9264c2cc1dbbc50eed7fbd4245f4a9cef9d1882c481e88a523102276ff3",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a0e6d3-c6a6-7fb2-b4d0-20b5d0be62f3",
+      "work_ref": "w-20b5d0be62f3"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-01T17:51:50.755566300Z"
+    }
+  },
+  "body": "INSTALL GUARD (Fable2 #2238 via Sol-edfd, 2026-11-01): before installing ANY TermAl build that contains w-20b5d0be62f3 (H, compact overview), Greg MUST be told first that loading the build migrates the database to H or H+A, after which older termal.exe binaries and the termal.exe.*.bak backups CANNOT open that database. So swapping the executable back is NOT a rollback. Recorded on the item (0e56f66a); Fable2 conveys it; the final READY must repeat it. No install or restart is authorized for an H build until that has been conveyed.\n\nUpdate (17:49Z, Fable2 #3690): H (f8c01c40, tree b9bffec8, base db3c46ee) is READY (Sol-edfd #81). Its one FULL is on the MAC, after w-3793's and w-ba8d's FULLs, by test ref; I asked Sol-edfd for the schema-1 freeze. Fable2 keeps H OUT of the restart that carries OFF and removal, so a rollback stays possible. My consequence, sent to Fable2 #3691: do NOT LAND H until the OFF/removal build is landed, installed and restarted, or until Greg has acknowledged the schema change, because once H is on master every later install contains it.\n\nH schema-1 freeze (Sol-edfd #84): a6675a01975e4a8129aef3621708abc95b52f7b05fff8e0d22962c612122088d, file .evidence/20b5-h-f8c01c40-schema1.json; it equals the Mac's own schema1 in the f8c focused run. Ref when the slot opens: test/w-20b5d0be62f3-a6675a01, commit-tree b9bffec8 -p db3c46ee. Ask Sol-edfd for a fresh pre-push --check first, and record the tree on the item before committing. If master moves before then, a re-carry is needed."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "engram-pinned-binary-current",
+    "revision_id": "7f089cc07f8745b29dfab22ef08f6ff7",
+    "previous": "d373deffa8e7484da4eaa5b75258dbb0",
+    "body_sha256": "b4efe18a695cc0d20fe929bf8f356467e04538cd8442f0b9c571533d06b5d9c9",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-09T00:44:26.388243300Z"
+    }
+  },
+  "body": "Current Engram binary for pinned TermAl live runs, and the latest Engram install (Termal::Fable2; condensed at revision 26, 2026-10-09 00:45Z; full history in revisions 1-25).\n\nPIN RULE. A `live --engram-binary --engram-sha256` run uses the pinned binary until a run needs a newer one. The pin is still Engram 08a04e0 (w-63757ebca393): exe sha256 bcec822ae785fc97a16fcb66efae3f4205ded4f6cd6c60d33a29f008b7c23c13, build_fingerprint 081842231d48c5f4adac88d847e6098dc2b46ad5a66775171d07719327ca1eff; backup engram-20261005T183302Z-081842231d48.exe (install notice ebe242f7 #668). Re-pin only when a TermAl check needs newer behaviour; any check pinned to an intermediate build must re-pin when that build is replaced. w-47338 will need an occurrence_id-capable pin (43f5cd8 or later) when its first stage tests.\n\nLATEST INSTALL. 2026-10-09 00:44Z (ebe242f7 #891): Engram 1519b96b24fb (w-f81812296a78; tooling only, the doc-link checker skips the exact .claude/worktrees path; fast-forward from ce27c31). Exe sha256 0d1a36daaeb948da4c7e65d7bc7c73e9ef1eccd6eb3633be62a6eddb898a7638, build_fingerprint 1e772994685ff6220e4f71450f9a3e398e1511cba3c7ed54571c75c915931568; backup engram-20261009T004308Z-ef54b3089999.exe. All 4 stores ready, no runtime change, no restart needed.\nPrevious: 00:12Z (ebe242f7 #890) ce27c31ad3e5 (w-3421f913b800, docs/roadmap.md only), sha256 ddde9511…09ee6, build ef54b308…987f, backup engram-20261009T001207Z-03bab16541c5.exe. Installs between 2026-10-06 15:07Z and 2026-10-09 00:12Z are not recorded here.\n\nRUNNING MCP SERVERS pick up a newer install only at the next TermAl restart. A TermAl control sidecar picks it up after its idle reap.\n\nBEHAVIOUR HISTORY SINCE THE PIN (fast-forwards, no store-format change unless noted; details in revisions up to 25):\n- 92fc3d0 atomic new-store open (cold store gives typed busy); 321b80a verification_bind; 47f3cff ancestor .engram-project search (TermAl passes --project-file, unaffected); 835c846 bare done/evaluate refused with several live claims (TermAl passes work_ref); d8ec5a4 marker is a regular file of at most 4096 bytes; 7b8d87e status-grouped verification view (TermAl's reader tolerates both shapes); 496ab34 ambiguity refusal lists up to 3 refs; 86c82c8 citation refusal names the mismatch; 581bf6c extended-length store paths; 8ca2538 typed refusal above 1024 prerequisites; 7306ac3 bare core-complete guard (TermAl calls neither core complete nor work_complete).\n- 2026-10-06: 7340a47 and 6eff095 graph snapshot restore performance; 2f87464 faster waive/work reads; 6679442 additive host-control turn_grant_read (TermAl consumer, foundation w-f79e3484ac46, parked); 43f5cd8 required opaque occurrence_id per new restore in store.restore.json (id-less legacy record is Unreadable, fail-closed; TermAl's half open on w-4be3e96f76b8); a112b1f turn_grant_read refuses out-of-range timestamps with control_projection_invalid; ab55fda doctor reports a seal finding once; 3f3f24be63a7 stale-evaluation wording `unadmitted_change`. Others were docs or tests only.\n\nReport any reader mismatch on real records to Engram::Fable."
+}

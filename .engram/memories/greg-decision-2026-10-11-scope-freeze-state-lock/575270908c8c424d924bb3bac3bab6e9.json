@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-11-scope-freeze-state-lock",
+    "revision_id": "575270908c8c424d924bb3bac3bab6e9",
+    "previous": null,
+    "body_sha256": "9faf83d82251fe404f18edce151fe9a23e84f2b72090d758dbdd0ed829a077ce",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-11T04:39:28.310026700Z"
+    }
+  },
+  "body": "Greg's directions, 2026-10-11 03:19-04:20Z, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #607-#618). Received by Termal::Fable2 at 04:38Z: my session was parked, held behind a paused queue, from 03:19 to 04:37Z.\n#608 (03:21) SCOPE FREEZE: \"no new roots, pilots, architecture expansions or implementation starts. Focus the next train solely on already prepared TermAl packages: serial Merger carry, exact gate/review/evaluation, landing. Existing incomplete work may preserve its current branch and stop at a clean preparation boundary; do not consume a landing slot ahead of a package already review-ready. Report only landings or a genuine conflict.\"\n#610 (03:26) ORDER: \"(1) finish/check-in already prepared packages under the existing rules; (2) then conduct a scoped validation-suite review: identify UI-heavy tests and map each required check to changed surfaces/contracts, preserving meaningful coverage and full gates where cross-cutting; do not weaken tests by blanket removal. For now, do not start #2 code before #1 queue is clear… Remote-gate feasibility remains held.\"\n#614 (03:39) \"defer the new operating-model/Profile P work for now. Do not start its implementation, mode/config/store changes, or cutover preparation. Prioritize the existing state-lock contention investigation and a bounded fix instead… Keep prepared landing packages moving; no synthetic load, polling or watchdog.\"\n#615 (03:52) \"assign distinct coders to the three confirmed small TermAl packages: (1) passive wait/hold/phase attribution; (2) narrow reclamation eligibility avoiding full fence cloning, with exact ABA revalidation; (3) file-event I/O extraction outside global lock with explicit turn identity. Keep optional queue projection and immutable-persist rewrite parked… isolated worktrees and continuous package delivery; do not wait for Profile P.\"\nGreg #217 (Advisor #123, 04:15, via Engram::Architect1 and Termal::Architect2): do NOT build new continuous or passive telemetry, counters or a profiling subsystem now; a manual 30-second stack capture only. This SUPERSEDES package (1).\n#618 (04:20) standing authorization for the manual xperf/WPA 30 s capture (an elevated kernel CPU trace, one owned trace, artifacts only in TermAl .evidence/profiles/<capture-id>, compact summary reported to Greg; no synthetic load, polling, retry, install, registry or global config, or restart).\nEffects: P (w-a5cb, w-43ae and the P-related UI) is deferred. State-lock packages (2) reclamation and (3) file-event extraction get coders, per the joint architecture briefs (Termal::Architect2 #619/#620, Engram::Architect1 #17). Package (1) is dropped. New starts are paused; in-flight work stops at a clean boundary; prepared packages land."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-review-identity-git-default-2026-10-29",
+    "revision_id": "1cbeef04b27445568d61e6d6c6e47881",
+    "previous": "3ebe4a2b8200476d8b54d2e0e8fc6430",
+    "body_sha256": "e88475314bafea7b8cdb03dbd228b1ecc0bea9e964a292ff4fc25e5a26490465",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T01:11:24.084470400Z"
+    }
+  },
+  "body": "Greg's decision, Advisor #2425 at 01:09:31Z on 2026-10-29, verbatim: \"Greg: „Sugeruję nie używać tego. Polegamy głównie na Git.” Traktujcie Git identity jako domyślny zwykły przepływ i nie wymagajcie review identity capture. Doprecyzujcie tylko nieliczne wyjątki o rzeczywistej potrzebie raw-byte; przygotujcie małą zmianę procedury/narzędzi zgodnie ze wspólną rekomendacją.\" This answers the joint TermAl and Engram recommendation of Advisor #2423 and Engram::Fable's copy. Engram's matching memory is rules-greg-git-identity-2026-10-29.\nTermAl RULE (coordinator Termal::Fable2):\n1. Review identity capture (`termal_review_identity`, the raw-capture engine) is NOT required anywhere: not in reviews, freezes, intake or landing.\n2. DEFAULT input identity is Git. Freeze a FULLY STAGED index, check `git diff --quiet` (worktree equals index), `git ls-files --others --exclude-standard` is empty, and record `git write-tree`, the tree id, on the item. Every reviewer reports that tree id at the start and end of its review. The landing tree must equal it. Remote gates follow joint record revision 4 (remote-test-ref-gates-evidence-only-2026-10-28).\n3. The launcher's own automatic before/after fingerprint stays (CLAUDE.md test-ref bullet and launcher behaviour); nobody computes or compares it by hand.\n4. EXCEPTION, joint wording proposed by Engram::Fable in #5181 and concurred by Termal::Fable2 in #5183, verbatim: \"Use the raw capture ONLY when the change's correctness depends on bytes that Git normalises or does not track: files under a .gitattributes eol or filter rule, executable bits, symlink targets, or nested repositories and submodules. Record that reason on the item.\"\nNote: TermAl's .claude/commands/review-changes.md does not mention review identity capture; its use was lane practice. So no TermAl command-file change is needed. Engram updates its /review-changes freeze section and merger procedure through its instruction-change procedure, landing after the cutover."
+}

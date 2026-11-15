@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "declared-commands-two-route-verdict-rule",
+    "revision_id": "68f415147eec4f89a4bead837b1483c3",
+    "previous": null,
+    "body_sha256": "6c3a717c937ef2239020380abdee8189b1f19d280bd00e81a2255aebda559bec",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-08T02:21:19.957461500Z"
+    }
+  },
+  "body": "Declared test commands have TWO verdict routes, per docs/features/declared-test-commands.md. Don't collapse them.\n\n- NATIVE verification (registered credit): the frozen artifact's PASS, FAIL or UNKNOWN decides directly, and the exit is only an observation. A missing exit, a task notice without a verdict, output persistence or a background move do not override a valid artifact.\n- LEGACY observed check (ordinary run rows and passed or failed checks): exit-aware. PASS requires exit 0 plus a valid PASS artifact. A non-zero exit is FAIL whatever the file says. With exit 0, the artifact and stream validity decide. A missing or unknown exit can never be PASS.\n\nOn 2026-11-08 I wrongly ruled \"artifact is the verdict\" for all routes (#2775 to Sol-edfd, a note on w-52b688a8e327). The c445 review caught the contradiction (row PASS against check FAIL for the same event). I corrected it at about 02:22Z and held bf9284bb (w-104f) for a recheck. Before ruling on verdict semantics, read the doc's route sections."
+}

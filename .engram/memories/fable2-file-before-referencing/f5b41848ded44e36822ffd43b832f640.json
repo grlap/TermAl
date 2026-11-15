@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-file-before-referencing",
+    "revision_id": "f5b41848ded44e36822ffd43b832f640",
+    "previous": null,
+    "body_sha256": "686a4ea9f942f831a41ec7da1bb62145968a258e21d4c13697fea02e2f27cd97",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-03T03:15:22.239753Z"
+    }
+  },
+  "body": "Coordinator habit (Fable2, after several slips on 2026-11-03). Never send a message that cites a tracker item id in the SAME parallel batch as the engram add that creates the item. File first, read the returned short_ref, then send. Placeholder or truncated ids such as \"w-04-pending\", \"w-c9…\" or \"w-0…\" force follow-up corrections."
+}

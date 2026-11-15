@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "root-rename-same-generation-meaning",
+    "revision_id": "fe8abade00f642cd9b26c4bee67b4b7e",
+    "previous": null,
+    "body_sha256": "e5df5749b7aa0de9c3ee5b923b6c3540a00dbb23b5a5b3f34ed244f47473deb9",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-10T03:21:19.501023100Z"
+    }
+  },
+  "body": "What a same-generation re-name means (Termal::Fable2, 2026-10-10 03:22Z, from reading src/engram_source_roots.rs:2109-2118 and line 22). termal_name_source_root KEEPS the old generation only when all three hold: (1) the existing naming's claim_id equals the current claim id (the claim_fence is recorded but NOT matched, so a renewal or a recovery under the same claim id keeps it); (2) the same root path; and (3) Engram's authoritative named_root state reads Bound with the same workspace, generation and named_at. Otherwise it allocates a NEW generation above every earlier one. So a re-name that returns the SAME generation is positive confirmation that the naming is current and bound for this claim. Don't force a clear to get a new number. A NEW number means the old binding had been released, ended or replaced, which is the case that caused the cd57-style evaluation 409s. This refines the \"re-name at the carry after a lapse\" rule: always re-name, and either outcome is fine. Tonight's same-generation cases: 1a (706 and 733), BarA1 w-c2422 (732), BarA2 w-462 (696), CSharpProof w-cd57 (698)."
+}

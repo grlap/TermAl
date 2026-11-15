@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-no-observation-payload-in-agent-context",
+  "head": {
+    "state": "active",
+    "chain": [
+      "020304c2fb5640f4a4790de846acf5cd"
+    ]
+  }
+}

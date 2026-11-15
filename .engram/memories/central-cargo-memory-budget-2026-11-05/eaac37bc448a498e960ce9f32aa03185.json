@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-cargo-memory-budget-2026-11-05",
+    "revision_id": "eaac37bc448a498e960ce9f32aa03185",
+    "previous": null,
+    "body_sha256": "9d59b4d7574892bcdc0df47b2241fc7593ff1c572a8d416ef7c8a5619cb8e1be",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1ad11-c755-7061-8921-cf039ab7b131",
+      "work_ref": "w-cf039ab7b131"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-05T23:06:50.673005300Z"
+    }
+  },
+  "body": "Central Cargo memory budget (Termal::Fable2, 2026-11-05 23:08Z). It replaces the flat '30 GB FreeVirtualMemory at each GO' rule, on Greg's word relayed by Engram::Asistant (#445): «To chyba jest max teraz co mamy.»\n\nRules (the integration owner Opus2 enforces):\n- One Cargo job at a time, with RUST_TEST_THREADS=4.\n- CARGO_BUILD_JOBS=4 when FreeVirtual ≥ 22 GB; jobs 2 when ≥ 16 GB; no start below 16 GB.\n- The run's owner stops its own run if FreeVirtual falls below 6 GB, and records it as a resource stop, not a test result.\n\nThe thresholds are estimates. Measure the peak commit of a -j 4 termal build and of a live run, then set the floor to the peak plus an 8 GB reserve.\n\nContext: Central's paged pool sits at about 16 GB persistently. Cause unknown; it was not ADU.exe. See w-cf039ab7b131."
+}

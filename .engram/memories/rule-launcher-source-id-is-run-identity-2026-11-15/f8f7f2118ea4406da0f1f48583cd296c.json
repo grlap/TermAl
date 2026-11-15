@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rule-launcher-source-id-is-run-identity-2026-11-15",
+    "revision_id": "f8f7f2118ea4406da0f1f48583cd296c",
+    "previous": null,
+    "body_sha256": "837caf2191699345663eb1f7d63542f0e43f5fa08a5c1de766ad3df4988e6715",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-15T15:58:43.559369800Z"
+    }
+  },
+  "body": "SETTLED RULE, not to be reopened. Greg confirmed on 2026-11-15 (via Engram::Asistant 588693a8 #1790): „Tak miało być. Uzgodnione juz 100 razy + Kimi.”\n\nSince commit 30ddf016 (2026-11-07), a test-launcher run's before/after input identity IS its recorded source_id equality: results.sourceIdBefore == results.sourceIdAfter, compared as a whole object (docs/test.md \"Ordinary committed-input runs\"). Drift before the run stops it, and drift after prevents a pass. The launcher computes NO input fingerprint any more. The review-freeze fingerprint lives only in explicit review-freeze commands, reviewer identities, test-ref names, commit messages and Review-Freeze trailers.\n\nSo any rule or check that says a run's \"fingerprint before and after\" means source_id equality. A remote FULL on a test ref gates a landing when its source_id before and after are equal, the test-ref name and commit bind the review-freeze fingerprint, and the integration owner records the run id, host, commit, tree and both source_ids. Authority text is being aligned in w-7b234e31e827. Do NOT raise this as a question again, and do not ask Greg about it.\n\nWhy it resurfaced: CLAUDE.md and AGENTS.md lagged behind docs/test.md after the cutover. Whenever docs/test.md changes run-identity semantics, check the authority text in the same change."
+}

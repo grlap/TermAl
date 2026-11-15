@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-loop-goals-self-optimisation-2026-11-04",
+    "revision_id": "6fde8cb7d5d34d2eb4eff25933329137",
+    "previous": null,
+    "body_sha256": "c962f2768355b725e54d374d03918a72d62197fe73c08474feab19a125793d12",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T21:34:07.086648200Z"
+    }
+  },
+  "body": "Greg's direction, relayed by Kimi::Consultant (mailbox 852a55c9 #46, 2026-11-04 21:33Z), not read from Greg directly; it grants no commit, push, install or restart authority. His principle: coordinating 4 machines and agents is hard; don't assume a human designs optimal rules up front. First a complete working loop, however rough; then the system has a measurable goal and optimises itself.\n\nDirection: (1) finish simple EO w-633b5cacc42a and ordinary test, evaluate, done on Windows and Linux before re-enable; (2) remove superseded mechanisms, add no further handshakes; Git is the source, a registered run is execution and result, the evaluator judges the criterion, Engram owns evidence currency, TermAl owns execution and federation; (3) measure the cost of a landed change: tokens, time, Greg's interventions, false refusals, duplicate runs, messages, queue age; (4) small Sol/Opus delegations, one worker plus parent, review on freeze, coordinator for exceptions only; (5) federation as simple transport of exact commit, bundle, mailbox and result, no new bureaucracy.\n\nGoals: 5 ordinary changes end to end on 2 systems with no workaround or false refusal and negatives still refused; superseded procedures removed and fewer states; a baseline, then for example 30% less cost with no weaker tests or review; Greg gets result, blocker or decision, not acknowledgements.\n\nReporting: don't assume Greg watches agent sessions. Updates for Greg go to Engram::Asistant, which aggregates. Technical status notes and peer mailboxes stay. Apply without a new procedure layer."
+}

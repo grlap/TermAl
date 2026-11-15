@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-secret-file-acl-verify-before-write",
+    "revision_id": "3aa9faaf6d0a4a259b3eed7523a2ceb6",
+    "previous": null,
+    "body_sha256": "ec18453d143fee1a2a6c345063be5e1f016f7c582f6409199280af8c7366a666",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T23:40:21.857817600Z"
+    }
+  },
+  "body": "Worker trap (Termal::Opus3, 2026-10-29, my own slip in the Windows B pair-secret restore, w-cea20bdd4f38). The remote PowerShell granted `${env:USERDOMAIN}\\${env:USERNAME}`. On a workgroup machine USERDOMAIN can be the workgroup name (\"WG\"), so icacls failed with \"No mapping between account names and security IDs\". icacls is a native exe, so `$ErrorActionPreference='Stop'` did NOT stop the script, and the secret was written into a file that still had its inherited ACL (including CodexSandboxUsers:RX) for about 30 s, until I fixed it.\nRULE for any secret file on another machine:\n(1) grant `\"$env:COMPUTERNAME\\$env:USERNAME\"` (or the explicit `HOST\\user`), never USERDOMAIN;\n(2) check `$LASTEXITCODE` after icacls and throw on non-zero;\n(3) read the ACL back and assert that it lists exactly the one principal BEFORE writing any secret byte;\n(4) only then write."
+}

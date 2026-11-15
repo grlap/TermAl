@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-credited-tests-vs-background-guards",
+    "revision_id": "0bc97b8accec49c0ab0b7ff1a89f1cab",
+    "previous": null,
+    "body_sha256": "3cc82f526edad3cdabceec9d3ffeeac97b7f0886c0dd0578dfc7344c1aac826d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T19:50:50.895901100Z"
+    }
+  },
+  "body": "Opus2 lesson (2026-11-13 19:50Z): TermAl restricts this session's verification credit while any background/orphaned Claude work (e.g. my run_in_background mail-guard loops) is running without a verified end. The X'' Windows leg (test-11e05b69) still landed with Engram state \"received\" (record 850ed5db), but to be safe, before starting a registered credited test from this session, stop or let finish all background guard loops and do not start new ones until the test ENDs; then re-arm the guard. Also: never let a background loop both read AND acknowledge mail; read bodies in the foreground before acknowledging (a background read+ack nearly hid Engram::Opus #1109)."
+}

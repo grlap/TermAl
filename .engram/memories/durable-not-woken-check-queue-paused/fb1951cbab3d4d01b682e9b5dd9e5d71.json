@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "durable-not-woken-check-queue-paused",
+    "revision_id": "fb1951cbab3d4d01b682e9b5dd9e5d71",
+    "previous": "28c991ccac1b4a23af456ed706e3a4e5",
+    "body_sha256": "a4e6a1289b768fdcd01060d8fe689afa6fe94c87bc1741e82a5f918c81f4aba7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T05:51:39.947047500Z"
+    }
+  },
+  "body": "When a send to a worker returns notificationDisposition durableButNotWoken (or heldBehindPausedQueue), immediately GET /api/sessions/{id}. If it reads queuePaused=true with pending prompts and the session is idle, POST /api/sessions/{id}/queue/resume, then read back; the turn may take a second to begin. Since 2026-10-16 queues have been seen paused at ORDINARY turn ends with no stop (Coder 7422 at 23:07Z on build 12e16176), so a worker can idle forever otherwise. Record each occurrence on w-80e0cb2002da.\n\nUPDATE 2026-10-17 05:51Z: if /queue/resume returns 200 but the queue STAYS paused, read the session preview. \"Waiting/Unknown after interrupted authorization ... cancel or reconcile\" means an Engram admission timed out (for example a 20 s deadline) and the head prompt is interrupted, so resume won't release it. If the head is only a mailbox NOTIFICATION, cancel it with POST /api/sessions/{id}/queued-prompts/{headId}/cancel and then resume. The mailbox message stays durable, so tell the session to re-read that mailbox. Don't cancel a head that carries real user work without its owner's say."
+}

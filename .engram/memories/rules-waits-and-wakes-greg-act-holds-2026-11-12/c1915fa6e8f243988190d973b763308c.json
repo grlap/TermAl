@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rules-waits-and-wakes-greg-act-holds-2026-11-12",
+    "revision_id": "c1915fa6e8f243988190d973b763308c",
+    "previous": null,
+    "body_sha256": "bc1a2c5e75291988d7523ff67ee65d546440cfb947ca6027a06a7273a60f11cd",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-12T19:22:54.892662600Z"
+    }
+  },
+  "body": "Continuation of rules-waits-and-wakes, which is at its 8 KiB limit. ITEM 8 AMENDMENT, verbatim, concurred by both coordinators (Termal::Fable2 #7690 and Engram::Fable #7691, TermAl mailbox ebe242f7, 2026-11-12 about 19:22Z; TermAl w-bebbae70639c, Engram w-761908cf1e2a). It answers Greg's report of 2026-11-12 („nie pracuje, zero errors, ???”; „nie zrozumiał, że miał zrobić restart”), after all lanes sat idle about 1.5 h behind a drain for a cutover he never started:\n\n\"GREG-ACT HOLDS (2026-11-12): no drain or hold for a Greg act (restart or cutover) starts until Greg himself has replied that he is ready, through Engram::Asistant; sending the request starts no hold. Any drain or hold that waits on a Greg act then has an absolute deadline: the agreed start plus 15 minutes. Each coordinator sets a real scheduled wake for that deadline in its own session (Claude CronCreate one-shot or the Codex equivalent). If the session restarts, it sets the wake again on recovery. On waking, it checks the actual host state: process start times, installed binary hash, backup and log directories. If the act has not started, it lifts the hold, tells every waiting session to resume, and tells Greg through Asistant. Every request for a Greg act goes through Engram::Asistant (his direct channel) as well as Advisor, says in plain words that Greg must perform it and when, and asks him to reply „zaczynam” when he starts.\"\n\nThis supersedes item 8's \"RESTART NOW via Advisor\" route and its \"no timer\" clause, for Greg acts."
+}

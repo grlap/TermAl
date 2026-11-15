@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara2-export-review-before-fix-edits",
+    "revision_id": "6a930202a3594a3e82a63185cef6d857",
+    "previous": "e6aa703a3801471f9ad7850e3e761a63",
+    "body_sha256": "525b11bebece3d5d43165a8c974e467d0ba3a11f0b11853811652cb121d4c741",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T15:06:52.701163900Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA2), REVISED 2026-10-29 at about 15:10Z under Greg's process change (memory termal-verification-by-git-not-manual-hashes, Fable2 #1117).\n\n**What stays:** when a review round returns findings, preserve the reviewers' results BEFORE any fix edit, so the findings are fixed against what was actually said. Two ways:\n- cite the two counted delegation ids (TermAl stores their results);\n- or, where an item's criteria need it, keep the raw output with `node .tmp/export-review-results.mjs <dir> session-11466 <ids>`.\n\n**What stops:** NO INDEX.md or SHA256SUMS manifests for review exports, freeze folders or runs; no patch-file SHAs; no attrib +R ceremony.\n\n**Identity is Git:**\n- the frozen tree id (git write-tree on the staged input) plus the base commit, and a clean `git status`;\n- test evidence is the launcher run id, its result and counts, and the launcher's own before/after fingerprint.\n\nOrigin: my own slips on w-c205 slice A rounds 1 and 2, where exports were made after fix edits."
+}

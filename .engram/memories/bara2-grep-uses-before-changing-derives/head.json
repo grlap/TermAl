@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "bara2-grep-uses-before-changing-derives",
+  "head": {
+    "state": "active",
+    "chain": [
+      "a01b46e3d36b47e295d4af574ebc3604"
+    ]
+  }
+}

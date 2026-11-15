@@ -1,0 +1,16 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "merger-freeze-crlf-rules",
+  "head": {
+    "state": "active",
+    "chain": [
+      "5146a09327bd46548e7e65fd5ae2a65a",
+      "2410c7aba95047f98c69064f8f1ced7a",
+      "3d268b3eee9544309f5bf7a1e3de9faf",
+      "1edf8ccb32584706890879bed3306126",
+      "6bf36570a9b542b1865e84b77636c8c7",
+      "493cc11413f1412486cde3a37d595eec"
+    ]
+  }
+}

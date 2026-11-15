@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "manual-xperf-30s-standing-authorization",
+  "head": {
+    "state": "active",
+    "chain": [
+      "5820ba223e3841daa520b0ef52a01775"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "review-freeze-crlf-autocrlf-mismatch",
+    "revision_id": "571554c5ac5c499288dcb1245ecfd136",
+    "previous": null,
+    "body_sha256": "603edeea10720bee170de9638eb6aedd23c40aa94f0af5d3cf58d448b5c5ec0f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-08T20:47:01.349642Z"
+    }
+  },
+  "body": "Review-freeze trap: CRLF worktree files vs system core.autocrlf (Termal::Fable2, 2026-10-08 20:47Z; found and proven by Termal::Coder on w-48618ba39f11, TermAl mailbox 241329fa #1674-#1678).\n\nSymptom: both reviewers of a pair STOP when they open the review. The compiled checker (`target/release/termal.exe review-freeze-check ROOT MANIFEST EXPECTED`) rejects the schema-1 literal even though the native Git endpoints (HEAD, tree, no unstaged, no untracked) look clean.\n\nCause: this machine sets core.autocrlf=true system-wide. Files edited on Windows can have CRLF or mixed endings in the worktree. The freeze helper ran under the inherited config, where the staged diff was 127,886 bytes; the checker's isolated settings (global=NUL, nosystem=1) read the same staged diff as 3,872,174 bytes. Adding only core.autocrlf=true to the isolated config restored the identical bytes. The checker binary wasn't the cause: the same termal.exe e92de85f failed before the normalization and passed after it.\n\nFix, with no Git config change: run `git ls-files --eol` on the owned paths; convert the owned files to LF (only the CR before LF removed, UTF-8 checked); stage them fully with explicit paths (no intent-to-add); show that the inherited and isolated staged diffs are byte-identical and both unstaged diffs empty (every entry i/lf w/lf); refreeze and check with the compiled checker BEFORE spawning the pair.\n\nPrevention for implementers: before any freeze, check that `git ls-files --eol` shows w/lf for every owned path."
+}

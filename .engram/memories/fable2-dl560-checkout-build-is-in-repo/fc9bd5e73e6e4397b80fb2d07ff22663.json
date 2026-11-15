@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-dl560-checkout-build-is-in-repo",
+    "revision_id": "fc9bd5e73e6e4397b80fb2d07ff22663",
+    "previous": "7f14e09183eb467290ec0e0b36e6d0c4",
+    "body_sha256": "973d7b596d8797bc5b819f77e62104d4c80a3684ff806d6cc6995cef0e4ddbe5",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T10:45:05.987547800Z"
+    }
+  },
+  "body": "Lesson (Termal::Fable2, 2026-11-07 10:43Z, my own over-caution, challenged by Engram::Asistant 588693a8 #819/#821). Fast-forwarding DL560's TermAl checkout (/home/greg/github/TermAl) to LANDED, gated master and building it into that checkout's target/release, with the running pid untouched and no restart, needs NO fresh word from Greg. CLAUDE.md:268 limits writes to the repository folder. The DL560 checkout is TermAl's repository on that host, the same clone class remote runners work in. CLAUDE.md:296–299 needs Greg's explicit word only for writes OUTSIDE the repository. The landing (:181–189) installs the gated tree's binary where the host runs it from. Restart 1's „Tak” was caution, not a rule. Do not ask Greg for this again. Restarts stay Greg's. Building an UNlanded tree, or anything outside the checkout, is a different matter.\n\nRev 2: Greg's verbatim word, relayed by Engram::Asistant (588693a8 #823, 10:43Z): „Niech pracuje. Szkoda czasu i tokenow na pytanie sie.” Asistant added: continue the DL560 TermAl preparation and the agreed Unified EO plan, and do not ask again about acts his order already covers. Greg restarts the host after the signal.\n\nRev 3 (10:45Z), the practical limit. DL560 Codex 6 (session-6), the runner that executes the build, REFUSED the job (Opus2 #4862, Codex 6 #401). Its reasons: the landing rule names the integration owner as installer, it is only the runner, and a relayed word gives it no authority. Opus2 will not SSH there himself (Greg banned ad hoc SSH). So for DL560 TermAl builds, the working route is Greg typing one line directly in session-6, as at restart 1 (#364). Next time, ask Greg for that line in session-6 UP FRONT, in the first message, and do not debate authority first."
+}

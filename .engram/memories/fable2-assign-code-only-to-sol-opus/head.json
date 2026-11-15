@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "fable2-assign-code-only-to-sol-opus",
+  "head": {
+    "state": "active",
+    "chain": [
+      "edb8b38608a54920ab1c1c9629c58bb5"
+    ]
+  }
+}

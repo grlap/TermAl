@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-durable-but-not-woken-is-not-proof",
+    "revision_id": "15a0e62009b74a69b9ef64cb9f58c692",
+    "previous": null,
+    "body_sha256": "aa68c2aa5555d923802f4bfe8f52cad8a5ed4d00f547f48a9fb5890da95a19bb",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-08T05:52:13.287206100Z"
+    }
+  },
+  "body": "Coordinator lesson (Termal::Fable2, 2026-11-08). A send result of durableButNotWoken means only that the sender got no wake confirmation. It does NOT prove the recipient was not woken. On 2026-11-08 a relay message to the Windows B runner, session-9, came back durableButNotWoken, yet the runner received it, ran Greg's toolchain check and answered. I wrongly recorded it on w-a8af as proof of the remote-dispatch gap, and routed a duplicate job through Opus2. Before treating a not-woken send as failed: wait briefly for a reply, or check the recipient's read cursor (termal_read_mailbox_message for that message). Don't duplicate the work, and don't record it as a defect until the absence of action is shown."
+}

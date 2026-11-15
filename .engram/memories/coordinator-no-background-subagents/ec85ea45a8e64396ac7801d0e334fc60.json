@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-no-background-subagents",
+    "revision_id": "ec85ea45a8e64396ac7801d0e334fc60",
+    "previous": null,
+    "body_sha256": "ed9b3b56d5a47fef403633c9c196c61cc62d21bf28e4a415fa3b6eb3ba58ac2c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-05T06:05:56.745110900Z"
+    }
+  },
+  "body": "Coordinator rule (Fable2, 2026-10-05 about 06:07Z, learned from my own error). Never run a background subagent (the Agent tool with run_in_background) or any background Claude work from the coordinator session in C:\\github\\Personal\\TermAl. While it runs, the host restricts check credit for that workdir. Other sessions are refused credit for tests in workspaces that work may write in, and implementer worktrees under .tmp sit inside the master checkout. Observed: a read-only Explore survey at about 06:02-06:05Z triggered \"Evidence restricted … 1 piece of background, subagent or orphaned Claude work\". For a code survey, run the agent in the FOREGROUND (run_in_background false) in a turn where no implementer gate is about to settle, or ask an idle architect to do it. If it happens anyway, tell the implementers that a check refused in the window may be rerun once as recovery."
+}

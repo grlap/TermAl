@@ -1,0 +1,29 @@
+{
+  "id": "01a1ddea-d793-7430-ba52-607f91cefcfe",
+  "external_ref": null,
+  "title": "Preserve the originating fatal sibling error in the parallel run summary",
+  "outcome": "The aggregate parallel run error names the originating fatal owner failure while retaining both siblings' actual terminal facts.",
+  "acceptance": [
+    "When the higher-index sibling fails fatally and cancellation makes the lower-index peer reject, the aggregate error retains the originating failure rather than choosing a rejection solely by stage index; a deterministic event-barrier test covers this ordering."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "dl560",
+    "performance",
+    "review-follow-up",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dae9-ede6-7e10-a850-06f3c0e4467d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

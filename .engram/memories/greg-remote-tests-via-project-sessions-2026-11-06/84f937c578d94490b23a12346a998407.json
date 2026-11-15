@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-remote-tests-via-project-sessions-2026-11-06",
+    "revision_id": "84f937c578d94490b23a12346a998407",
+    "previous": null,
+    "body_sha256": "ccecb43d15d1a140e50b66f5db795e50a5a264e57b294a902ce69d3dac75fefd",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-06T05:32:22.719440200Z"
+    }
+  },
+  "body": "Greg's rules, 2026-11-06 about 05:26–05:31Z, relayed by Engram::Asistant (Engram #350/#352/#356, TermAl mailbox 588693a8 #495 and #497), verbatim:\n- «Dlaczego agent mailby odpalac inne repozytorium.»\n- «Mozemt utworzyc remote sesje questiki czy phoenixa. Nie chce aby agent odpalal cos cross z innego repo.»\n- «po to mamy remote sesje aby z nich korzystac nie chce odpalania jakys testow na dziko, jak robil to zespol przez SSH».\n\nRules:\n(1) A test in project X is run only by a registered TermAl session OF PROJECT X, on the right host, in its own worktree, the ordinary way: its declared command from termal-tests.toml. TermAl associates it with the session, project, workdir and store automatically.\n(2) No agent runs another repository's tooling (for example TermAl's launcher by path with --root). Any root parameter is internal to TermAl.\n(3) No SSH or ad-hoc remote test runs, and no cross-project runs.\n(4) Missing project sessions on a remote host are created by the supported route, the same API the UI uses.\n(5) Greg wants concrete run ids and results, not plans."
+}

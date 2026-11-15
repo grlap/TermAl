@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-read-mailbox-before-every-launch",
+    "revision_id": "3c6d5b909db4422290a46ce5075b60e3",
+    "previous": null,
+    "body_sha256": "bb1802021e7f6a83311140d2b2ce6ca9364f6dc1e31406a933908cff6a68842f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T01:38:09.088617Z"
+    }
+  },
+  "body": "Worker rule (Termal::Opus3, 2026-10-23 01:38Z, my own miss on w-3c44 GREEN test-cc5547a2). Before EVERY test or compile launch, READ the coordinator mailbox as well as the run census, including a launch triggered by a resume wait firing. A queue correction may have arrived queued behind my active turn. Fable2 #3323 (01:31:10Z) put me 5th for the single +1 beside Merger's gate. I launched at about 01:31:45Z on a test-run wait firing, after a census-only check, and took Sol-03d4's slot. The census showing one gate running does not mean the +1 is mine: the coordinator orders the +1 queue. A resume wait on another lane's run is a wake, never a GO."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "remote-runner-path-rules",
+    "revision_id": "216c06e7145e44bdb4cca28e1969acd8",
+    "previous": null,
+    "body_sha256": "08fd9c83e93dfd594ae3519c3897c378982acbde681b82388b998cb9f8b81f58",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-01T01:15:53.926847900Z"
+    }
+  },
+  "body": "Path rules for every remote TermAl runner, learned 2026-11-01. (1) No path component named target, dist, node_modules or a dot-directory the watcher ignores may appear in the job worktree OR in TMPDIR/TEMP/the test home. TermAl's workspace_watch.rs:393 is_ignored_workspace_file_event_path and claude_gate_write_guard.rs:78 match those names over the WHOLE absolute path (bug w-a259a47bb144). A runner that set TMPDIR to <worktree>/target/.tmp got 19 false failures (gate_write_guard and watcher tests) in the Mac batch gate test-98aab07f. Put TMPDIR and the test home under the worktree's own .tmp/. (2) On Windows, keep paths short and have LongPathsEnabled = 1: the first Windows B layout gave 1273 false failures, and the short layout with LongPathsEnabled = 0 gave 5 \"Filename too long\" (w-3551b1d9102f). (3) A launch from a session belonging to another project must be standalone (TERMAL_BASE_URL, TERMAL_SESSION_ID and TERMAL_CLI removed, giving UNTRACKED), or registration is refused with a 400 (w-5e2f3fba987a). (4) Use the local fingerprint, with commit + tree as the cross-host identity. (5) Look up the item reference before quoting it in a note. Don't write a guessed or placeholder w-… id."
+}

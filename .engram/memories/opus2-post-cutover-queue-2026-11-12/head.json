@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-post-cutover-queue-2026-11-12",
+  "head": {
+    "state": "active",
+    "chain": [
+      "93a4a2d0ab514f4c961a2c6d653b8b63"
+    ]
+  }
+}

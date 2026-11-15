@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "no-node-modules-junction-for-test-roots",
+    "revision_id": "2bda3fc27cd74046b1404def40c4c488",
+    "previous": null,
+    "body_sha256": "81bf42ac87174e7f1f74857d1882cc619efe0c21d76b4f7123e0ba9fb28e4b54",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-15T15:41:18.650267500Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-15 15:41Z, after two workers proposed it in the same hour). A fresh worktree that runs vitest or npm tests must run its OWN `npm ci` in its ui/. It must NOT link ui/node_modules (junction or symlink) to the master checkout's node_modules: vitest and vite write their cache under node_modules (.vite/vitest), so runs would write into the master checkout, and a shared install hides dependency drift.\nRemoving such a junction: confirm `(Get-Item PATH).LinkType -eq 'Junction'`, then `cmd /c rmdir \"PATH\"` WITHOUT /s, which removes the link only, then confirm that master's ui/node_modules still exists. NEVER `Remove-Item -Recurse` or `rmdir /s` on a junction.\nnpm ci counts as heavy disk/network work: run it in the worker's granted slot, not during a gate."
+}

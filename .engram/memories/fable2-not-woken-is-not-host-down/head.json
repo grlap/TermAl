@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "fable2-not-woken-is-not-host-down",
+  "head": {
+    "state": "active",
+    "chain": [
+      "7b86eef5c3b740f48eee8d9bafad9177"
+    ]
+  }
+}

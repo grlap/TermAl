@@ -1,0 +1,17 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "dl560-source-owner-binarypath-unset-2026-11-14",
+  "head": {
+    "state": "active",
+    "chain": [
+      "066ef70b65e045f4a5dbef340a56837d",
+      "e8bab44a91bd48809f516418244dc891",
+      "54e32a6ec38143a0ab7a44e6a5f4f85a",
+      "ff9c79beb919431d99c7fbe0ccf740dc",
+      "298df7d285244a329fb1f73e85d8f75a",
+      "671ac16288df4edfbf7d7160a6e81526",
+      "30c24e36b06a4ee8ae715851b83b9883"
+    ]
+  }
+}

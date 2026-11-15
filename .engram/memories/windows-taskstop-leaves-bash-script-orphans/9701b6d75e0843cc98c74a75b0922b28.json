@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "windows-taskstop-leaves-bash-script-orphans",
+    "revision_id": "9701b6d75e0843cc98c74a75b0922b28",
+    "previous": null,
+    "body_sha256": "b58c4c2e586ee62bd8bb9a278d09f7b8878d4e8a64d96a6af428f622ad11d57e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T08:24:46.507807100Z"
+    }
+  },
+  "body": "Worker trap (Termal::Opus2, 2026-11-11 08:24Z). On Central (Windows, Git Bash), TaskStop on a background Bash task running `bash script.sh` reports success but leaves the script's bash.exe process running as an orphan, still looping. I stopped two self-gated install wait loops that way; both kept polling. Neither built, because each one waits for rustc=0. To truly stop your OWN background script, check with Get-CimInstance Win32_Process for its exact command line, then stop only that pid. Better: don't relaunch a gated loop with new thresholds; write the threshold to a file the loop rereads, or make the loop exit when a sentinel file appears."
+}

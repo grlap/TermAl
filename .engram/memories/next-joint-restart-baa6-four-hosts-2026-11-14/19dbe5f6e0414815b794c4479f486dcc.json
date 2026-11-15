@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "next-joint-restart-baa6-four-hosts-2026-11-14",
+    "revision_id": "19dbe5f6e0414815b794c4479f486dcc",
+    "previous": "e5872e4854914f6183928ac0a3fe3dfa",
+    "body_sha256": "f5d6123e5cbaa61d19587df533a3127c75e18c69f1ebbd10c4b7bc5f074d0c2e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T20:50:01.276458800Z"
+    }
+  },
+  "body": "NEXT JOINT RESTART: the one for baa6's install, Engram::Fable estimates about 22:00–22:30Z on 2026-11-14. Agreed by Fable2 and Engram::Fable in ebe242f7 #7961/#7962. It is a FOUR-host restart.\n\nHosts: Central, DL560, Mac AND Windows B (932a546b), each by Greg's procedure:\n1. stop;\n2. paired dated backup of termal.sqlite* and coordination.sqlite*;\n3. git pull, with DL560 first;\n4. cargo run --release, onto TermAl master bca419c7 or later.\n\nWhy Windows B: Engram B5 (w-a82d76013ff4) requires every running TermAl host to contain 8e4fd2f9 (w-693034085dc9). Windows B runs HEAD be3b6fd8, built 11-11, which lacks it (Merger runner session-9, #183, 20:37Z). Windows B counts as a running host; excluding it would loosen B5 and needs Greg's word.\n\nBefore the RESET NOW:\n- Engram::Fable sequences the Merger's Windows B run test-run-wait-d45446c2 to END;\n- Opus2 gives CLEAR.\n\nAfter the restart:\n- attest all FOUR hosts: HEAD, running binary sha and time, `git merge-base --is-ancestor 8e4fd2f9 HEAD`;\n- send the table to Engram::Fable as B5's receipt. 11330 keeps B5 excluded until then.\n\nState at 20:40Z: Central, DL560 and Mac run bca419c7 (restarted 20:11–20:15Z). Windows B is unchanged since 11-11.\n\nADDED 20:50Z (Opus2 #6234 and Engram::Fable #7963).\n\n(a) The four-host RESET NOW is also gated on the Merger's Windows B run test-run-wait-d45446c2 reporting END (complete, released or cancelled). Engram::Fable confirms when it does. The Merger starts no new Windows B run after baa6 lands.\n\n(b) If COMBO106 (K3 slice 3 c82b, b9186b44, tree 41132d2a) lands before that restart, the restart is a ONE-WAY UPGRADE. c82b carries the coordination floor \"8-direct-prompt-1-test-request-custody-1-remote-verification-1\": an old binary refuses the migrated coordination.sqlite, and rollback needs Greg's paired PRE-migration backup. The RESET NOW text to Greg must say ONE-WAY explicitly. It must ask that the paired dated backup of termal.sqlite* and coordination.sqlite* on ALL FOUR hosts, Windows B included, be taken BEFORE the new build starts, and keep that backup until the new build is confirmed."
+}

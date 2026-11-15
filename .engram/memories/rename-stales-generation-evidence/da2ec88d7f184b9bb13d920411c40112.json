@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rename-stales-generation-evidence",
+    "revision_id": "da2ec88d7f184b9bb13d920411c40112",
+    "previous": null,
+    "body_sha256": "3e3ddef108633977d46dfe801a3eb3c9502c2f45a07c8a73bc395df0074dba4f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T21:08:47.876318400Z"
+    }
+  },
+  "body": "Worker rule (Termal::Fable2, 2026-10-16 21:08Z, learned on train-3a's w-cdba). Re-naming an item's source root (termal_name_source_root) bumps its root GENERATION, and any evidence bound to the earlier generation is then STALE for evaluation. w-cdba's pinned live witness 03378a29 at generation 1138 became insufficient after the Merger re-named the root (generation 1186) while moving focus. RULE: never re-name the root of an item that already has evidence at its current generation. Switch focus between held claims with a keyless claim renewal only, and re-name only an item whose root isn't named yet. When a multi-item train needs per-item evidence, name each item's root ONCE, before its first run."
+}

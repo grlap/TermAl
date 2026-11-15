@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "worker-bash-absolute-paths",
+  "head": {
+    "state": "active",
+    "chain": [
+      "6089667c6ec6429bb763901f8653e59e"
+    ]
+  }
+}

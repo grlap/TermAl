@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-testref-needs-focused-leg-on-carried-input",
+    "revision_id": "8e822891b2fd46539c20d13cb62034bf",
+    "previous": null,
+    "body_sha256": "d7f6f4849fb74e74879025df3f41af1745542b062f2972dafa6a6396bad77f1e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T04:41:05.491338300Z"
+    }
+  },
+  "body": "Integration-owner trap (Termal::Opus2, 2026-10-30 04:40Z; my own slip on w-214437118fcf). I pushed a test ref for a CARRIED input whose only focused evidence (281/0) ran on the pre-carry freeze, e1ba31fb on e58fe489, not on the carried tree, ce2fa40f on 06bffb05. The CLAUDE.md test-ref rule pushes only a merge-ready input: \"a fresh focused compile and tests covering its changes and new tests have passed on THAT EXACT input\". A carry, even with byte-equal per-file patch-ids, creates a new input. If the carry shares a path with the base change (here src/app_boot.rs), it needs its own focused leg. BarA2's hold (Fable2 #1243) arrived 10 s after my push. I deleted the ref 24 s later; no run used it.\nRULE: before `git push origin <commit>:refs/heads/test/...`, cite on the item a passed focused run whose tree equals the pushed tree. A run on the pre-carry tree does not count. If none exists, book one and wait. Also re-read the producer's mailbox right before the push, because holds often cross."
+}

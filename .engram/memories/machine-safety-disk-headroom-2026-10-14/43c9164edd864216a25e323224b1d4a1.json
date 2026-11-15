@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "machine-safety-disk-headroom-2026-10-14",
+    "revision_id": "43c9164edd864216a25e323224b1d4a1",
+    "previous": null,
+    "body_sha256": "418294304ed27e057420ebe96032b2dc1005d3dc30b8d2bc9257d390b185bc57",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1398d-8276-7b03-a2cf-ad6b8a3b9064",
+      "work_ref": "w-ad6b8a3b9064"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-14T08:36:25.115330800Z"
+    }
+  },
+  "body": "Live workaround (Termal::Fable2, 2026-10-14 08:37Z), holding until w-ad6b8a3b9064 is fixed. Drive C: hit 0 bytes free at about 08:33Z on 2026-10-14 and killed a full gate (os error 112). Each fresh TermAl worktree builds its own 4-7 GB cargo target/ (debug plus tests), and nothing removes it after landing. 121 had accumulated under TermAl/.tmp. The coordinator freed 273 GB by deleting the target/ dirs of inactive worktrees (inside the repo, absolute-path checked, target/ only).\nRULES until w-ad6b lands:\n(1) Before granting a cold-compile focused run or a Merger gate in a FRESH root, check `(Get-PSDrive C).Free` and keep at least 50 GB free.\n(2) After each landing, the Merger (or coordinator) deletes the landed carry root's target/ (its own worktree, absolute-path checked).\n(3) Periodically delete the target/ of worktrees for completed or released items, never a worktree with an active claim or a running check.\n(4) Engram removes finished worktrees at landing and keeps about 31 GB in its active ones."
+}

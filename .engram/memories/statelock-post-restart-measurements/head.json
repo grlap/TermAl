@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "statelock-post-restart-measurements",
+  "head": {
+    "state": "active",
+    "chain": [
+      "58211c103c77446eac7651447a25c022",
+      "79d68ff24b3b4f71ac666daedcf6d33e"
+    ]
+  }
+}

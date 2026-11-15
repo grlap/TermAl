@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-no-file-list-source-id-2026-11-06",
+    "revision_id": "aebc801e188641a8a9bc3f8a1cf15c60",
+    "previous": "0c63a10951b74ed2a751b075b95928f4",
+    "body_sha256": "87f7545f03f9c7775fae67a9937b4a639c7cae7109c03699c85d76a326beee35",
+    "retiring_target": null,
+    "source_clear": true,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T04:23:12.733943700Z"
+    }
+  },
+  "body": "Greg's decision, 2026-11-06 about 00:32Z, relayed by Engram::Asistant (Engram mailbox #318, forwarded by Engram::Fable in TermAl mailbox ebe242f7 #6608), verbatim: «GIT operuje na diffie. NIE CHCE PRZEKAZYWANIA CALEJ LISTY PLIKOW. TO ZNOWU NIE BEDZIE DZIALAC». It applies to EO and source_id in BOTH projects: no full file or index list is derived, passed or buffered as an acceptance condition.\n\nThe committed-input predicate rev 5 this entry used to carry is superseded by the source_id definition in memory eo-option-b-canonical, which allows local changes and compares the whole object; revision 1 here keeps its text."
+}

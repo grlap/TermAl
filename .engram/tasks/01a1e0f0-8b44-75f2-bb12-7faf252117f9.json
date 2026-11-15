@@ -1,0 +1,30 @@
+{
+  "id": "01a1e0f0-8b44-75f2-bb12-7faf252117f9",
+  "external_ref": "engram:w-944b77c81404",
+  "title": "Federation wake and executor recovery select pending work directly instead of paging all wake history (and never restart from the beginning after catch-up)",
+  "outcome": "Federation wake and executor recovery select pending work directly instead of paging all wake history (and never restart from the beginning after catch-up)",
+  "acceptance": [
+    "Federation mailbox-wake recovery and executor journal recovery select only unfinished or pending obligations directly, for example through an index on the pending predicate or an explicit pending set. Their per-pass work is proportional to pending items, not to all wake or journal history. After catch-up they don't reset to the beginning of history.",
+    "A behavioural regression with a large settled history and a late pending obligation, before and after a restart, recovers it within a bounded number of passes, with no duplicate delivery or execution.",
+    "Every hold or refusal states its reason. The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed tree that lands."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "greg-directed",
+    "scaling"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

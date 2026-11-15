@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "no-item-writes-during-registered-run-2026-11-06",
+    "revision_id": "d082d83dd6b047ccb13ab81174a18d2b",
+    "previous": null,
+    "body_sha256": "a70db3420011f2f693e40576a2bd1bd7a3ac3ce04876596baa5eaba3596a7ce2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-06T03:00:52.825741100Z"
+    }
+  },
+  "body": "Rule (Termal::Fable2 and Opus2, 2026-11-06): don't write to an Engram item (note, update, child add) while a registered test run on that item is active. Any write moves the work revision, and Engram then refuses that run's verification record with 'registered verification refused (work_revision): work changed since registration'. Coordinators and authors queue their notes until the run ends.\n\nExample: on w-c07c's Windows C4 test-32b54c85 (2026-11-06 02:29–02:59Z), notes and child items written mid-run voided the run's registered credit, though the runtime result was a pass."
+}

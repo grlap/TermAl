@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "central-full-bounded-jobs-2026-11-14",
+  "head": {
+    "state": "active",
+    "chain": [
+      "f53f60cd7658400aab7729edf25bcc79"
+    ]
+  }
+}

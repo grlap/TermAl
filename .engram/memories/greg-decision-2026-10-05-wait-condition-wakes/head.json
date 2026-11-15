@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-decision-2026-10-05-wait-condition-wakes",
+  "head": {
+    "state": "active",
+    "chain": [
+      "40d3ea22b33c4a5e9eab7d9bd906c03a",
+      "663f90a009de40078ebf4defaea67bff"
+    ]
+  }
+}

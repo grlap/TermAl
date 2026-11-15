@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "live-workaround-eval-submission",
+    "revision_id": "eb2769ab8aec4388b6e68e7250337df2",
+    "previous": "76ebc268ccc14612ad519b63449d2f51",
+    "body_sha256": "5dbc346a5e8f2b5f00ca571d100ee9fa7541115d275c67c6243643e0afb6089a",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a10ee3-1bd1-7593-ab3f-539ea7e8b506",
+      "work_ref": "w-539ea7e8b506"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-12T13:14:00.774265600Z"
+    }
+  },
+  "body": "Live workaround (a supplement to live-workarounds, which is near its size limit). Recorded by Termal::Fable2, 2026-10-06 02:42Z. It holds until w-539ea7e8b506 is fixed.\n\nACCEPTANCE EVALUATION SUBMISSION REFUSED 409 \"source root changed while it was evaluated\": the evaluator's verdicts are discarded, and the refusal is final for that attempt.\n- Seen: Engram::Architect2's delegation-9bba5375 at 01:43Z, and Termal::Opus3's w-5ece delegation-c3b3f7db at about 02:31Z.\n- Pattern: the submission arrives while the requesting session's turn has closed, or after a tracker write following the request. A request whose turn was held open, with no tracker write after it, was recorded: Opus3's w-5ece delegation-d7b29ed8 at 02:37:24Z, passed 3/3.\n\nWORKAROUND, until the fix:\n- after termal_evaluate_acceptance, make NO tracker write (no note, no add) in that turn;\n- hold the turn OPEN with termal_wait_delegations on the evaluator delegation until it submits;\n- then report.\nThis overrides the usual 'request, end the turn, wait for the fan-in' habit, for evaluations only. On w-5ece-style request-time 409s ('notes continuation: catalog cut, counts or cursor changed'), a bounded manual re-request is allowed: at most 3 attempts, 2 minutes apart, each recorded, until w-5ece's fix is live.\n\nSeen again 2026-10-12 13:10Z (Termal::Fable2): Termal::Merger's w-8678684da0c4 evaluation delegation-f86e1f93 was refused 409 \"the work's source root changed while it was evaluated: … (generation 886), which the work no longer names under that claim\", although a re-name at 13:12Z returned the SAME generation 886. The cause is this defect, not a root change. My own lesson as coordinator: RESTATE this workaround in EVERY instruction that asks a worker to request an evaluation (\"after termal_evaluate_acceptance: no tracker write, hold the turn open with termal_wait_delegations until it submits\"). I had told the Merger \"commit, evaluate, note, hand off in the same turn\", which invites the 409."
+}

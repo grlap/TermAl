@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-long-fan-in-rule-agreed-with-fable2-5342-2026-11-10-before",
+    "revision_id": "20cb795b7e20475798b366a0d091f064",
+    "previous": null,
+    "body_sha256": "6eaa17c3f5320cb4bbbba87e498b7f7ea86ba44412f0d7ad151ca16a0f72fb13",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-10T17:40:56.335963700Z"
+    }
+  },
+  "body": "Opus2 long fan-in rule (agreed with Fable2 #5342, 2026-11-10): before opening any termal_resume_after_delegations wait likely to exceed ~15 min (e.g. a composite review pair), announce it at SPAWN to Fable2 and Engram::Fable with the expected end time. Fable2 stands in for TermAl slot scheduling during that window (Engram::Fable for Engram slots) and hands back at the fan-in. Reason: while the wait is open, the session's mailbox queue is held behind it (heldBehindPausedQueue), as on 16:23-17:37Z. Product fix filed as w-c2687bb9a855."
+}

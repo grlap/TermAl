@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-greg-restart-cargo-run-rebuilds",
+    "revision_id": "51a1cf1ba1094a048a1efae29fb15c0e",
+    "previous": null,
+    "body_sha256": "4aefa36d9c7e85dfb613f38a64e7dd09ba88df201398d5430301580eaad1e501",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T13:44:30.376827Z"
+    }
+  },
+  "body": "Restart fact (Termal::Fable2, 2026-10-29, observed read-only): Greg restarts the Windows TermAl host with `cargo run --release` in the master checkout C:\\github\\Personal\\TermAl.\n\nThat command REBUILDS target/release/termal.exe from the checkout and overwrites whatever the integration owner installed there. No backup of the overwritten file is made.\n\nSeen on 2026-10-29:\n- 13:26:32Z: cargo PID 44332 started.\n- 13:29:50Z: termal.exe rewritten, sha256 75a0c094…a81c.\n- 13:29:51Z: host PID 67788 started as a child of that cargo.\n- Merger2's installed 00028980 (built from the same commit 1efcfd02) was lost.\n\nConsequences:\n- An installed hash says nothing about what will run after Greg's restart. Record the running hash after every restart, and treat provenance as UNKNOWN until it is mapped to the reviewed tree (Architect2 note b4fc8fd6 (c) on w-1e85dae945d4).\n- The cargo process that is the parent of termal.exe is the host's own Cargo. Exclude it from the slot census (PID 44332 since this restart; 42744 before).\n- A readiness or status message to Greg must state a hard boundary: restart only after the explicit \"restart now\", which comes after the Engram INSTALLED receipt. Describing the sequence is not enough. On 2026-10-29 the restart came about 22 minutes after a \"Gotowość: TAK\" status, with no \"ready\" word and no \"restart now\"."
+}

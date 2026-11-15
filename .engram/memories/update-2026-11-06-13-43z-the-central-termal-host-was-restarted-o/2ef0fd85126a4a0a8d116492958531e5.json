@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "update-2026-11-06-13-43z-the-central-termal-host-was-restarted-o",
+    "revision_id": "2ef0fd85126a4a0a8d116492958531e5",
+    "previous": null,
+    "body_sha256": "6ab95cc8bc11a1bdae4834e5b1d75ed0fc7a6b7f19bb92ffcdb6c438cc2754c8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-06T13:45:53.423779800Z"
+    }
+  },
+  "body": "Update (2026-11-06 13:43Z): the Central TermAl host was restarted onto master ee2f21c6 (running binary sha256 706fb38f…, rebuilt by cargo run). From now on: a registered launcher run that matches two named-root entries for the same worktree in one session gets a LOUD refusal with both entries named, instead of a silent unbind (w-9200b26b7cb1). The rev-5 committed-input reader refuses incomplete Git reads, including Git stderr on exit 0, and passes core.longpaths=true and core.safecrlf=false per invocation on Windows (w-43ba19db0403). The 409 for releasing one's own current binding names the supported termal_name_source_root clear form (w-bc25de6bbe39). Best practice is still one live claim per named worktree; clear the old name before naming the worktree for a new claim. DL560's host is still on 6a0bc8c5."
+}

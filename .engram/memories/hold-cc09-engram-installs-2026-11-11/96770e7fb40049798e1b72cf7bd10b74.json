@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "hold-cc09-engram-installs-2026-11-11",
+    "revision_id": "96770e7fb40049798e1b72cf7bd10b74",
+    "previous": null,
+    "body_sha256": "1082177d6c039efe28caa7aacb6becf21c8c00c0bf6ae137504959f975b865bc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T23:01:31.843627Z"
+    }
+  },
+  "body": "HOLD (Fable2 #5645, 2026-11-11 23:01Z), in force until lifted by Fable2.\nCause: 12325's PRIVATE CC09 rehearsal doctor repair, test-2c08dd3d, failed. It reported corrupt_store and refused all 220 memory heads as invalid, right after the old-import doctor had passed on the same copy. Root cause not yet proved.\nRules while the hold lasts:\n(1) Hold ALL CC09 Engram installs on Central, DL560 and the Mac, and every live Engram repair, until the cause is fixed AND a new private rehearsal passes repair and readiness on every store type. The DL560 per-store repair exception (Questly 30871f28, PhoenixCodeNav 98bc0e74) is NOT granted before that.\n(2) The proposed morning restart is TermAl-only: e81c9787 plus whatever lands overnight. Engram stays on the installed 0bd70a30. The TermAl train is unaffected; keep landing and installing TermAl.\n(3) 12325 keeps the Central heavy slot released and starts nothing heavy without a named GO from Opus2.\nRelated: both DL560 stores already have a zero-byte engram.db.open-lock (OpenGuard advisory, by design). A future repair exception must account for it."
+}

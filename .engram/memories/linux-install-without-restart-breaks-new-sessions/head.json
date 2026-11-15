@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "linux-install-without-restart-breaks-new-sessions",
+  "head": {
+    "state": "active",
+    "chain": [
+      "b45be0d1eef44da1910c9730211174f9",
+      "eddfdeabcedd4fa08e7b0bde60648895"
+    ]
+  }
+}

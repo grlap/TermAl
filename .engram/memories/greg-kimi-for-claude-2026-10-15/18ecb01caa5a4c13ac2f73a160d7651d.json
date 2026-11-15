@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-kimi-for-claude-2026-10-15",
+    "revision_id": "18ecb01caa5a4c13ac2f73a160d7651d",
+    "previous": "c0e4c54f9c9e40bab2024d1cb814980e",
+    "body_sha256": "732c83c5a9f8aa1143e3dca8af2b630c31bedb55dd40e2459afa870381ab9e3c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-15T00:41:21.425131600Z"
+    }
+  },
+  "body": "Greg's directive (relayed by Engram::Advisor, b9d13887 #801, 2026-10-15T00:37:58Z), quoted from the relay: \"When Claude is unavailable/refuses for capacity, use Kimi as its replacement for the needed independent review or implementation role; record the Claude unavailability and the Kimi substitution on the item, keep the other independent reviewer and all gates/evaluations. Do not wait for Claude capacity. After already-active/frozen work reaches its natural boundary, prioritize simple, independent backlog cleanup ... Defer new complex feature starts.\"\nApplied by Termal::Fable2 to IMPLEMENTATION and EVALUATOR roles: Kimi substitutes on a Claude capacity refusal, with the refusal text and the substitution recorded on the item.\nNOT applied to the COMMIT review pair. CLAUDE.md's commit rule says \"an unavailable Claude reviewer has no stand-in\", and a relayed word never carries a commit. A Kimi-for-Claude reviewer counts toward landing only after Greg's own word in the acting session, or an amended rule (a widening: his verbatim word plus coordinator concurrence plus the final-diff audit). I sent the proposed amendment wording to the Advisor (#802) and asked for his exact words. The cleanup queue order is in #802.\n\nCORRECTION (00:41Z): Greg's EXACT words, per Advisor #805 (from the acting Advisor session, 2026-10-14/15 Pacific), are: \"claude will soon run of tokens / we need to use Kimi as replacement / and focus on simple cleanup / we have enormous backlog\". The longer quote above is the Advisor's restatement. Amendment item: w-63d2a489637f (assigned to Opus2). Concurred clause: \"while Codex or Claude is unavailable … Kimi stands in for the unavailable reviewer, and Kimi never stands in for both reviewers of the same round\". Greg was sent the wording and its consequence (Advisor #804). Landing still needs both coordinators' concurrence plus the final-diff audit."
+}

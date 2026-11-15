@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "restart-plan-revised-by-fable2-termal-5496-5498-on-2026-11-11-07",
+    "revision_id": "39c8f4940d684e2a996fd3d94310ec73",
+    "previous": null,
+    "body_sha256": "7468ccfc1f1cda2fec072e8cb7f4d1a4c3142583886522dd3cdc7ec6e437c811",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T07:10:28.905611300Z"
+    }
+  },
+  "body": "RESTART PLAN, revised by Fable2 TermAl #5496/#5498 on 2026-11-11 07:09Z; this supersedes the timing in post-restart-task-2.\n- The next restart comes only after w-18a1ae323de4 (Greg's 60 s operation limits, P0, Sol-a7bb) is landed and installed. combo50 and combo51 come with it, plus the Engram sync install if it is installable within about 30 min.\n- If w-18a1 slips past about 10:00Z, the restart is for combo50+51 alone.\n- DL560 FULL lane: combo50 -> combo51 -> w-18a1 (the moment it is READY, ahead of the others) -> Engram sync 8f55 FULLs (about 09:00Z) -> the rest.\n- Evaluation sequence, strictly one at a time, stopping on any timeout: Sol-8e1f's same-key w-6e81 resubmit -> w-638b -> w-5c35 -> w-3075.\n- w-5c35 and w-3075 still need their DL560 installs. Do those in the gap between combo50's FULL END and combo51's FULL START.\n- The post-restart census check (closingJob about 0, J about 23, 2-3 latency calls) still applies after that restart."
+}

@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "remote-runner-bundle-transfer-method",
+  "head": {
+    "state": "active",
+    "chain": [
+      "8cb031e58c934a0daf15e1050a9aa0d9"
+    ]
+  }
+}

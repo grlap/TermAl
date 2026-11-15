@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "focused-registered-check-foreground-only-2026-11-14",
+  "head": {
+    "state": "active",
+    "chain": [
+      "1c91da31fb5a47dd99548dbf0055cb02",
+      "f7ac03ad2e3942aebc49a24c9b97e7e3"
+    ]
+  }
+}

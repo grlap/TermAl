@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "no-agent-watches-running-tests",
+    "revision_id": "91700e811eb0420e8dbaa9a1fea7d494",
+    "previous": "40396532f171444cbe42555397f15d51",
+    "body_sha256": "5b5a7a9863a73001917b25e44295b8e3ad740333dbf289fd950e056845377ea4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-08T18:01:10.814165600Z"
+    }
+  },
+  "body": "Greg, 2026-11-08 17:39Z, on Codex 6 posting every 53 s during a FULL: 'why Codex 6 is babysitting testrun? this is a big problem as it consumes the tokens'. Rule: no agent watches a running test. No polling, sleep loops, log tailing, status reads or progress posts during a run.\n\nHow, by case:\n- Remote runner jobs dispatched by the integration owner: one background script that survives the turn; the launcher runs hostless with TERMAL_* removed for that child only; an EXIT trap sends END once to the dispatcher with the run dir and exit code; the agent ends its turn.\n- Local detached gates: --detach --notify to a different coordinator, then end the turn.\n- Registered runs in a root session: the supported wait, then end the turn.\n\nCause found on 2026-11-08: Opus2's dispatch forced a foreground hostless launcher, with no wake and a 'sampled load' report line. Its own account says what produced the 53 s updates is unconfirmed; a long tool wait is a guess.\n\nRelated gaps: w-f7c5c15cf8b0 (domain mailbox never wakes a domain-bound runner), w-5e2f3fba987a (remote run wait and registration).\n\nNever add another polling mechanism as a fix.\n\nConfirmed by Codex 6 itself (via Opus2 #5035, 2026-11-08 18:00Z): 'During the run I continued foreground waits, progress updates, stage/log and load reads under the original dispatch; I did not act on #657 in time.' Lesson: mail to a runner in a foreground wait doesn't stop that wait. Only the dispatch shape prevents polling."
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1e0eb-a91c-7d21-a300-d63303cc54de",
+  "external_ref": null,
+  "title": "Reviewer lens: routine operations scale with changed or pending work, not total history (a full read needs a stated reason and measured bounds)",
+  "outcome": "Reviewer lens: routine operations scale with changed or pending work, not total history (a full read needs a stated reason and measured bounds)",
+  "acceptance": [
+    "The Rust and TypeScript reviewer lenses under .claude/reviewers/ contain a short rule: a routine or periodic operation (tick, rescan, recovery, sync, list, snapshot) does work proportional to what changed or is genuinely pending, not to the total accumulated history. Where a full read is unavoidable, the change states why and gives a measured bound (rows, time, memory) at a realistic size. The text has no quotes or conversation history.",
+    "The change lands under the standing rule, with the review pair clean and the full gate green. No test reads or pins the lens text."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "review-lens",
+    "scaling"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

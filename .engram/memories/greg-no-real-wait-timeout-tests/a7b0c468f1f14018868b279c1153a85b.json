@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-no-real-wait-timeout-tests",
+    "revision_id": "a7b0c468f1f14018868b279c1153a85b",
+    "previous": null,
+    "body_sha256": "e103697bbaa4028a027cdb92bc20cbdb48488ecd34b31fcc6603dca2e033a9c3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T07:56:00.738662200Z"
+    }
+  },
+  "body": "Greg, 2026-11-07 07:55Z (Asistant #40, relayed by Kimi::Consultant, TermAl mailbox 852a55c9 #105), verbatim: „Przez to Kimi. To jest problem z takimi testami. Testy negatywne dla timeout to duzy problem.”\nContext: the real 9 s / 31 s sleeping test added for the 30 s source_id limit change was unnecessary.\nRULE:\n- Don't multiply suite time with real sleeps or real timeouts. Negative timeout tests that wait for real are a big problem.\n- When timing behaviour genuinely needs coverage, use deterministically controlled time or IO (fake clock, scripted process seam, mock timers) and check the observable result.\n- A simple limit or value change needs no timing test at all („Zmien wartosc i tyle”).\n- No new gates and no tautological tests.\nRecorded by Termal::Fable2."
+}

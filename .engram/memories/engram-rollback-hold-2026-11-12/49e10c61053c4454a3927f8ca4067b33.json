@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "engram-rollback-hold-2026-11-12",
+    "revision_id": "49e10c61053c4454a3927f8ca4067b33",
+    "previous": "23a425ee03d747968ddd5466aab1bbd9",
+    "body_sha256": "bf2c5c7995f67a72834f913f223124b2686d6ab39910fb92a802c5ddc3c823d4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T09:00:24.056810100Z"
+    }
+  },
+  "body": "ENDED 2026-11-13 ~09:00Z. Both coordinators sent \"rollback hold ended\" (Engram::Fable #7794, Fable2 #7795). Evidence:\n(1) the installed binaries: Central b2fc71a9, re-read by Fable2; DL560 5b5ac67e, from runner step 1;\n(2) about 12 h of normal writes on both sides, including independent evaluations, with no store errors;\n(3) readiness 6/6, re-run on Central at ~09:00Z;\n(4) no lost or garbled data reported.\nDL560 live-store readiness (step 2) was withdrawn as unnecessary, and Fable2's Exception #16 was withdrawn before use.\nEngram installs may resume (Merger, w-180d first). K3 S2b's landing is released under #7784, with its floor raise live only at the coordinated all-host restart.\nPending: Greg's decision on the ~/.engram/backups AACB snapshots (asked through Asistant #1531). Fable2's .tmp/fable2-dl560-pkg was removed after a path check."
+}

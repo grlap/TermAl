@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-silent-worker-check",
+    "revision_id": "b6a03398990546b49355b88b47ecbb35",
+    "previous": "9034f8adf3034bf3954ed2ec0025b7e4",
+    "body_sha256": "ac1c012e03520b9e5c84003a8ddbb9c5dfd346e8319f90010d64b67035fbbf51",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-14T21:33:38.930038300Z"
+    }
+  },
+  "body": "Coordinator lesson (Termal::Fable2, 2026-10-09 06:08Z; the second occurrence today). Implementers sometimes end a turn waiting for my wake without mailing me: their final text goes only to their own transcript. I wake only on mail, so the pair waits on each other. Today Opus3 sat idle about 45 min after its credited 1b check, and CSharpProof about 70 min after witness (c); earlier, CSharpProof waited about 44 min after its FAIL run. Practice: when an expected report is overdue past the step's normal length, do ONE read of termal_list_sessions (status and preview; this is a read, not polling), and wake any idle worker whose preview shows a finished step. Every wake I send asks the worker to mail me one line whenever it ends a turn waiting on me.\n\nSeen again, 2026-10-12 02:24-02:55Z (Fable2): Termal::Merger committed w-cfcf (9836a6bd) and said \"I'll request acceptance evaluation in the next turn\", then idled about 30 min, because no wake arrived. Rule: whenever a worker says \"next turn\", send it a one-line wake right away, or within a few minutes, after any commit, freeze or naming turn.\n\n2026-10-13 22:12Z, third Merger missed wake today (w-ae2c). The Merger wrote its holder note at 21:33:26Z and ended the turn WITHOUT mailing me; the host credited the record at 21:33:31Z. I noticed only at 22:11Z, when Engram asked whether a TermAl gate was ready: 38 minutes lost.\n\nMECHANISM: after I send a \"holder note first, then END\" instruction, the Merger usually stays silent. On the very next event of ANY kind, read the item's history (show --history). If a holder note and typed_evidence_added are present, send the commit WAKE at once. Apply the same check after the commit wake, before the evaluation wake.\n\n2026-10-14 02:49Z, again: the Merger named the w-254ae root at 02:04Z (effective next turn) and ended without mailing me. It sat idle about 45 min until I checked the item when Engram asked whether a TermAl gate was ready.\n\nRULE ADDITION: after giving the Merger a \"next package\" instruction, check that item's history at my next event. A naming checkpoint with no mail means it needs a wake. Also tell the Merger in each instruction: \"MAIL me whenever you end a turn waiting for a wake.\"\n\n2026-10-14 21:32Z, a third occurrence that cost about 35 minutes. The Merger set the w-c538 focus in its separate final turn at 20:58Z, then went idle without mailing READY. Its READY only came at 21:32Z, after Greg noticed everyone was idle. Lesson: when I ask a worker for \"focus in a separate FINAL turn, then READY\", that final turn cannot be followed by another turn unless something wakes it. So either have READY mailed IN that final focus turn (it is a mailbox send, not a tracker write), or check the worker's session preview in list_sessions within about 5 minutes of the expected READY. Never just end my turn and wait on a READY that has no wake path."
+}

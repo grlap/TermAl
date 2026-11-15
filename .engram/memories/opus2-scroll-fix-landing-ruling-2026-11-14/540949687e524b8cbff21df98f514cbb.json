@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-scroll-fix-landing-ruling-2026-11-14",
+    "revision_id": "540949687e524b8cbff21df98f514cbb",
+    "previous": null,
+    "body_sha256": "0d7350257460386a2b5873f813752bea2b166edd78c1743b6dc5075b3db3e240",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T01:45:04.149949700Z"
+    }
+  },
+  "body": "Fable2 #6039 (2026-11-14 ~01:45Z) ruling on the P0 scroll fix w-84132b835175 (Opus3; no review pair, by Greg's \"nie uruchamiaj code reviews\"):\n- The landing rests on Greg's own word in the ACTING session.\n- His check-in word is in Opus3's session, so OPUS3 does the fast-forward of master and the push, from the master checkout. Opus2 does NOT.\n- Opus2: runs the FULL on the byte-identical re-cut after combo99c lands; does the integration checks (origin/master == base, fast-forward, the 17 ui/src paths byte-identical to what Greg tested); then sends Opus3 an explicit GO with the gated commit id.\n- Opus3 re-verifies those three facts, restores main's staged paths right before the fast-forward, pushes, and verifies the remote contains the commit.\n- If the FULL fails or any path must change, Greg re-tests before any landing.\n- No separate install: Greg restarts with git pull + cargo run --release.\n- No tracker ids in the commit body.\n- After the landing and Greg's confirmation, Fable2 proposes RESET NOW to Engram::Fable.\nRemove once the scroll fix has landed."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-cargo-commit-and-hold-rule-2026-10-26",
+    "revision_id": "f79e60522a544d1abb577ed35007eb0b",
+    "previous": "d008faf8d88f4d58b521f83ef411be0b",
+    "body_sha256": "ea87ba58fa06f9bad49dcbd9a198cd2aea817c82a358b3fe72a4a54705d218b7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-26T07:16:47.351778900Z"
+    }
+  },
+  "body": "BUILD-SLOT PROTOCOL (Fable2 #3573, 07:15Z, 2026-10-26). It REPLACES the free-commit threshold rules of #3567 and #3569. It came after the 06:12Z host crash on commit exhaustion (w-002b151e7b26).\n\nTermAl has ONE build slot host-wide; Engram has its own. A full gate takes BOTH slots for its first 20 min, then TermAl's slot.\n\nFor ANY cargo build or test, or any launcher run:\n1. Mail Fable2 (session-8112) \"BUILD SLOT request <item> <est minutes>\".\n2. WAIT for \"GRANTED\".\n3. At start, still check free commit is at least 20 GB, measured with (Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory/1MB, and use cargo -j at most 4.\n4. Mail \"BUILD SLOT END <item>\" as soon as cargo exits.\n\nNo slot is needed for read-only work, reviews or edits.\n\nRecover any run in flight at a crash from its saved result (summary, then recover); never assume."
+}

@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "engram-add-moves-focus",
+  "head": {
+    "state": "active",
+    "chain": [
+      "85a484a85ada47b49d0f3dd3c8c386c2"
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-restart-builds-from-master",
+  "head": {
+    "state": "active",
+    "chain": [
+      "6df373569918497ba779acf860b0720d"
+    ]
+  }
+}

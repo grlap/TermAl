@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-review-identity-git-default-2026-10-29",
+  "head": {
+    "state": "active",
+    "chain": [
+      "3ebe4a2b8200476d8b54d2e0e8fc6430",
+      "1cbeef04b27445568d61e6d6c6e47881",
+      "167d6b1e2dec4f2989e2e009008a5873"
+    ]
+  }
+}

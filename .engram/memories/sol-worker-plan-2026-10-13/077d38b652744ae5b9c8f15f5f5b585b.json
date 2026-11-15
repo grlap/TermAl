@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol-worker-plan-2026-10-13",
+    "revision_id": "077d38b652744ae5b9c8f15f5f5b585b",
+    "previous": "98aae215c66644989378d9ba2596d131",
+    "body_sha256": "864b59c7f2c5370a811928af20a302af6e1e23b9898b5028e0f84c73381ccde2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T05:22:19.715346400Z"
+    }
+  },
+  "body": "Model preference and historical pipeline direction, not a current worker queue. Engram::Advisor b9d13887 #706 (2026-10-13T02:45Z), verbatim: 'Greg confirms Codex gpt-6.1-sol is the preferred implementation model. Apply it by default to every new coder assignment. Use a different model only when Sol is unavailable or moving already-started work would cost more than continuing it; record that exception.' Later applicable model/capacity rules, including Greg's no-model/owner-change response to transient capacity in greg-decision-2026-10-05-provider-limits r2, still govern; this old preference does not override them.\n\nAdvisor #702/#704 (Oct13 02:36/02:38Z) directed the then-prepared implementation pipeline after the triple gate ended and its record settled, keeping already assigned owners working and roots untouched during the gate. #708 subsequently approved the specific root-session creation route; historical session-to-item maps, exceptions, named roots and receipts are retained in revisions1–6 and on their original work items. They are not today's assignments, reservations or permission to spawn sessions. The old capacity incident and paused-queue state are historical; current supported status and current authority decide recovery. This keeper preserves the unique sourced model direction while moving working state out of current memory. No session, model, owner, queue, source, test or creation authority is changed."
+}

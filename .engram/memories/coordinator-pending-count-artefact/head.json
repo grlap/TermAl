@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "coordinator-pending-count-artefact",
+  "head": {
+    "state": "active",
+    "chain": [
+      "1934f59723fa4b31aa69c97e6eafb46c",
+      "2451d25441224a58addea98ad984aa29"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-search-before-filing",
+    "revision_id": "86ce92650b904144b82985adf2c455c5",
+    "previous": null,
+    "body_sha256": "ead590538918c9af8e1ea704f88cf72e12c4abfcfa238ead520fd07393430557",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T17:14:04.942283600Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-17 17:15Z; my second duplicate today). BEFORE filing any TermAl item, run engram search with 2–3 distinct phrasings of the symptom (for example \"retries without end\", \"bounded retry\", \"re-admission schedule\") and check open AND parked items.\n\nToday's misses:\n- w-7a86 duplicated w-b37b4125dcb8 (registration);\n- w-a61eb0dfbd49 duplicated the older Greg-directed w-ac230a24d0d8 (bounded Engram retries; Greg's 2026-10-11 contract: a 240 s persisted budget from control-admission acceptance, reusing w-cfcf10b68c9b's fields).\nThe duplicate nearly led a worker to design a conflicting bound (8 attempts) against Greg's contract.\n\nIf a near-match exists, note on it, or file a child under it, instead of a new root."
+}

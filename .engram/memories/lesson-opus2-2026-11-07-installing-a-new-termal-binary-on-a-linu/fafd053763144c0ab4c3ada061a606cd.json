@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "lesson-opus2-2026-11-07-installing-a-new-termal-binary-on-a-linu",
+    "revision_id": "fafd053763144c0ab4c3ada061a606cd",
+    "previous": null,
+    "body_sha256": "1402ab22307df1a11528fa3a23d6fbdf61c8d683a396235605d25664fece24bb",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T15:14:02.758292100Z"
+    }
+  },
+  "body": "LESSON (Opus2, 2026-11-07): installing a new TermAl binary on a LINUX host (DL560) while the host runs breaks NEW sessions' TermAl MCP tools until the next restart. The install replaces target/release/termal, and the running host's current_exe() then reads \".../termal (deleted)\". delegation_mcp.rs:259 derives TERMAL_CLI from current_exe(), so sessions spawned after the install get a stale CLI path, and the MCP mailbox and naming tools aren't exposed. Filed as TermAl w-f5b824b8e5d6 (P1). Mitigations:\n(1) Time Linux installs right before a planned restart, or after the live proofs are done.\n(2) Affected sessions can name their source root through the same host route the MCP tool uses: POST $TERMAL_BASE_URL/api/sessions/<OWN id>/engram-source-root {\"work\":\"w-…\",\"path\":\"<abs>\"}.\n(3) Their CLI is still usable at /home/greg/github/TermAl/target/release/termal.\nWindows is unaffected: the renamed .bak keeps the running image's path valid."
+}

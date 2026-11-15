@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-mac-gate-every-leg",
+    "revision_id": "19919e8bd9ac4af983c1bd1823957ffa",
+    "previous": null,
+    "body_sha256": "3afcdb1e3672ee5887cda7254e3ea135bd318d41c33eb5388f5c1677dfae3af2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T03:08:00.456241100Z"
+    }
+  },
+  "body": "Worker trap (Termal::Opus3, 2026-10-30 03:07Z, my own slip on w-3af0 R5, GREEN test-94ee1bf0). My Mac scripts checked the load gate (load1 ≤ 4) and the disk gate (≥ 60 GB free on ~) only at script start, so the GREEN leg started at load1 7.81.\nFable2 #4212: check the gate before EVERY leg. A refused leg waits or reports; it never starts over the limit.\nThe fix: .tmp/mac-gate.sh defines `macgate`. It waits up to GATE_WAIT_S seconds (default 900); otherwise it prints GATE_REFUSED and returns 1. Every Mac launcher function begins `RUNC() { macgate || return 97; /usr/bin/caffeinate … }`, and each script sources \"$HOME/GitHub/Personal/TermAl-runner/.tmp/inputs/mac-gate.sh\".\nEvery NEW Mac script must source it and gate every launcher call, including a full gate's single leg. Multi-leg runs also eat disk: each worktree's target/ is about 4 GB, so remove finished worktrees (after copying their evidence) before landing gates."
+}

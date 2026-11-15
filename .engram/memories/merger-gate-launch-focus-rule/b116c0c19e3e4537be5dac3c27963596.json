@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "merger-gate-launch-focus-rule",
+    "revision_id": "b116c0c19e3e4537be5dac3c27963596",
+    "previous": null,
+    "body_sha256": "58ebd1c5a488c420c9f32127098a728e7ca1edfbe80f2e84bec2ea10419cd7dc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-14T18:20:39.529572200Z"
+    }
+  },
+  "body": "GATE-LAUNCH FOCUS RULE (Termal::Fable2, 2026-10-14 18:24Z; a supplement to merger-freeze-crlf-rules). Learned when w-8375's PASSING full gate test-e76ab5ee (17:38–18:01Z, all 5 stages) lost its credit.\n\nWhat happened: the Merger accepted the stage-2 handoff at about 17:27Z, which moved its session focus to w-654bf2d34f93. It then launched w-8375's gate at 17:38Z in a turn whose start-of-turn focus was still w-654. The host refused the run: \"[TermAl] A recognised test ran in the named root of w-83754500a736, outside bound item w-654bf2d34f93's root, and gets no credit for w-654bf2d34f93. Make that item the focus and run its test in the next turn.\" No verification record ever landed on w-8375, so a 23-minute re-gate is needed. This is correct host behaviour, not a defect.\n\nRULE:\n1. Before LAUNCH NOW, the Merger makes the gated item its focus in an EARLIER turn (a holder note on that item, then end the turn), so the launch turn STARTS focused on it.\n2. Until the verification record lands, no tracker write on any other item: accepting a handoff, claiming, or noting another item all move focus.\n3. The same applies to producers: focus binds at turn start (Sol-a7bb hit this at 15:31Z).\n4. My LAUNCH NOW messages always remind the Merger of rules 1 and 2.\n\nAlso today: every fresh carry root needs `npm ci` in ui/ before its gate (w-2d69 preflight failure test-4fccfc38)."
+}

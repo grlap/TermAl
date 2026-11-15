@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coder-owns-the-working-package",
+    "revision_id": "591ff6585d2b45708b6b8b0502705f67",
+    "previous": null,
+    "body_sha256": "e2b3e0be48d3d8521c359cc4405bd17dba18c2cac5867fe00191e828b342b407",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-08T17:56:43.433338900Z"
+    }
+  },
+  "body": "Greg, 2026-11-08, relayed verbatim by Engram::Asistant (588693a8 #1004): 'For me Coder is responsible for the package. Code changes test chanes, making sure it builds and change is working. The issue might be hard to identify which tests must be run.'\n\nSo the author owns the whole working package: code, the necessary test changes, a build, and meaningful behaviour checks. Integration doesn't take that over.\n\nPractical help when choosing tests is hard, with no universal selection guarantee:\n1. The author names the selection in the handoff and says why it covers the change: the changed modules, their direct callers, and every new test. Cargo filters use module paths, because test files are mounted under different names (memory bara2-cargo-filters-use-module-paths).\n2. When unsure, widen to the whole test module family of the touched area, or ask for a wider targeted run in an Opus2 slot. Don't guess narrow.\n3. Opus2's train preflight is the union of the authors' declared selections plus new tests; whole-binary when a train changes shared host, session or federation core, or persisted schema.\n4. The landing FULL remains the backstop. A failure it finds that the author's selection should have covered goes back to the author, as a failed gate does."
+}

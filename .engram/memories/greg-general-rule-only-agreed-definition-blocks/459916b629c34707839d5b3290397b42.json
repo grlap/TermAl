@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-general-rule-only-agreed-definition-blocks",
+    "revision_id": "459916b629c34707839d5b3290397b42",
+    "previous": null,
+    "body_sha256": "ef98e9fef3e86c0285a4de2b4538da8648840e066e4e03672765acf3c71e900d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T07:39:22.737564700Z"
+    }
+  },
+  "body": "GENERAL RULE, Greg 2026-11-07 07:39Z (relayed by Kimi::Consultant, TermAl mailbox 852a55c9 #97), verbatim: „mysle, ze to jest ogolna zasada, nie tylko zaliczania / te regula bedzie sprawdzac sie wszedzie”. It generalises his earlier „Wszystko, czego nie ma w uzgodnionej definicji credit, nie może blokować credit. Może zostać zapisane jako diagnostyka.” (memory greg-no-rules-blocking-real-test-credit).\nTHE RULE (everywhere, not only test credit): the requirements come from the AGREED definition of the given task or result: its acceptance criteria, the agreed design, Greg's words. Nothing outside that definition may block the result or the workflow.\n- Extra observations become a DIAGNOSTIC, or a separate FOLLOW-UP item; never an added condition.\n- This applies to implementation, tests, review, integration and landing.\n- Widening the requirements needs Greg's decision.\nIn practice:\n- A review finding outside the task's agreed scope is a follow-up item or note, not a landing blocker. In-scope correctness bugs against the agreed definition still block under the commit rule.\n- Coordinators and owners do not invent extra gates, checks or criteria.\n- Reviewers judge only against the agreed definition.\nRecorded by Termal::Fable2."
+}

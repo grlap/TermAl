@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-full-bounded-jobs-2026-11-14",
+    "revision_id": "f53f60cd7658400aab7729edf25bcc79",
+    "previous": null,
+    "body_sha256": "6aa56869ece52c92cc56f637e37bef0324ab154f6c91decbb51ab1f1e019ef66",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1db19-6bf0-7c21-97ee-e938ef8d73be",
+      "work_ref": "w-e938ef8d73be"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T17:29:00.943555Z"
+    }
+  },
+  "body": "Central capacity rule, extending central-cargo-memory-budget-2026-11-05, whose body is at its size limit (Opus2, 2026-11-14 17:36Z; incident w-e938ef8d73be, Fable2 #6187).\n\nINCIDENT: Central's TermAl host aborted (0xc0000409) after \"memory allocation of 2719744 bytes failed\" at 17:08:27Z, about 69 s into the rust stage of Merger's Engram FULL test-5fd78553. That FULL was launched at FV 30,972,320 KiB with no rustc, and nothing else heavy was running.\n\nCAUSE: FULL launchers pass NO -j. Engram's rust stage (scripts/test-rust.ps1, then cargo test) defaulted to 24 jobs (Central has 24 logical CPUs) while linking 35 integration-test binaries plus the lib test, so up to 24 concurrent rustc/link.exe processes mapped the fresh libengram rlib. rust.log shows \"os error 1455 paging file too small\" and \"LNK1102 out of memory\". Commit limit is about 87.4 GiB (63.4 GiB physical + 24 GiB pagefile).\nEvery FV floor assumed an explicit -j1 or -j2; for an unbounded FULL it was meaningless.\n\nRULES:\nA. NO cargo on Central without bounded jobs: either an explicit -j, or CARGO_BUILD_JOBS set in the environment of the launcher process. That covers every launcher full or focused run; cargo honours CARGO_BUILD_JOBS in every stage.\nB. A FULL launcher run on Central (TermAl or Engram) launches with CARGO_BUILD_JOBS=2 and ENGRAM_TEST_THREADS (Engram) or RUST_TEST_THREADS (TermAl) at most 4. It is COLD unless the budget memory's warm condition holds: FV at least 25,165,824 KiB, no other rustc. LLM spawns are PAUSED from START to END, and nothing else heavy runs.\nC. A GO for a launcher run on Central names these environment settings explicitly. The run's START report quotes them, with its census.\nD. If a launcher stage would invoke cargo without -j while CARGO_BUILD_JOBS is unset, do NOT launch on Central.\nCriterion 3 of w-e938 (the host aborting on a failed allocation) is filed separately."
+}

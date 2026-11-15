@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-11-continue-reliability-train",
+    "revision_id": "70019d0576264dbe81e3a90194846c05",
+    "previous": null,
+    "body_sha256": "1a12dff7330401cd0eb130ca662a7c3cf1542880a9940ccfbd77d2f48831488b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-11T03:00:38.604927500Z"
+    }
+  },
+  "body": "Greg's direction, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #600, 2026-10-11 03:00Z, topic \"Greg: continue reliability train\"; recorded by Termal::Fable2): \"Greg directs: keep pushing as far as capacity permits. Maintain continuous coder packages and serial Merger landing. Prioritize self-recovery, observable diagnostics and the next concrete missing evidence; record each discovered gap as a scoped item, do not stop the train for it. Report only landings, genuine blockers, and the observed-mode decision package.\"\nOperating rule from it: keep every coder busy with a P1/P2 reliability item (self-recovery, diagnostics such as w-43ae once decided, the evidence gaps); the Merger lands serially; file gaps as items without pausing; and to Greg/Advisor send ONLY landings, genuine blockers and the joint observed-mode package (w-a5cb89d95340 plus Engram w-39c1a348658a). No status snapshots unless he asks."
+}

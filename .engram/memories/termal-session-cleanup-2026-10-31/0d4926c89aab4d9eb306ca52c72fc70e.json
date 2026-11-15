@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-session-cleanup-2026-10-31",
+    "revision_id": "0d4926c89aab4d9eb306ca52c72fc70e",
+    "previous": null,
+    "body_sha256": "47deb109894e7808657d69bb5807ccb056c34e1372522691ae84d3f6cb470215",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-31T23:38:40.104123300Z"
+    }
+  },
+  "body": "Session cleanup in project-6 on Central, on Greg's word via Advisor b9d13887 #2944 (2026-10-31 23:28Z): \"Usuwanie bezpiecznie zidentyfikowanych nie wymaga kolejnej prosby\". The route is POST /api/sessions/<id>/kill. It returns the full state snapshot (~25 MB), so send the output to a file. It has NO undo, it garbage-collects the delegated child sessions the session owns, and the host itself refuses on Engram removal obligations. Checks before a kill: GET /api/sessions/<id> (status, messageCount, pending prompts, queuePaused, the last assistant text) and GET /api/sessions/<id>/delegations (skip any session that owns delegations, since their review results may be cited as evidence). At 23:37Z I deleted 15: the empty Codex threads 7732, 8712, 8920, 9191–9196, 12826 and 15294, the empty 14598, plus O1-A 13930, WindowsB-Gate-Courier 14053 and CheckIn 11394. I kept CSharpProof 11519 (steps 2 and 3 open), UI 11881, Codex-WorkspaceLookupsFresh 11336 and PhoenixRunner 11410 (they own delegations), Grok 6721 (retained Engram prompt, paused), Architect1 8982 (stopped by Greg), and all active workers. I resumed Sol-license 12415 and Sol-c593 13170 (model-capacity errors; now active)."
+}

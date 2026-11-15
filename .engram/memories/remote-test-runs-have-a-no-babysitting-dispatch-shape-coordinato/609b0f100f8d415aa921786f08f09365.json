@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "remote-test-runs-have-a-no-babysitting-dispatch-shape-coordinato",
+    "revision_id": "609b0f100f8d415aa921786f08f09365",
+    "previous": "7a1c865f88ef488f934d3ac230eff7e6",
+    "body_sha256": "e182c3d681c9f7629c53d499a09c23abd0d3d44ea0fc6a715521cc9fc61242c0",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-08T18:59:07.871876900Z"
+    }
+  },
+  "body": "Remote test runs have a no-babysitting dispatch shape (coordinator decision, Termal::Fable2 mailbox 4daa5b87 #5028, 2026-11-08, after Greg's 'why Codex 6 is babysitting testrun? this is a big problem as it consumes the tokens'). Every remote FULL or focused job: the agent starts one background script that survives its turn (setsid/nohup on Linux, the Start-Process equivalent on Windows). The script runs the standard launcher once, hostless, with TERMAL_* removed for that child only. An EXIT trap using the inherited TERMAL_CLI sends END once to the integration owner with the run directory and exit code. The agent then ends its turn: no polling, sleep-loops, log tailing, status reads, progress posts or load sampling. The integration owner runs no watcher either: if a run goes quiet, it reads `summary RUN_DIRECTORY` once on an ordinary wake.\nWhy hostless is unknown. Correction from Fable2 #5056: the earlier reason cited here (w-5e2f3fba987a, registration refused from an independent clone) is wrong, since that item completed on 2026-11-06 with origin registration and durable host-qualified remote waits, observation-only and uncredited. The shape stays for now. Open check, not urgent: whether a registered remote run plus the remote wait gives the runner a real wake and still produces test-ref evidence; Engram::Fable saw termal_resume_after_test_runs return 404 'test run is not indexed' for remote runs, so test that rather than assume it."
+}

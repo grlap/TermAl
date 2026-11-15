@@ -1,0 +1,29 @@
+{
+  "id": "01a1ded5-d480-7e50-9cae-c5baae87e69f",
+  "external_ref": null,
+  "title": "Keep Cargo output pins out of non-Cargo helper stage environments",
+  "outcome": "Parallel scheduling preserves the sequential helper-suite environment while every Cargo writer uses the validated output paths.",
+  "acceptance": [
+    "Apply validated Cargo output pins only where Cargo writes, or otherwise preserve the non-Cargo helper environment; a behavioral fixture compares sequential and parallel helper observations and confirms Cargo writers retain both validated output paths."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "dl560",
+    "performance",
+    "review-low",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dae9-ede6-7e10-a850-06f3c0e4467d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

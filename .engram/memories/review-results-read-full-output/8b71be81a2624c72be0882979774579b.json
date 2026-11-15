@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "review-results-read-full-output",
+    "revision_id": "8b71be81a2624c72be0882979774579b",
+    "previous": null,
+    "body_sha256": "9ddda0bd29fdda58e5ea80c26717c677f7ab6e8efb3c38ca28cd0bad1d1c3542",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a14582-0dba-7cd0-8714-9d4b9b00c603",
+      "work_ref": "w-9d4b9b00c603"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T16:19:08.901275900Z"
+    }
+  },
+  "body": "Review-integrity rule (Termal::Fable2, 2026-10-16 16:20Z; P1 w-9d4b9b00c603). A delegation's COMPACT result packet can show \"Findings: None\" while the child's full output lists real High/Medium findings: an Engram explorer, delegation ea4ec2c6, had 1 High and 4 Medium. RULE for every /review-code pair child and explorer: judge the result ONLY from the FULL paged output (termal_get_session_result, paging until complete:true). Never call a review clean from the compact packet's \"None\". Every coordinator check of a pair result asks the worker: \"verified from full output?\". Retire this rule when w-9d4b lands and is running."
+}

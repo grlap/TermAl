@@ -1,0 +1,18 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "host-restart-via-cargo-run-2",
+  "head": {
+    "state": "active",
+    "chain": [
+      "3ff111c249da4d22acf107b98373c999",
+      "6de0199e6d6b47119aafb8f142f0b116",
+      "85ed611c27544b2cbab69f2767adeb96",
+      "8d8cbe68bbcd45b8a18d93319131c2b1",
+      "ede5d92bfe2e48e3b72737240879cfc8",
+      "9655623cb28e4f728ef2835763927d94",
+      "c389edd17fb641ec906143c10c819ba4",
+      "876f0a8f541947d48497ed1c57288eae"
+    ]
+  }
+}

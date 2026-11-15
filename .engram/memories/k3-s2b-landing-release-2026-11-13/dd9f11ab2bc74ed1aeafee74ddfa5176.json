@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "k3-s2b-landing-release-2026-11-13",
+    "revision_id": "dd9f11ab2bc74ed1aeafee74ddfa5176",
+    "previous": "32cc9a066f884b3da08ecf92a08acf67",
+    "body_sha256": "d39c2443fa29bfd6d37d2d639f465c76fad9e27e971e9d864bb99c69b83f0f85",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T09:02:08.739125Z"
+    }
+  },
+  "body": "UPDATE 09:05Z (Fable2 #5881/#5883): the AACB rollback hold has ENDED (Engram::Fable #7794 plus Fable2), so Engram installs resume on the Merger plan, w-180d first. K3 S2b's landing is released under the standing rule and #7784: land and install, no restart, once its fresh multi-turn pair is clean and its FULL green. The reader-floor raise goes live only at the coordinated all-host restart.\nLanding order (Fable2 #5883): combo88 (277b 600568fe) > b078 (ab787fa2) > 0419 (9c020ae4) > K3 S2b > P0 w-492e. K3's earlier rounds on 10034061 did not count: Claude completed, and both Codex runs stopped early.\nc593 cuts a FRESH K3 candidate on the chain top 9c020ae4, resolving the src/test_runs.rs conflict with b078 and any 0419 overlap (src/main.rs, src/persist.rs), then runs the approved multi-turn round on that exact input. Fable2 sees the identity fields first.\nIf any chain member below K3 changes before landing, K3 re-cuts and re-reviews, and Opus2 tells c593 at once.\nThe P0 492e (03d4) is NOT READY (3 Mediums on ab83697a). It returns as a fresh candidate on the then-current master.\nWindows leg for K3: c593's 13 Rust filters (expect 42) plus scripts/test-launcher-request-message.test.mjs (expect 17), on Central, on the final K3 carry. The selection is saved in .tmp/q8111/k3-windows-leg-selection.txt."
+}

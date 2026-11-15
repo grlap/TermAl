@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-merger-model-2026-10-10",
+    "revision_id": "84663f67f09749fc81b81ffd748e10a3",
+    "previous": null,
+    "body_sha256": "69f8b607e20af2685377cafe746c2eb3227aae84f50a11bea6291da5515cfa2e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-10T23:44:03.164368Z"
+    }
+  },
+  "body": "TermAl operating model from 2026-10-10 about 23:45Z (Greg adopted it for Engram; Advisor b9d13887 #553 asked TermAl to apply it; Termal::Fable2's assessment in #554). CONTINUOUS PRODUCERS plus a SERIAL MECHANICAL MERGER.\n- Producers (coders) prepare disjoint packages in isolated worktrees: implementation, RED/GREEN, freeze, and a clean review pair. Then they HAND OFF the item (engram handoff, or a release plus a note) with a package note: freeze, base, root, pair delegations, run ids, criteria changes. Then they start the next item. Producers no longer carry after every landing.\n- The Merger is Termal::Opus2 (session-8111, the integration owner per CLAUDE.md). It claims the handed-off item, carries it onto current master (hunk-identical: no pair; merged or changed hunks: back to the coder for a confirmation pair or a fix), re-names the root ONCE, and gates on Fable2's LAUNCH NOW. Then it commits, evaluates with the turn held open, and lands and installs. Conflicts and gate failures go back to the coder.\n- Why the handoff: a full gate is credited to the claim of the launching session, from a root named under that claim.\n- Fable2 controls the queue, the gate alternation with Engram, review and evaluation rulings, and landing order.\n- If Opus2 is down (Claude limits), a Codex session can stand in; the procedure is mechanical.\nFirst packages: w-d3e97ac8a353 (Opus3), then w-539ea7e8b506 (BarA1), then w-cd57679e0bb6 (CSharpProof) and Codex's w-aec234e3f7d0 and w-b21c5132848c after their pairs. This grants no new authority; commit and push stay with the integration owner."
+}

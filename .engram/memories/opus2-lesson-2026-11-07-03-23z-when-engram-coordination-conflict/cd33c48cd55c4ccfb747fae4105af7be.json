@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-lesson-2026-11-07-03-23z-when-engram-coordination-conflict",
+    "revision_id": "cd33c48cd55c4ccfb747fae4105af7be",
+    "previous": null,
+    "body_sha256": "ef62dd8f89a39100093f4b2255ac0d719cccb2ee83eff2e49e7e34c3727f8d56",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T03:24:40.022556600Z"
+    }
+  },
+  "body": "Opus2 lesson (2026-11-07 03:23Z): when Engram coordination conflicts — Engram::Merger says one thing while Engram::Fable says another — don't act on either until BOTH confirm in their own messages. On 2026-11-07 I re-GO'd the Windows B Engram runner to fcf8b52 on Merger #168 (\"Fable agreed\"). Fable #322 then kept 0cfb2341, and I had to withdraw within a minute. Engram::Fable is Engram's coordinator, so its decision prevails; wait for Fable's own message before switching a running job."
+}

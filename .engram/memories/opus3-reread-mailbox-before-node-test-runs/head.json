@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus3-reread-mailbox-before-node-test-runs",
+  "head": {
+    "state": "active",
+    "chain": [
+      "d77cb513449a432aa7f8854eb9ab3232"
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "next-joint-restart-baa6-four-hosts-2026-11-14",
+  "head": {
+    "state": "active",
+    "chain": [
+      "e5872e4854914f6183928ac0a3fe3dfa",
+      "19dbe5f6e0414815b794c4479f486dcc",
+      "43b207bf09774c72a5b49d1cced0fa3d"
+    ]
+  }
+}

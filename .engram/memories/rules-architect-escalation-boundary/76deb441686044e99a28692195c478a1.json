@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rules-architect-escalation-boundary",
+    "revision_id": "76deb441686044e99a28692195c478a1",
+    "previous": null,
+    "body_sha256": "10510ac4204e1d94e7378f17be15bc0c7d642e5919b081f2baaf7714e9df4251",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-08T15:36:59.562133Z"
+    }
+  },
+  "body": "CANONICAL for TermAl: the architect escalation boundary, Greg's direct direction of 2026-10-08. It is copied verbatim from Engram's project memory of the same key, revision 1 (relayed by Engram::Advisor, TermAl mailbox b9d13887 #381), and recorded here by Termal::Fable2 so TermAl sessions read it. It supersedes conflicting older role descriptions, including termal-roles.\n\"Architects are scarce, expensive escalation capacity. They act only when an explicit architectural decision is needed, or when an implementation agent reports that it cannot proceed and needs an architectural decision.\nArchitects do not distribute work, run check-ins, implement code, execute tests or gates, conduct routine code review, request or record evaluations or gate credit, hold operational claims, or land and integrate changes. There is no exception to preserve an existing gate: transfer the item to an executor and rerun the gate under that executor when necessary.\nCoordinators, coders and dedicated read-only reviewers own routine work. A separate non-coding check-in agent collects status and blockers; it does not code, test, review code or decide architecture.\"\nTermAl application, 2026-10-08:\n- Architects: Termal::Architect1 (session-8982) and Termal::Architect2 (session-8983).\n- Check-in agent: Termal::CheckIn (session-11394, a Codex session with a read-only sandbox).\n- Coordinator: Termal::Fable2 (session-8112).\n- Integration owner: Termal::Opus2 (session-8111)."
+}

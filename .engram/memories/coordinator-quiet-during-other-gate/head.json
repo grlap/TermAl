@@ -1,0 +1,16 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "coordinator-quiet-during-other-gate",
+  "head": {
+    "state": "active",
+    "chain": [
+      "d0ef27a66d5d40c6ac73391f99defefb",
+      "f94eb5a677aa4b71b5abc891abad9619",
+      "e53348760e3f4045b46b0db8ec9af642",
+      "9466ef2638aa4f3bb9ee42c9156f85be",
+      "51adb123e2d04f28bf588dded9efd7df",
+      "d2ceb25d6b094f47ad572db5056b4e87"
+    ]
+  }
+}

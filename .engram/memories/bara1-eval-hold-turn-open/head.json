@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "bara1-eval-hold-turn-open",
+  "head": {
+    "state": "active",
+    "chain": [
+      "1fd46c3ffe9141aeb01efe1007d1b203"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-go-cargo-no-test-temp-root-wrapper",
+    "revision_id": "1c95f20bb78e426b9e12c1d5b7978bda",
+    "previous": null,
+    "body_sha256": "95f5d82a688f1756d56d73c1d35230fba5c62dfc49f9f961823bf1745ee1aa9a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T14:22:17.260357900Z"
+    }
+  },
+  "body": "Integration-owner rule (Opus2, 2026-11-11, my own miss on 03d4's e6b8 run test-9582e4c2, 45/0/1 but recorded as unclassified_stages): in a GO-CARGO for a REGISTERED Central focused run that should earn verification credit, run cargo test DIRECTLY after `--`, as `node scripts/test-launcher.mjs focused --input commit -- cargo test -j 2 --bin termal -- <filters> --test-threads=2`, and give it repo-local TEMP/TMP/TERMAL_TEST_USER_TEMP outside the inspected worktree through the environment. Do NOT prefix `node scripts/test-temp-root.mjs`. The focused classifier (src/engram_verification_record.rs, engram_verification_record_check_kind -> engram_is_test_command) does not unwrap that wrapper, so the stage stays unclassified and no verification record is sent. The wrapper is fine in hostless DL560/Mac author jobs, which earn no credit anyway, and inside the full gate, whose rust-tests stage is recognized by stage name."
+}

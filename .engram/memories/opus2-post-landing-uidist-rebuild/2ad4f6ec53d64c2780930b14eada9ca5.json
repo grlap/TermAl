@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-post-landing-uidist-rebuild",
+    "revision_id": "2ad4f6ec53d64c2780930b14eada9ca5",
+    "previous": "6d70928a85d746c89bd5cac34387f911",
+    "body_sha256": "e2d20ff8b7ab2ab8c3a00e59ae7ef104b5287ad03bf8f269516f7aad33716119",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-12T00:13:17.314225700Z"
+    }
+  },
+  "body": "POST-LANDING CHECKLIST ITEM (Opus2, from Fable2 #5656, 2026-11-12 00:00Z), after my own lapse: combo58 be3b6fd8 and combo67 9cba6226 landed UI changes that were never served.\nFor EVERY landing whose contribution touches ui/ (check with `git diff --name-only BASE C -- ui/`), the install step includes ONE ui/dist rebuild:\n- in the master checkout, from the exact landed clean master (`cd ui && npm run build` into ui/dist.new);\n- swapped with .tmp/q8111/swap-dist.mjs;\n- outside any gate window, ours or Engram's.\nCAUTION: swap-dist.mjs leaves its backup as the sibling ui/dist.<suffix>.bak. Per opus2-uidist-backup-under-tmp (Fable2 #5211), move that backup under .tmp/ IMMEDIATELY after the swap. A sibling makes the master checkout dirty for committed-input runs. Alternatively, change the script first.\nReport the build identity (index.html and js/css hashes), a served check, and greps for the landed UI strings.\nAuthority: Greg's standing approval, memory greg-standing-ui-dist-rebuild; don't re-ask. It grants no restart.\n\nUPDATE (2026-11-12 00:13Z, first use): do NOT build into ui/dist.new. Greg's Vite DEV server on :4173 (memory central-ui-serving) watches ui/ and locks any new directory there; swap-dist.mjs then fails with 30x EPERM, though safely, with the live dist untouched.\nUse instead:\n1. `cd ui && node node_modules/typescript/bin/tsc --noEmit && node node_modules/vite/bin/vite.js build --outDir ../.tmp/ui-dist-new-<c8> --emptyOutDir`;\n2. from the repo root, `node .tmp/q8111/swap-dist-tmp.mjs ui-dist-new-<c8> ui-dist.<date>-before-<c8>.bak`. It renames ui/dist to the .tmp backup, then the new build into ui/dist.\nServed check: `curl :8787/` references the new index-*.js. Note that the :4173 dev server already shows landed UI on page reload; ui/dist is the :8787 fallback."
+}

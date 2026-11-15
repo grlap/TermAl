@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-fresh-worktree-npm-ci",
+    "revision_id": "7605ec8d98c54024aac804280ce9f16e",
+    "previous": null,
+    "body_sha256": "5d532e2e738deda69243245d38cd818d32c99c98903ec4e1f65bccfab3ceb256",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T08:02:32.454329700Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-17 08:03Z, my own miss). A FRESH worktree, such as a train carry worktree, has no ui/node_modules. The full gate's runner then fails before any stage with ENOENT ui/node_modules/typescript/bin/tsc (TRAIN-4 test-9979f1c8). Before LAUNCH NOW in any worktree that was newly created, schedule `npm ci` in its ui/ as its own command, and check that it's present in the pre-flight (ui/node_modules/typescript exists). The npm ci must happen in an allowed window, not during the other project's gate."
+}

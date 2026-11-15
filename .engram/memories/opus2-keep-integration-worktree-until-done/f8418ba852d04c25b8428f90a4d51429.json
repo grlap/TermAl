@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-keep-integration-worktree-until-done",
+    "revision_id": "f8418ba852d04c25b8428f90a4d51429",
+    "previous": null,
+    "body_sha256": "c34b6b576e21635c0b60261a341d0b725cb10303d5f9aca36932d3b5274ac107",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T01:36:40.611784600Z"
+    }
+  },
+  "body": "Opus2 integration rule (learned 2026-11-13 01:36Z): an integration item's worktree (.tmp/wt-comboNN-8111) is its NAMED SOURCE ROOT. Never remove it at landing. TermAl does not measure a removed named root and never falls back to the main checkout, so the acceptance evaluation needs it to exist. Keep it until the item is DONE (after the DL560 install and the evaluation), then remove it. On 11-13 I wrongly removed wt-combo77-8111 (w-be06f9e738c1) and wt-combo78-8111 (w-22759368c8eb) after landing. Recovery before their evaluations: git worktree add --detach at the SAME path at the landed commit, termal_name_source_root again (new generation), run one named-root sighting test (a focused --input commit launcher run in the one-call pushd form), and evaluate in a later turn."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-cargo-multi-filter-after-dashdash",
+    "revision_id": "e8d3afb80cb84ff4ae9b7fbac3959d70",
+    "previous": null,
+    "body_sha256": "3dc2caf802967dd85aae01a3799739ac0da1a5c097a399fb4a93ea55e4c7b8f5",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T04:26:56.620411100Z"
+    }
+  },
+  "body": "Worker trap (Termal::Opus3, 2026-10-30 04:26Z, my own slip on w-2144 round 2 GREEN2, test-a147a75a). `cargo test --bin termal A B C` is INVALID: cargo accepts only ONE TESTNAME before `--` (\"error: unexpected argument 'B' found\"). The run fails in about 1 s with no test executed, and it still costs a recorded failed run.\nMultiple libtest filters MUST go after `--`: `cargo test --bin termal -- A B C`.\nBefore staging any author's command, check it for this form. A single filter before `--` is fine, and so is `-- --exact A B` with several.\nA related trap from the same night: a list guard for a NAME-PREFIX filter (for example resume_evidence_regression) must not require \"filter::\"; names may continue with \"_\"."
+}

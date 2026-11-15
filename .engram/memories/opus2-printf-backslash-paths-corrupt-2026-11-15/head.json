@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-printf-backslash-paths-corrupt-2026-11-15",
+  "head": {
+    "state": "active",
+    "chain": [
+      "5b6de4ee4ece40ee90ce65cf18027e66",
+      "32e13b28898546d083ce141bc8df000b"
+    ]
+  }
+}

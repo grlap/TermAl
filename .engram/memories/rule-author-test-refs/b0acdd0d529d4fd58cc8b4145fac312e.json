@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rule-author-test-refs",
+    "revision_id": "b0acdd0d529d4fd58cc8b4145fac312e",
+    "previous": null,
+    "body_sha256": "aad87346b6c5ed0aa65bca0c1aee6be25a94f8a20d2307f8a8560199922ff3fa",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T21:24:37.300965Z"
+    }
+  },
+  "body": "Author test refs, in force in TermAl's CLAUDE.md and AGENTS.md since combo29c landed (master d53b3c7a, pushed 2026-11-09 21:24:05Z), on Greg's word in memory greg-word-2026-11-09-author-test-refs. The session that wrote a candidate commit may push exactly that commit to origin as `refs/heads/author-test/<item>-<commit8>`, using the explicit refspec `<commit>:refs/heads/author-test/<item>-<commit8>`, at any stage and with no review first. It may never push to master or any other branch, push to another remote, force-push, rebase or merge.\n- Create only: first confirm the ref is absent on origin, and never update an existing ref.\n- The candidate's parent must already be on origin.\n- The pusher confirms the whole candidate is safe to publish, since the repo is public.\n- The runner fetches the ref, checks the commit out in a fresh, clean worktree, and confirms the commit id before running.\n- On TermAl the run is evidence only, never a landing gate.\n- The pusher deletes only that ref, with an explicit refspec, once the evidence is recorded and at the latest when the item closes, and records the push and the deletion on the item.\nThe coder test-execution skill points to this route. Engram has the same rule, except there such a run counts like a bundle run of the same commit. Known Lows filed by Opus2 for a later change: the \"Before every push\" bullet lacks the carve-out, and an orphaned author ref can only be deleted by its pusher."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-one-voice-on-wire-decisions",
+    "revision_id": "c798402fbd2143798a9b8ab80fb51fd3",
+    "previous": null,
+    "body_sha256": "9d3ad6f682a87e1f35556b2397604a82ea1bbfcb9a080d73eebce50ca9d653c6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T15:04:18.987902200Z"
+    }
+  },
+  "body": "Lesson (Termal::Fable2, 2026-11-07 15:04Z, my own slip). On the content-v1 observation bound, I sent Sol-03d4 \"lean generous\" guidance (#2825). Engram::Fable had already ruled \"keep 64 KiB, degrade\". Then each of us aligned to the OTHER at the same minute, and the coders got four contradictory messages. Rule: for a wire owned by the other project, its coordinator decides. Do not send design guidance to coders on that wire before agreeing it with that coordinator, and when the two crossings are discovered, send ONE message marked FINAL that names the decider and supersedes the earlier ones. Final outcome: complete identities, about an 18 MiB frame for the observation operation only (Engram::Fable #6999)."
+}

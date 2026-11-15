@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-claude-gate-launch-rule",
+    "revision_id": "6a5c5bfaed074f8c9b9db3e369259885",
+    "previous": null,
+    "body_sha256": "ebefeea6cfe22accf33c8e315984c0115047b38b5b3ec73303d4fe4481006d5d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T22:20:46.562098800Z"
+    }
+  },
+  "body": "CLAUDE LANE GATE LAUNCH (interim, Fable2 2026-10-17 22:20Z): on the running host build 459f8540, a Claude root session's Bash-BACKGROUND gate launch fences its own credit. It counts as outstanding background work (ClaudeHazardCause::OwnSession, src/claude_outstanding_work.rs). Bug: w-b576a44fb793 (P1).\nUntil it is fixed, Claude lanes (Opus3 and other Claude lanes: BarA1, BarA2, CSharpProof) launch full gates DETACHED, as one FOREGROUND Bash call:\n  pushd \"ROOT\" && node scripts/test-launcher.mjs full --detach --notify session-8112\nin a turn that begins focused on the item, then end the turn. Fable2 gets the notify and wakes the lane.\nCodex lanes keep their usual form."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-author-preflight-lessons-2026-10-30",
+    "revision_id": "5917c036a45742a9afb84196cc23faee",
+    "previous": "72fb45322b8f4cfb8417e053826f3bc9",
+    "body_sha256": "f23945ea2b6aa83ce0d317a3aaeefe20a1d64b626a825da8c33350cb49a235f5",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T05:51:42.635206800Z"
+    }
+  },
+  "body": "Author validation lessons, source Fable2 mailbox #1137 (message e2017f3f-c02c-4db0-a128-933a2a598144) and #1139 (message d1f9d8b4-9ca2-46b7-90ec-8f66cae56bbd), session-13169, 2026-10-30. This records validation practice, not new execution or commit authority. For new native/cross-platform code, verify the exact pinned binding symbols/types and run the authorized focused compile in the named author root before sending a candidate to a scarce remote slot. Host-utilization R1 reached Windows B before compiling: two missing PDH_FMT_NOSCALE symbols in windows-sys 0.60.2 and one uninferred JoinSet stopped the RED listing. This is a compile failure, not a RED assertion result or test validation. Preserve its original run; fix and refreeze before fresh controlled validation. Fable specifically directed the author command node scripts/test-launcher.mjs focused -- cargo check --all-targets on Windows for this candidate.\n\nFocused test counts prove only the selected names. Reset R6's five narrow filters (root_dispatch::project_reset_wait, project_containment, control_transport, changing_connection_settings, engram_mcp) selected 268 passes but excluded all seven later integration failures. Future focused filters list the affected exact names before execution; compare that list to the behavior/caller inventory rather than inferring coverage from the count or compiled file. A compile/zero-selection failure is not a negative control. Migrated async fixtures drive the actual scheduler and keep prior delivery/identity/debt guards; mutation-check that their target faults are still detected. Internal shutdown sentinels must be distinguished from actual wire frames, with a positive wire-frame control. Existing resource bookings, shared launcher, waits, standard pair and full-gate rules continue to apply.\n\nAdditional confirmed author miss and coordinator direction, 2026-10-30, Fable2 mailbox #1167/message3df6c03e-39df-48b7-af4f-6fe40b9f8186 (full read). R7 A-mutant LIST test-204abac4-27d6-4c6a-94ee-8c38ec116b4b exited101/selected0 because the first-use fixture named DispatchTurnResult::Immediate; the actual enum has Dispatched, DispatchedAfterQueue and Queued. This is the second remote slot stopped at compilation that day, after utilization R1. Verify actual repository enum/API names instead of importing a familiar name from memory. Fable's explicit instruction: before the next freeze/booking, run a focused cargo test --no-run through the launcher on Central, after a named resource release and census (20GiB free-commit floor, one Cargo job at a time; install build has priority), OR ask Opus3 for a compile-only leg FIRST. A remote compile-only leg on the exact new input is the authorized fallback when Central is reserved. Never count compile failure/zero selection as a negative control, and never reuse old-input GO or fingerprint after fixing it. Generation assertions also name their capture boundary: the reset already increments dispatch_generation once when it raises the fence, so preservation means no additional inspection/Save increment after that known transition, not equality to a pre-reset snapshot."
+}

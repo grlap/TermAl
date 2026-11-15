@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-committed-input-eval-needs-classified-record",
+    "revision_id": "c32219a5c5244eccad25715db1c102f6",
+    "previous": null,
+    "body_sha256": "3af1cc46ce916c38adde9425c2550fdd2dd70e8cde3ad0142fafb4eb96454bc8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T03:46:11.897207500Z"
+    }
+  },
+  "body": "Learned 2026-11-13 03:45Z (Sol-edfd #1222, w-36d0): an acceptance evaluation of a committed-input item is refused before spawn unless the named root's HEAD has a CLASSIFIED Test or Build record. API 409 committed_input_no_eligible_run means there's no eligible run at HEAD. API 409 verification_record_unclassified_stages means the run was eligible but unclassified, e.g. `node scripts/test-launcher.mjs focused --input commit -- node --version`. A node --version sighting gives eligible input and a named-root sighting, but NOT the classified record evaluations need. For Opus2's own integration items (combo73..83), the closure check in each named root must be a recognized test or build at the landed commit: vitest for UI combos (npm ci in ui, then focused --input commit -- node ui/node_modules/vitest/vitest.mjs run --root ui <file>), or a registered cargo test/check for Rust combos (Central slot). Don't rely on the node --version sightings for evaluation."
+}

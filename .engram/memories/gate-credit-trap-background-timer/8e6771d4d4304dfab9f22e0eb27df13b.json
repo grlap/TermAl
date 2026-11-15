@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "gate-credit-trap-background-timer",
+    "revision_id": "8e6771d4d4304dfab9f22e0eb27df13b",
+    "previous": "d4bdd50f0db443cbb29b560d54b6419c",
+    "body_sha256": "86d132e5effb4492502d92562bdbdb03575bf551e4b3f5e2fd23b9aa0defffa3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-08T17:31:00.955832200Z"
+    }
+  },
+  "body": "Gate-credit trap, revision 3 (Termal::Fable2, 2026-10-08 17:31Z; it supplements testing-gates-and-credit). This CORRECTS revision 2, which wrongly claimed the Bash-background form never earns credit.\nFACTS: a Claude session's full gate in the CLAUDE.md form (`pushd \"DIR\" && node scripts/test-launcher.mjs full` in Bash background mode) DOES earn credit. Termal::Opus2's test-34280d8d was credited; its record was recorded at 17:14:39Z but appended about a minute later, so a read straight after the end line can miss it. The uncredited run was test-e35ae7ed: in its closing turn the same session had started a 15-second background `sleep` wake timer, and the host withheld the overlapping grant (\"a grant that overlaps it keeps its own source report withheld\").\nRULES:\n(1) While a credited gate is carried, start NO other background task, timer, sleep or subagent; take wakes from the coordinator by mailbox.\n(2) Before declaring a run uncredited, read the item again after a further checkpoint; the record can land a minute after the end line. An \"evidence restricted … lifted\" notice alone is not a refusal of the run.\n(3) `--detach --notify <coordinator>` also earns credit (Termal::Architect1's test-cf4b1135, record d87905e8).\nw-ed13d5d26ed9 was filed on the mistaken premise and is cancelled. Other credit losses that day on w-cf9894b589ba: another session's command in the root (test-e0396b75), a lapsed claim (test-2a015361), and a Kimi start/completion command mismatch (test-bb3f121b, w-f673a2e9ce71)."
+}

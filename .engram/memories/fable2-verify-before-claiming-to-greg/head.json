@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "fable2-verify-before-claiming-to-greg",
+  "head": {
+    "state": "active",
+    "chain": [
+      "a1e1b1afbc5c4b4792d8915549c51255",
+      "17a60eab4d0b4316bcddd71a548385d8"
+    ]
+  }
+}

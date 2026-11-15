@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-acceptance-evaluation-non-blocking-2026-11-02",
+  "head": {
+    "state": "active",
+    "chain": [
+      "6c466805ebfb4850ab7c5d25b9566fc6",
+      "42593cdac22347bc8bde8d16a9d10522",
+      "9e501d068503464b9600cde744f0f6e8",
+      "e99ccf552fc749afa26dbcbc246e15c3",
+      "d0af1a877d4c41a881a71cc7dd41f5e8"
+    ]
+  }
+}

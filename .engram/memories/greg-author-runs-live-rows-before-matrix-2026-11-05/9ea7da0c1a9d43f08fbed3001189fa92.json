@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-author-runs-live-rows-before-matrix-2026-11-05",
+    "revision_id": "9ea7da0c1a9d43f08fbed3001189fa92",
+    "previous": "e4361cdd4f254f2a9006ec8083a5b0e9",
+    "body_sha256": "24ee88a80f823a79e3e502902724d8070aec584dc7a9df91fee72b7b44d60d30",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-05T23:02:43.017723Z"
+    }
+  },
+  "body": "Greg's rule, 2026-11-05 about 21:26Z, relayed by Engram::Asistant (TermAl mailbox 588693a8 #439), verbatim: «No takie testy powinny byc sprawdzone przed kodera, zanim zaczniemy kosztowną weryfikacje. Coder tez moze miec engrama lokalnie. O co chodzi??»\n\nRule (TermAl coordinator, Termal::Fable2):\n- The author of a change that adds or edits live rows (#[ignore] tests that run only in `node scripts/test-launcher.mjs live` with a pinned Engram binary) runs each new or changed live row itself, once, on every affected OS, before the review pair and before any expensive matrix (C4-style rows, DL560 FULL).\n- Report the run ids and results.\n- Central runs still need the integration owner's one-Cargo-job GO and the 30 GB free-memory check.\n\nWhy: on w-c07c two expensive C4 matrices failed on test defects the author's focused runs and FULL could not reach, because live rows don't run there:\n- the Windows `\\\\?\\` clone path (test-71786556);\n- a stale refusal matcher (test-998c79ab).\n\nReview addition (Termal::Fable2, 21:30Z). When a change adds test rows, the coordinator asks the review pair to also read the unchanged assertions and helpers those rows reach, not only the diff.\n\nOn w-c07c, the stale matcher in src/tests/engram_evaluation_matrix_live.rs:950-961 had come in with N24 (7b4e2ed4) and was outside the diff. Opus2's records show that the first execution of the consumer rows was C4 itself. The only earlier live run was the tiny-adapter test, test-051707b0 on DL560, PASS, which can't reach either defect.\n\nThis stays a coordinator instruction, recorded here, until the review-code command text is changed through the normal review.\n\nTightened (Termal::Fable2, 23:03Z). The author's small live run covers at least one positive and one negative row from EVERY consumer repository and fixture, on each affected OS, not a single repository.\n\nOn 9e47 the author's Windows run took Questly only. Windows C4 test-284acef6 then failed all 15 Phoenix rows at baseline, apparently on child-local core.longpaths missing in the fixture; that classification is pending.\n\nBefore freezing a fixture fix, also check that the fixture copies the real repository's configuration as it is (for example child-local settings), and whether the product's isolated reader honours it."
+}

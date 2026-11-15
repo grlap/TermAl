@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "lesson-for-e2-w-8f4c-hostless-runs-opus2-2026-11-07-05-45z-the-e",
+    "revision_id": "89c4589675dd494fa459cde6749fbdde",
+    "previous": null,
+    "body_sha256": "c119d9c03e62387c18c947d20d4e21a0959352cc841698d317f2621464ec4867",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T05:42:38.355781Z"
+    }
+  },
+  "body": "Lesson for E2 (w-8f4c) hostless runs (Opus2, 2026-11-07 05:45Z): the Engram source producer (54a) refuses when its scratch (TEMP/TMP) lies INSIDE the tree it inspects: 'ENGRAM_SOURCE_UNAVAILABLE / input_unavailable: source EOL scratch is inside the inspected tree'. Put the private HOME/USERPROFILE/TEMP/TMP/APPDATA/LOCALAPPDATA/PSModuleAnalysisCachePath in a SIBLING directory outside the inspected worktree but inside the repository, e.g. Windows B .tmp/j/<id>-env or DL560 .tmp/r/<id>-s. Never place them in the worktree's own .tmp. This applies to E2's Windows FULL dispatch too."
+}

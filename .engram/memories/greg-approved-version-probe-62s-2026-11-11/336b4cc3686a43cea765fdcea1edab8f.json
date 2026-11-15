@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-approved-version-probe-62s-2026-11-11",
+    "revision_id": "336b4cc3686a43cea765fdcea1edab8f",
+    "previous": null,
+    "body_sha256": "a96a43f5e3c44879ed4131ce22e42c9eceba569982c21791a64417fde2f68069",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T22:44:48.452704700Z"
+    }
+  },
+  "body": "Greg's recorded decision, 2026-11-11T22:44Z, under his 60 s rule for operation-aborting limits (at least 60 s, warning at 10 s, longer limits not shortened without his word). He approved ONE shortening: the source owner's `engram --version` probe gets its own 62 s window (60 + 2 s delivery) with the 10 s warning. It replaces the inherited remaining-request deadline of up to about 1024 s. His words, relayed by Engram::Asistant in TermAl mailbox 588693a8 #1398: „Ok. Moze być\". The item is w-ee28bebebad9, implemented by Sol-a7bb. Every other longer limit stays unshortened unless Greg decides otherwise."
+}

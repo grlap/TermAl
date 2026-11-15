@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-greg-coding-rule-2026-10-18",
+    "revision_id": "24c58b499a5d4d95acb013c937603add",
+    "previous": null,
+    "body_sha256": "4b6644aa0e53918d0e79e18683c2b2d0e964700e1a38f951838dabcfac5f0551",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-18T21:16:44.321681600Z"
+    }
+  },
+  "body": "Greg's rule (2026-10-18 21:14Z, via Engram::Advisor b9d13887 #1187, verbatim): 'Greg direction after credit renewal: keep agents continuously coding on ready, independent slices; use capacity for implementation, not repeated status/design turns. TermAl owns test runs; workers consume pass/fail metadata and bounded failure excerpts only, never routine full logs. Use architects exceptionally: only a real architecture-boundary change, durable-format question, or unresolved design conflict. Otherwise coordinator/implementer decides and proceeds. Apply to TermAl lanes and report active coding count at boundaries.' Coordinator practice: give each idle lane a ready slice; keep coordinator mails short; don't route ordinary design questions to Architect1 or Architect2; include the active coding count in boundary reports to Advisor; tell workers not to read full logs routinely."
+}

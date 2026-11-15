@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "test-hosts-cpu-class-2026-11-04",
+    "revision_id": "e6206ea40a674fdd9470dd6ce54db30e",
+    "previous": "a3fd7ab40c85407f81341575a06a5f99",
+    "body_sha256": "9f091fb38d354017a32d0d4ad1b251a5b59f5d38b7a4e5c9a8cc5865a9a8aa89",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T03:59:33.596489800Z"
+    }
+  },
+  "body": "Greg, 2026-11-04, relayed by Engram::Asistant: „Dl560 ma wolny single core..” and „Tak. Ale dl ma 1ghz na core, windows B ma 4ghz. Inna klasa maszyn.” Asistant added: different clock speeds, architectures and loads mean no direct conclusion about a regression from timings alone between these hosts, and no needless expensive comparisons. Practical rule: compare timings only on one host, on two commits or two settings. Timings across DL560 and Windows B say nothing about product speed. Read from DL560 at 03:58Z, read only: Xeon Gold 6140, base 2.3 GHz, max 3.7 GHz, min 1.0 GHz, governor powersave with intel_pstate active, average 1160 MHz at low load and one core at 3700 MHz, so 1 GHz looks like the idle state rather than a hardware limit; changing the governor is global configuration and Greg's. 4 sockets, 4 NUMA nodes, 144 CPUs, distance 21 against 10, numa_balancing=1. A real-clock limit tuned on a fast host is harsher there, which is a test defect, not a host fault. A direct focused cargo test at the default test-thread count ran 400-620 OS threads there; a FULL at 4 threads ran 12-19. NUMA and allocator work is on w-d59057f2b3b5."
+}

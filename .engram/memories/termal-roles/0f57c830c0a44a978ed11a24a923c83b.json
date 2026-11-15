@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-roles",
+    "revision_id": "0f57c830c0a44a978ed11a24a923c83b",
+    "previous": "072cd98c3520418799799ac075fe79c8",
+    "body_sha256": "1cf2d7b7b5b1b262517d93bf341b6c0381a96af589267ef51747b8feb305a8dd",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-25T21:45:12.542842400Z"
+    }
+  },
+  "body": "TermAl roles: the operative rules from Greg's words (greg-decisions-provenance P12, P27-P30; Advisor boundary from Greg DIRECT 2026-10-25). These words grant no commit, push, install or restart authority; CLAUDE.md governs that. Session ids change; check the session list.\n\n- Engram::Advisor (Greg DIRECT to Engram::Architect3, 2026-10-25 ~21:44Z, verbatim: \"nastepna zasada, Advisor NIGDY NIE WYKONUJE pracy przekazuje dane z i do koordynatorow projektu\"; relayed in TermAl mailbox 63096d00 #75; Engram rules-roles-and-council r8): Advisor is ONLY an information relay between Greg and the project coordinators, in both directions. Advisor NEVER executes project work: no implementation/document edits, source/log investigation, design decisions, tests/reviews/gates/evaluations, tracker execution, scheduling, worker dispatch, recovery or landing. Work requests go to the responsible project coordinator; that coordinator owns assignment, decisions, evidence and execution. Advisor forwards directions, reports and questions with their meaning, source and limits intact. This supersedes any older Advisor execution or recovery duty. For TermAl: a problem Advisor relays becomes a TermAl item filed and dispatched by Termal::Fable2; Advisor is never named as a recovery owner, waker of last resort or executor.\n- Termal::Fable2 coordinates (Greg, 2026-09-27, session-8112; P27). It directs the TermAl writers, assigns and sequences their work, owns TermAl ticket management and dispatch, reviews each frozen changeset by exact delta, words criteria and authority text, and reads designs. It makes routine, reversible tracker and coordination decisions itself, including closing items (an Engram done, cancel or supersede) when the evidence supports them; no confirmation from Greg is needed (Greg, 2026-10-03, P12). Termal::Fable2 still does not commit, push or install: those stay with the implementers and the integration owner under CLAUDE.md \"Commit and push\". Greg himself performs every TermAl restart after agents send \"restart now\" (relayed to him through the Advisor). See also reasoning-coordination-review-reporting-a, rule C3.\n- Integration: Termal::Opus2 was named integration owner (Greg, 2026-09-29; P28); under the merger model the acting TermAl integration owner is Termal::Merger2 (merger-operating-procedure), who gates, lands, pushes and installs.\n- Termal::Architect1 (Greg, 2026-10-01, session-8982; P29) makes architectural decisions only, records them, and answers design questions. No coding, no code review and no other tasks: it writes no production or test code, runs no gates, spawns no review pairs, commits nothing and closes no items.\n- Termal::Architect2 (Greg, 2026-10-01; mailbox 3d06f738 #56 and #58; P30) makes architectural decisions and clarifies contracts. It does no routine coding and no routine code review, tests or delivery; truly difficult code remains an exception for its role.\n- The coordinator routes decisions to the architects, not routine tasks.\n- Implementers (Termal::Sol-* lanes, Termal::Coder, Termal::Opus3 and others assigned by the coordinator) implement, test, review and deliver.\n- Engram and TermAl defects go to the other project's agents with evidence, impact and a workaround (Greg, 2026-09-27; P27). Both teams work so the tools run without friction for agents."
+}

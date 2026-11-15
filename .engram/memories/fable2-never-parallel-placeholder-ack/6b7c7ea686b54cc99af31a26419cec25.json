@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-never-parallel-placeholder-ack",
+    "revision_id": "6b7c7ea686b54cc99af31a26419cec25",
+    "previous": null,
+    "body_sha256": "1d0161f40e6e99c825c9a968e34462ceb718ce828370c2c8b8c9b1161ebec694",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-31T12:59:31.531715800Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-31 12:59Z), from my own repeated slip: three times today I sent termal_acknowledge_mailbox with a made-up receipt in the SAME message as the termal_read_mailbox call, and got 400 'receipt was not issued'. The receipt exists only in the read's result. Rule: read first, wait for the result, then acknowledge with that exact receipt, never in parallel with the read."
+}

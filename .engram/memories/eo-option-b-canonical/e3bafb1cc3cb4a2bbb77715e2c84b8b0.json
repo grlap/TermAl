@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "eo-option-b-canonical",
+    "revision_id": "e3bafb1cc3cb4a2bbb77715e2c84b8b0",
+    "previous": "811e8891e55c407392407d0be1ec878d",
+    "body_sha256": "7ab0e644a70a4412055f34d6408bc3fa3921cb97ac1acfbdb4b6314e9e484ed6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-06T16:51:50.651685900Z"
+    }
+  },
+  "body": "CANONICAL source_id AND EO CREDIT. Consolidated rev 9 (Termal::Fable2, 2026-11-06 16:52Z). It replaces all earlier revisions, which remain in history as superseded. It is based on Greg's words relayed by Engram::Asistant (#569, #574, #576, #578, #583, #586, #592, #594, #596, #598), and the definition comes from Kimi::Consultant (TermAl mailbox 852a55c9 #71 and #73), agreed by TermAl and Engram.\nsource_id = ONE object describing the source state, produced only by `engram source` (Engram owns it):\n- root: commit (HEAD) and tree;\n- submodules: path and actual HEAD for each, from `git submodule status --recursive`; expected pins come from the root commit;\n- changes[]: only the local delta, from `git status --porcelain=v1 -z --untracked-files=all --ignore-submodules=none`, with path, status, origin (for renames), mode or type, and the Git blob id from `git hash-object --stdin-paths` (default filters, no -w), computed over the dirty paths only. Deletions are tombstones. Untracked non-ignored files are included. Ignored files are excluded absolutely. Only dirty or off-pin submodules recurse; an uninitialized or conflicted submodule makes the result unavailable. Clean means changes = [].\nBounds (Greg accepted: „mysle, ze to rozsadne ograniczenie w wiekszosci przypadkow, git diff jest pusty”): at most 1 MiB of JSON and 8 s; overflow, timeout, drift seen by a stat-and-status recheck, filters, or any error means unavailable. A partial result is never returned.\nNever: watcher events, hashing anything in the .git directory, or a full repository or index listing.\nEO credit (Greg: „to jest wystarczajacy warunek ... mysle, ze i tak jest za silny, ale zacznijmy od tego”): the full source_id at S0 (before the prompt is dispatched) equals the full source_id after the declared test; local changes are allowed. The declared test must be the turn's first tool action; the result goes out as the existing verification_record_v1, with the existing artifact, identity and claim checks. There is no clean-repository requirement and no watcher. Clean is only a landing policy.\nAccepted, documented limits: a change fully reverted between S0 and the after capture; anything git status does not report (hidden index flags, edits inside .git); changes to ignored files.\nRollout: `engram source` gains the new fields in its existing JSON (no v2); TermAl's and Engram's strict readers are updated in the same window. Consumers then move off content-v1 one at a time. Old records stay readable as stored.\nRule: no new conditions, mechanisms or gates without Greg's explicit word. Items: Engram w-a6c91d6a7f27 (E1); TermAl w-6f42c416b0c7 (M1, then consumer switch, C1 to C6) and w-24a72c898d6d (EO)."
+}

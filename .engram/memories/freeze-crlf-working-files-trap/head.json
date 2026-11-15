@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "freeze-crlf-working-files-trap",
+  "head": {
+    "state": "active",
+    "chain": [
+      "6d64f26d542140af8f23a5e85326496c",
+      "55ec44285db54d59baa01f8a7b8e1d1f"
+    ]
+  }
+}

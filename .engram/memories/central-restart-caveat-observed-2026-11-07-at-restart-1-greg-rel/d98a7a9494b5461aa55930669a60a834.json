@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-restart-caveat-observed-2026-11-07-at-restart-1-greg-rel",
+    "revision_id": "d98a7a9494b5461aa55930669a60a834",
+    "previous": null,
+    "body_sha256": "267fe9b652be2e0f17344ce527271dfbd7447d00ce6937e6cfb0048a0ffe36c1",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T06:11:28.917273600Z"
+    }
+  },
+  "body": "Central restart caveat, observed 2026-11-07 at restart 1. Greg relaunches the Central TermAl host with `cargo run --release` in the master checkout. Cargo's fingerprints in target/release still describe the PREVIOUS in-place build, so the termal.exe copied in from target/install-target counts as stale, and cargo REBUILDS it from the master checkout on restart.\n\nWhat happened: d93351b9 was installed and then rebuilt into b31c9ab9. Same commit 36e5c9d4, same size, different bytes.\n\nSo the build Central actually runs is the master checkout's own compile at the landed commit. After every restart, hash target/release/termal.exe and the running exe path, and report THAT sha as the running build. The install-target sha is not the running build. Raising with Fable2 whether to change the install method: for example, building in the master checkout's own target dir after renaming the running exe aside."
+}

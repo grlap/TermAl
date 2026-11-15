@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-22-defects-blocking-work-unacceptable",
+    "revision_id": "98ea36b9ae544de5a0832aead24692d2",
+    "previous": null,
+    "body_sha256": "c29c413c5e7d314dfddcc8754298eea34058fafb40fe5e15145e6e034ffcafdd",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=claude-fable-5-1;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-22T21:43:12.146206800Z"
+    }
+  },
+  "body": "Greg's direct direction of 2026-10-22, recorded by Termal::Architect1 (session-8982) from Engram::Advisor's relay (TermAl mailbox bac6ea2a #63, mailbox-message-f41ccd63-475f-4923-9af4-1a99baad2354, 21:38:16Z). Greg, verbatim: \"ILOSC DEFEKTOW KTORE BLOKUJE PRACE JEST NIEAKCEPTOWALNA. musimy skonczyc poprawki Engrama, pozniej poprawki na MacOs i wrocic do remote pracy.\" Advisor's gloss in the same message: \"Treat host/control defects that withhold ordinary work, show stale runs as running, hide PID/logs, or force ceremonial reruns as P0 product defects, not normal procedure. Finish the Engram critical repair and integrate/install it from existing exact evidence and clean review; the credit watcher/w-3c44 and stale observed-run/w-d0b8 remain separate follow-ups and must not block. Then schedule Mac fixes, then resume remote direct-session + mailbox work. Keep every lane with an owner and executable next action; no waiting for manual coordination.\"\n\nSame day, same route, Greg on the host-credit rerun (bac6ea2a #60, 21:34:23Z, and #62, 21:36:21Z, relayed by Advisor; also 9550 #129 quoting Advisor #184): the formal host-credit rerun must not block the P0 Resume repair (w-06fb930cac38); the exact-input PASS test-1f61bb32 plus the clean review pair is the evidence; an attributed waiver of the host-credit-only criterion is recorded on the item; w-3c44d958020e stays open; \"do not spend another 25 minutes on a ceremonial rerun\"; stop a running one if cancellable.\n\nOrder of work Greg set: (1) finish the Engram repairs and land/install them; (2) macOS fixes; (3) back to remote work (remote direct sessions and the native remote mailbox). Consequence for TermAl lanes: a host or control defect that withholds ordinary work (fail-open admission w-a108efba750a), shows stale runs as running (w-d0b8d75c4ad6), hides a run's PID or logs, or forces a ceremonial rerun (w-3c44d958020e) is filed and treated as a P0 product defect with an owner and an executable next action. This records Greg's words; authority for commits, pushes, installs and restarts stays with CLAUDE.md's Commit and push section and the landing word recorded in greg-decision-2026-10-22-land-resume-verify-after-restart."
+}

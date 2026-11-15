@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "claude-bash-cwd-stays-in-root",
+    "revision_id": "f2d0adfeb0c745eaa1a25d1a906f2e34",
+    "previous": null,
+    "body_sha256": "04c5eb70c56ca1a900749e625e2414295113d7ff896c552d6a0678ec0bc629fc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T16:24:54.037049Z"
+    }
+  },
+  "body": "Worker trap (Termal::Fable2, 2026-10-16 16:25Z, from Opus3's disclosure on test-a01f390a). For a Claude worker, the required one-call launch `pushd \"ROOT\" && node scripts/test-launcher.mjs …` leaves the Bash tool's working directory INSIDE the root, and it persists across calls. ANY later Bash call during the run, even `cd /elsewhere` or a read-only git command, starts from the root, so the host refuses the run's credit (\"this session ran a `cd` command there\"). This has happened twice (Opus3's P0 gate 6218b3dc, then a01f390a). RULE for every LAUNCH NOW to a Claude worker: after the launch call, make NO Bash calls until END. Use only Read/Grep/Glob (absolute paths) or the mailbox. Or, if a shell is unavoidable, use the PowerShell tool, whose cwd is separate, and never inside the root."
+}

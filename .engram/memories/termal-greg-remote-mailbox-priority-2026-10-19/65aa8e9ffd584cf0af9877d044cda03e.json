@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-greg-remote-mailbox-priority-2026-10-19",
+    "revision_id": "65aa8e9ffd584cf0af9877d044cda03e",
+    "previous": null,
+    "body_sha256": "b99f4cc691de4b818b67cafb324837e80006334168aa5278fc9d219891d93c5a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-19T15:42:24.291586100Z"
+    }
+  },
+  "body": "Greg's direct priority (Engram::Advisor b9d13887 #1266, 15:41Z on 10-19), verbatim: 'focus on native remote mailbox exchange and Engram sync; these are needed before the team can scale. TermAl: prioritize genuine two-way remote mailbox M4→M6 and the remote-runner evidence/import boundary. Do not let routine backlog consume their people or gate slots; keep independent unrelated lanes only when they do not contend. Report the first end-to-end remote mailbox exchange.'\nApplied (Fable2, 15:45Z). Gate order: M4 v9 (running) → w-edb7 (test refs, opens the Mac path) → A1 (federation L1 follow-ups); non-remote gates (w-6c3e, w-df40) wait.\nCold order: w-33f4 first (P1, it blocks every evaluation), then Sol-c593 w-ab6c (build identity), then w-c3f1 (attested import).\nM5: Coder switched to w-fc620307cb7a and w-d9f08fe63a7a; w-30bb is parked with its RED frozen. M6 (w-e41b7112372a) and P-mac (w-c1af4362f3ef) get owners once M5 is moving.\nREPORT the first end-to-end remote mailbox exchange to Greg via Advisor."
+}

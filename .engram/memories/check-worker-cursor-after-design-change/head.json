@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "check-worker-cursor-after-design-change",
+  "head": {
+    "state": "active",
+    "chain": [
+      "5a9b881d9aa04f529392813f6a75fa82"
+    ]
+  }
+}

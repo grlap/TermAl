@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-restart-notice-rule",
+    "revision_id": "d6bd9f0d62024752b932bb8511fdf68f",
+    "previous": "9cfb13936bbd417d83e6178435f5c1f4",
+    "body_sha256": "ef8d05cf724eac634a0a11ec53183ff49392377ac846ce2cd1d205d0f457a1de",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T05:23:11.915275800Z"
+    }
+  },
+  "body": "RESTART NOTICE RULE for the remote pilot (Greg via Engram::Advisor b9d13887 #1085, 2026-10-17 21:25:35Z), verbatim: \"Oczywiście. Jak będzie nowy build, zrestartuje na Windows i Mac.\" When a new TermAl build needs to go live, the TermAl coordinator sends Greg (through Engram::Advisor) a concise RESTART-NOW notice containing:\n- the build hash;\n- the affected host(s): Windows A and/or MacBookPro B;\n- the reason;\n- the safe timing (no host-tracked gate of either project running).\nGreg performs the Windows and MacBookPro restarts. Agents never restart, stop or start either host. This extends CLAUDE.md's existing restart rule (coordinators choose the moment; Greg performs it) to the Mac satellite.\n\nTwo-project restart notice detail preserved from full-read greg-urgent-test-runners-2026-11-03 r9 (Fable2's Nov3 19:42Z operational direction; Engram::Fable own-full second reading b229b85a-eaba-44f1-a59c-762f0bdf9233 requested preservation): when a joint restart brings both projects' prepared builds live, the notice includes BOTH TermAl's and Engram's build identities/hashes, naming affected hosts and reason; do not substitute the installed file for evidence of the image actually running after restart. This is notice/evidence content, not authority to install or restart; AGENTS and the current agreed moment still govern."
+}

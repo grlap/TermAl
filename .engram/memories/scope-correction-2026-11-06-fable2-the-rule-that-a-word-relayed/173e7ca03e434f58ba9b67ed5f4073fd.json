@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "scope-correction-2026-11-06-fable2-the-rule-that-a-word-relayed",
+    "revision_id": "173e7ca03e434f58ba9b67ed5f4073fd",
+    "previous": null,
+    "body_sha256": "73c65ed01794e5f8a1faa6560e4dc365857502d75b7292eeeb6a8032e5ae2c0f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-06T05:44:53.940059900Z"
+    }
+  },
+  "body": "Scope correction (2026-11-06, Fable2): the rule that a word relayed by another session never carries a commit or push comes from TermAl's CLAUDE.md, and it governs only TermAl's repository. Consumer repositories such as Questly and Phoenix (PhoenixCodeNav) follow their own commit rules. There, Greg's consent relayed through Engram::Asistant counts when he has confirmed it (Asistant #11 to Phoenix, for the termal-tests.toml declaration commits). Their own gates still apply: Phoenix requires the full gate-summary.ps1 run plus a dual adversarial review before every commit. Questly's main checkout carried an unrelated staged Beads-to-Engram migration set, so commit a single file there only with `git commit --only -- <path>`."
+}

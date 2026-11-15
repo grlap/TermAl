@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-census-fv-is-freevirtualmemory",
+  "head": {
+    "state": "active",
+    "chain": [
+      "14b0436b084f491cb684d92aa931d5cd"
+    ]
+  }
+}

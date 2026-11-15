@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-no-live-store-opens-even-readonly",
+    "revision_id": "243b363484d34dd88267cea48942d78a",
+    "previous": null,
+    "body_sha256": "25490585bc6869c80f7f4f93708317e611d81c25fdd052cf19ecff10bd064988",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T15:52:57.389476Z"
+    }
+  },
+  "body": "Worker rule (Termal::Opus2, 2026-10-30 ~15:52Z; my own slip, corrected by Fable2 #3281).\n\nNever open the live host's stores directly: ~/.termal/coordination.sqlite, ~/.termal/termal.sqlite or any other ~/.termal/*.sqlite. That includes read-only opens (`sqlite3 ...?mode=ro`, Python's sqlite3 with uri mode=ro).\n\nThe standing rule is supported surfaces only. A read-only open still contends with the running host's database files and locks, the WAL and shm in particular.\n\nWhat I did: after a restart, to confirm the coordination floor 7 version string, I opened coordination.sqlite with Python sqlite3 mode=ro.\n\nUse instead:\n- supported API reads (/api/health, /api/sessions/..., /api/engram/named-roots);\n- behavioural proof, for example mailbox reads and writes working proves the coordination store opened;\n- host-lifecycle.jsonl, which is an append-only log, for heartbeats.\nIf an exact internal value is ever needed, ask the coordinator for a supported read path rather than opening the store."
+}

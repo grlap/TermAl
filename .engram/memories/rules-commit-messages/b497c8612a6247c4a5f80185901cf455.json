@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rules-commit-messages",
+    "revision_id": "b497c8612a6247c4a5f80185901cf455",
+    "previous": null,
+    "body_sha256": "770d8e1b397d6a09b8d5322584ef0fc42a71f06b3b90c3585202b570e38e7170",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1859b-7326-7153-874d-15e81a9c82fa",
+      "work_ref": "w-15e81a9c82fa"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T03:04:25.825675500Z"
+    }
+  },
+  "body": "SHARED AGREED COMMIT-MESSAGE RULE — Engram and TermAl. TermAl mirror of Engram's current memory rules-commit-messages r1, as published by Engram::Architect3 (mailbox 63096d00 #106, 2026-10-29T03:03:50Z) and mirrored by Termal::Fable2. Source: Greg via Advisor a4e53f6d-8f72-4437-86db-bcfa597d72ba, 2026-10-29T02:58:41Z. Exact section and instruction replacement concurred by Engram::Fable d7752ecb-e090-4a1c-853d-bd8176a6d9e3 and Termal::Fable2 b4272aab-233f-4296-ab7d-7667e14753e8.\nEFFECT: use the meaningful-message guidance for future ordinary landings. The test-ref format below takes effect when its controlling AGENTS/CLAUDE clause is updated through the existing authority-text process. Until then that clause governs test-ref creation. Operational owners may create a descriptive landing commit with the identical recorded tree under their existing checks; this is no authority to bypass a check. Current B16 is not held for this cleanup. Engram::Fable owns sending exact wording/consequence to Greg and the final-diff audit; TermAl source change is tracked as w-15e81a9c82fa and follows the joint cutover. No automatic history rewrite or new gate.\n\n### Commit messages\nUse a short imperative subject naming the concrete change and its purpose or observable effect. It must make sense without opening a hash or tracker item. An optional type/scope prefix or work reference may appear in the subject; a hash, fingerprint, work ref or vague \"updates\" alone is not a subject. A combined landing describes its actual combined changes. Merge/revert messages identify the change they merge or revert.\nAdd a body only when it explains a non-obvious reason or constraint. Work references belong in the subject, not the body. Keep gate run ids and validation results on the work item and in its retained evidence; do not require a future gate result in a commit created before that gate.\nRemote test-ref commits use the same meaningful subject and include the complete review-freeze fingerprint in a body trailer: `Review-Freeze: <fingerprint>`. The test-ref name, recorded tree identity and all other review/gate/landing requirements stay unchanged.\nThis rule is prospective: do not amend, rebase or force-push existing history or repeat a review/gate just to change a message. It adds no formatting gate and grants no new Git authority."
+}

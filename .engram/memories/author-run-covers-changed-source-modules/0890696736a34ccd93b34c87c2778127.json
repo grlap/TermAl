@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "author-run-covers-changed-source-modules",
+    "revision_id": "0890696736a34ccd93b34c87c2778127",
+    "previous": null,
+    "body_sha256": "0950326fd6e30612c0c59821ac31ec58be3d5e4658614dea5a7c55ed672ee0f0",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T20:49:28.997838Z"
+    }
+  },
+  "body": "Integration-owner rule (Opus2, from Fable2 #5620, 2026-11-11, after two misses the same day: a7bb R15 and edfd 4fe61e6b/combo63). An author run before handoff must cover the WHOLE suite, or at least EVERY test module that exercises the changed source files, not only the new tests. edfd's author GREEN passed 553 focused tests, yet combo63's FULL failed in a sibling module (tests::...::unadmitted_runtime_reporting::repairs::a_restored_closing_job_keeps_its_original_scope_and_policy) that exercises src/engram_unadmitted_closing.rs, which edfd changed. Apply this in every author-job GO I write: before dispatch, grep src/tests for modules that call into each changed src file, and add them to the filter (or run the entire --bin termal suite for a wide change). Review pairs do not replace this."
+}

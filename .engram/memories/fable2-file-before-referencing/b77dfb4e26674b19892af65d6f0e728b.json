@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-file-before-referencing",
+    "revision_id": "b77dfb4e26674b19892af65d6f0e728b",
+    "previous": "f5b41848ded44e36822ffd43b832f640",
+    "body_sha256": "acf629e60c32c247b59361d8b28848080386ce817500874c11f72265b8bc9113",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-03T14:46:22.875674500Z"
+    }
+  },
+  "body": "Rule (Fable2): file an Engram item BEFORE sending any message that cites its id, and never in the same parallel tool batch. Wait for the add result and copy the returned short_ref.\n\nRepeat violation at 14:46Z on 2026-11-03: I sent Asistant #141 citing a guessed \"w-74c8\" in the same batch as the add, and the real ref was w-8c622b63fa50. I corrected it in the next message."
+}

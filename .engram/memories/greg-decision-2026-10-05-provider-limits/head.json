@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-decision-2026-10-05-provider-limits",
+  "head": {
+    "state": "active",
+    "chain": [
+      "3a9adb9476864042962d9b20788521c5",
+      "3bfa1a1a01454b77a6cc14cc9ec5621a"
+    ]
+  }
+}

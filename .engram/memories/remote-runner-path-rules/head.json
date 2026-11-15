@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "remote-runner-path-rules",
+  "head": {
+    "state": "active",
+    "chain": [
+      "216c06e7145e44bdb4cca28e1969acd8"
+    ]
+  }
+}

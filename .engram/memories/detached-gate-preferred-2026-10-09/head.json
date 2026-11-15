@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "detached-gate-preferred-2026-10-09",
+  "head": {
+    "state": "active",
+    "chain": [
+      "209cfbdd94694810879dd81bbf30a785",
+      "a3a77a184a4e4cfabde7895ecdf81b1b",
+      "305edbd6d6e04b9ab83246e95b07868e",
+      "865554df20744fec9b18c1b1f09de4b8",
+      "de68dd7b56d54c73b26a85690db38b2f"
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-direction-native-remote-mailbox-2026-10-19",
+    "revision_id": "d55118552004459fb2cdc10a01e974d0",
+    "previous": "4bf8bd9cd06c413f99ce8cc65302e779",
+    "body_sha256": "7051b974cd80db32a23e04106d1c38dded322e648d2fb6c127d9afb45775c719",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a14bba-f18c-7630-91af-e41b7112372a",
+      "work_ref": "w-e41b7112372a"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T04:58:25.054175700Z"
+    }
+  },
+  "body": "Greg's direction (Advisor #1286, 2026-10-19 19:19Z), verbatim: \"finish the native remote mailbox now (M4→M6), then use it as the operational control channel to finish Engram sync. Prioritize native two-way remote delivery and the first M6 central↔Mac proof; retain the prompt/transcript path only as a temporary bridge until native evidence passes.\" Earlier, #1266 and #1268: the remote mailbox is the operational control channel for Git-folder export, merge and import, ownership and handoffs; it is not SQLite replication or a global claim lock. Coordinator consequences: remote-path slices go first for gates, warms and people; non-remote lanes yield when they contend. The temporary bridge for remote sessions is the central host's POST /api/sessions/{id}/messages with sourceSessionId (attributed), with results read from the session transcript; termal_send_to_session refuses remote targets.\n\nEarlier governing decision, preserved before retiring the Oct17 queue snapshots: Engram::Advisor, TermAl mailbox b9d13887 #1065, 2026-10-17 20:39:43Z, quoted verbatim in epic w-93105e5592c0 note3490235e0303443aaf02204fbe45eeb9 (full read; Engram::Fable second-reader requested preservation in mailbox-message-9d84a308-35e2-4d3f-b89c-eb75140c9c14): 'Greg odrzuca T1/T2 ograniczenie jako model docelowy. Jego nowy kierunek: remote ma być first-class citizen. Konkretnie: (1) mailbox ma działać zdalnie między hostami dla normalnej koordynacji, nie tylko poprzez operator relay; (2) Engram ma mieć osobny mechanizm synchronizacji między hostami. Operator relay jest tylko tymczasowym fallbackiem. Utwórz dwa wyraźne root items/epics z zależnością i zleć wspólny design Architect1+2: transport mailboxa, tożsamość/authority/dedup/recovery oraz Engram sync boundary/conflict semantics. Nie ograniczaj projektu do jednokierunkowego courier. Nie wdrażaj jeszcze kodu przed wspólnym projektem i rozbiciem na małe slice'y.'\n\nThe rejected alternatives are defined in w-7e947cec3d91 note8cc09c7afd9d476ca501191f544f0795: T1 meant B as SSH executor of A's control plane, mailbox and credit routed under the remote-access contract; T2 meant B as an independent host limited to a one-way typed-report courier, with operator relay as its interim default. Greg rejected those limits as the target. These task records retain the original decision and design sequence; this preservation grants no new action or revival of obsolete queue GOs. The later Oct19 native-mailbox direction above remains separately sourced.\n\nEarlier lasting direction, Engram::Advisor b9d13887 #1177, 2026-10-18T20:36:13Z, original wording supplied by Fable2 in mailbox-message-544b18df-0dba-42e0-9e8e-7a3b981c86d5 (#2768, 2026-11-09): \"Optimize for work moving onto multiple hosts, not additional coordinator ceremony.\" This is verbatim Advisor wording conveying Greg's direction, not a direct quotation of Greg. The earlier window32 paraphrase is preserved in history; its temporary watchdog and M3/M4/M5/A1 enrollment sequence was the plan at that time, not a new current launch condition. The opening paragraph's statement that termal_send_to_session refused remote targets describes its Oct19 implementation state only; current supported native remote mail follows AGENTS host guidance and the exact authenticated pair/identity route, with original message/key/route retained on unresolved retries. No new relay, route switch, send, enrollment, install or restart permission is created by this preservation."
+}

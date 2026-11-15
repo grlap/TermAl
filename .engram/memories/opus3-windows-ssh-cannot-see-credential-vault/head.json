@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus3-windows-ssh-cannot-see-credential-vault",
+  "head": {
+    "state": "active",
+    "chain": [
+      "011e47b7074144ba86353202dd756b15"
+    ]
+  }
+}

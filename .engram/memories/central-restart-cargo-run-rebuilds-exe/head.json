@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "central-restart-cargo-run-rebuilds-exe",
+  "head": {
+    "state": "active",
+    "chain": [
+      "055f389f4a704d239b5db41eb0d2a895",
+      "a9e6d8b911664857bb184b0e932887ec",
+      "7ea83ebcbb774423868607c5317de306"
+    ]
+  }
+}

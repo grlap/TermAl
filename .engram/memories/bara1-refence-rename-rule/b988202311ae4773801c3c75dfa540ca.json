@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-refence-rename-rule",
+    "revision_id": "b988202311ae4773801c3c75dfa540ca",
+    "previous": null,
+    "body_sha256": "aa18fe29f5241354b7e295ad6b0d031a9ef4e5d87296bdab500dd664ffad89f9",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-10T02:08:46.427517300Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA1, from Fable2 #131, 2026-10-10): when a claim lapses and is recovered under a new claim fence, RE-NAME the item's source root with termal_name_source_root under the current claim (at the item's next carry, before its gate), and confirm the NEW generation in the following turn. Confirming the old generation is not enough: an evaluation can be refused 409 on a naming made under the prior claim fence (the w-cd57 trap)."
+}

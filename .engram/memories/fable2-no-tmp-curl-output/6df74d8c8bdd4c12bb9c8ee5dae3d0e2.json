@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-no-tmp-curl-output",
+    "revision_id": "6df74d8c8bdd4c12bb9c8ee5dae3d0e2",
+    "previous": null,
+    "body_sha256": "33eef2318b309b32c435867c886b9ce5c91c6e27eaa27a55766b599a830ea4af",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-24T05:04:27.084967800Z"
+    }
+  },
+  "body": "Coordinator trap (Termal::Fable2, 2026-10-24 05:03Z, my own slip). In Git Bash, /tmp maps to C:\\Users\\grzeg\\AppData\\Local\\Temp, which is OUTSIDE the repository. A curl probe with `-o /tmp/x.json` wrote a 1 KB file there, against the CLAUDE.md work-only-in-the-repository rule. I removed it at once and disclosed it to Greg. Rule: for read-only probes use `-o /dev/null`, or pipe to node. Any scratch file goes under C:/github/Personal/TermAl/.tmp/. Never use /tmp, $TEMP or the system temp folder."
+}

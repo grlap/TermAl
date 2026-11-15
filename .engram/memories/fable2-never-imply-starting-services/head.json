@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "fable2-never-imply-starting-services",
+  "head": {
+    "state": "active",
+    "chain": [
+      "a7d4cbdac2ca47ebba435e08287db70a"
+    ]
+  }
+}

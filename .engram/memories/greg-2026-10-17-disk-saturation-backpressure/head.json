@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-2026-10-17-disk-saturation-backpressure",
+  "head": {
+    "state": "active",
+    "chain": [
+      "82c3273a719a470faeac8f8bd0e28533",
+      "24e0c39173a846e4ade9a95d3e3e4886"
+    ]
+  }
+}

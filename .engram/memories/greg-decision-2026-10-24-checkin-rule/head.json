@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-decision-2026-10-24-checkin-rule",
+  "head": {
+    "state": "active",
+    "chain": [
+      "17932ad561e84a059e31dde2d8348a68"
+    ]
+  }
+}

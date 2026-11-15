@@ -1,0 +1,33 @@
+{
+  "id": "01a1df08-bf73-7753-85d2-ac9a44bab672",
+  "external_ref": null,
+  "title": "Distinguish executed selected-record CLI failures from unavailable control on recovery results",
+  "outcome": "An exact-record CLI process failure reports the same truthful executed-read failure class as other recovery reads.",
+  "acceptance": [
+    "For a non-envelope selected-record CLI failure, the recovery result retains actual exit and byte observations and identifies cli_read_failed rather than implying unavailable control; genuine selected-reference refusal and crash/prose classification remain unchanged.",
+    "Behavioral recovery coverage exercises the exact-record phase through the production raw CLI boundary and checks returned, retained and parent-visible classification without exposing producer detail."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "blocks-engram-memory-sync",
+    "cross-project",
+    "design-rule",
+    "diagnostics",
+    "evaluator",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1de3a-abf6-7512-a7b5-27e5e342bba4",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

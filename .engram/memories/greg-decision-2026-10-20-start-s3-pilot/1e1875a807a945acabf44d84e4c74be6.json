@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-20-start-s3-pilot",
+    "revision_id": "1e1875a807a945acabf44d84e4c74be6",
+    "previous": "9861a329f8034db7ad463870f96c1b5c",
+    "body_sha256": "d333e017d9c25678e203ca44facb42638e952ea5b2b3cd08c0ed02c98e41984a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-20T00:17:43.215999Z"
+    }
+  },
+  "body": "Greg's direction, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #1311, 2026-10-20 00:02:43Z; recorded by Termal::Fable2): \"Greg explicitly authorizes START S3 after Engram S2.4 lands: support the fresh two-host pilot stores and use native M4→M6 mailbox coordination for every cross-host handoff. Do not enroll existing operational stores. Keep Mac/Win2 onboarding independent and report the first mailbox-coordinated Git-folder exchange with exact evidence.\"\nOperational reading (Fable2): the trigger is Engram S2.4 landing. Pilot stores are FRESH, never the live operational stores (Engram's or TermAl's). Every cross-host handoff in the pilot goes through native federation mailbox coordination (M4 to M6), not ad hoc channels. Mac and Win2 onboarding stay decoupled from each other. The first mailbox-coordinated Git-folder exchange must be reported to Greg with exact evidence (hosts, store paths, message ids, commit and folder hashes, dry-run output). Related: memory engram-task-sync-enrolled-deletion-2026-10-19 (enrolled destinations cancel omitted members, so dry-run first).\n\n00:07Z plan agreed with Engram::Fable (#3836 to #3839). Split: Engram owns the pilot store spec, enrollment and the dry-run-first rule; TermAl owns transport over native federation mailboxes; neither side touches operational stores. Windows pilot home is C:\\github\\Personal\\Engram\\target\\s3-pilot\\home-a; Mac is <Engram clone>/target/s3-pilot/home-b (Sol-1cee to confirm the clone and toolchain, read-only, asked in 37b34f93 #336). Git route is open: Greg's word for a pilot branch on origin, or a bare repo under A's Engram/.tmp reached over the A<->Mac SSH path; Engram decides. Engram's S2.4 landing estimate is 03:00-04:00Z. TermAl's native A<->Mac mailbox is not ready until the S3 build (M4 inc2, journal, S4b, Darwin), install, Greg's restart and O1.\n\n00:21Z: Greg picked option (c) (Advisor #1313 to TermAl; #1842 to Engram, verbatim in Engram::Fable #3846): \"use the private bare repository under target/s3-pilot/folder.git over the existing Windows↔Mac SSH path, never origin. Prepare the narrow exact authority wording for agents to commit/export only fresh S3 pilot .engram task-folder data and push/fetch only this private pilot remote; prohibit master/origin/other branches, code files, force-push, rebase and merge. Coordinate exact text with Fable2 and present it to Greg before use under the authority-text procedure. Do not delay S2.3/S2.4 or O1 work.\" Engram item: w-cc8cad321d85; draft 1 is in Engram's main target/tmp/s3-pilot-authority-bullet-draft1.md. FACT checked at 00:18Z: host A has NO sshd and nothing on :22, so the path is one-way, A as client with strict-pinned keys to Mac user greg. My review (#3847): put the bare repo ON THE MAC (/Users/greg/GitHub/Personal/Engram/target/s3-pilot/folder.git); the Windows clone pushes and fetches over A->Mac SSH; the Mac clone uses a local path; the clones' only remote is the bare repo; no --force, --force-with-lease or + refspec; actors are the assigned pilot lanes. TermAl NEEDS a matching narrow bullet (the Mac lane, Sol-1cee, writes in Engram's checkout), which goes through TermAl's authority procedure: both coordinators concur, Greg is sent the exact text, the final-diff audit, and Greg's recorded word on the widening. Awaiting Engram's draft 2."
+}

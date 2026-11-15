@@ -1,0 +1,18 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "restart-plan-joint-sync-2026-11-11-0914",
+  "head": {
+    "state": "active",
+    "chain": [
+      "3ab0ea61c07048698ac6420d122a951e",
+      "49614d2f9aa44e63bd8fce01ff916986",
+      "1a264151b9bf4f15ba0290ec0470dc2a",
+      "bd991494746e40c790925d3e54087468",
+      "08bd98f70ebf4f6fbea9dd0b98820b73",
+      "40608ae3347f4fa78d625a76516b5063",
+      "fb290a06d51d4d3d8d4002f83c39e93b",
+      "88d3320d6c3b42e1a54ec85a94d6704c"
+    ]
+  }
+}

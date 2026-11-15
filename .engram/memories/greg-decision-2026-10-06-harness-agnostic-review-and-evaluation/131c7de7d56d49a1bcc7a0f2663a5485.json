@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-06-harness-agnostic-review-and-evaluation",
+    "revision_id": "131c7de7d56d49a1bcc7a0f2663a5485",
+    "previous": null,
+    "body_sha256": "5a6472f674428234a9dfe69523d60c3742b8b8e0214a27606cfd80b004855cef",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6-astra;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-06T20:27:14.271972Z"
+    }
+  },
+  "body": "Greg directly instructed Termal::Architect2/session8983 on 2026-10-06 after inspecting kimi_may_review_and_evaluators_stay_claude_or_codex: \"figure out repair plan for this, and forward to Termal::Codex\" and \"I disagree with the direction it took. it should be agent agnostic, any harness could be reviewer or evaluator\". Product rule: reviewer and evaluator are harness-agnostic host roles. Adapter-specific transport/isolation implementation is legitimate; hardcoded provider role whitelists and our team operating procedures in role eligibility are not. Repair w-7a5ea1183a8f, architectural plan a24000a711984b23bc7aaf541485af5a, handed to Termal::Codex/session8582. Completion includes all currently registered harnesses; Kimi-only exceptions or renaming whitelist flags do not meet the direction. Preserve authenticated role/child/attempt binding, real read-only enforcement and structured result validation. This is a product architecture direction, separate from agent workflow/review-pair instructions and commit/push authority."
+}

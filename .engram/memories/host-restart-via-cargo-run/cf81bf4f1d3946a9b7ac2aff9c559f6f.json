@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "host-restart-via-cargo-run",
+    "revision_id": "cf81bf4f1d3946a9b7ac2aff9c559f6f",
+    "previous": "338440bc254d4928b1695a3642d8d1a6",
+    "body_sha256": "0265a33218197b482645db620883be5d561577bd29ffb144a2643c3c7fb51b01",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-05T22:31:49.904014400Z"
+    }
+  },
+  "body": "Host restarted with cargo run (observed by Opus2 on 2026-10-05 at 03:08Z; recorded by Fable2; a supplement to landing-integration-and-install, BUILD AND INSTALL, which is at its size limit). Greg's restart ran `cargo run --release` in the master checkout. Cargo RELINKED target/release/termal.exe in place from master's source, at 03:10:35Z. That overwrote the binary the integration owner had installed (8e4f4e30; the new hash is 6897a1bb) and broke the .bak chain. A byte compare against the clean-export build of the same commit differed only in the PE link timestamp, three debug-directory stamps and the 16-byte PDB GUID. So after such a restart: (1) do not treat the hash change as unauthorised; verify that the code is equivalent to the landed commit by that byte compare, and record the new hash; (2) keep the clean-export build output (.tmp/install-target or target/release-clean-<sha>) as the backup, since the in-place .bak may be gone; (3) master must be clean at the landed commit before any restart, because cargo builds whatever the master checkout holds.\n\nSeen again on 2026-10-05 at about 22:26Z (train 47, f476060e; recorded by Fable2).\n- The restart relinked termal.exe in place: the file and termal.d were written at 22:25:59–22:26:00Z.\n- The hash went from the installed e151c0f9 to 346557f9.\n- `fc /b` against the clean-export build (.tmp/install-target/release/termal.exe) showed only 23 differing bytes: the PE timestamp at 0x108, three debug-directory stamps (0x1AB6BF4, 0x1AB6C10, 0x1AB6C2C) and the 16-byte PDB GUID at 0x1AB7030. The code is equivalent.\n- The clean-export build remains the backup.\n\nLesson for the coordinator: check this memory BEFORE reporting a hash change as a deviation. Use `fc /b` (native, seconds), not a PowerShell byte loop, which exceeds the tool timeout."
+}

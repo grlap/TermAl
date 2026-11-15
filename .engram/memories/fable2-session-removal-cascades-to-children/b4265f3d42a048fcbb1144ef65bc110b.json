@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-session-removal-cascades-to-children",
+    "revision_id": "b4265f3d42a048fcbb1144ef65bc110b",
+    "previous": null,
+    "body_sha256": "e1d682c0126457ba8ef277b06f0c4baf38d0f65ac577c7bbe5c09ed998503c1d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-08T23:13:42.022255Z"
+    }
+  },
+  "body": "Lesson (Termal::Fable2, 2026-11-08 23:13Z, my own serious error). POST /api/sessions/ID/kill, which the UI trash also calls, removes the session AND its whole delegation-child subtree (src/delegations.rs:3887 reconcile_delegations_for_removed_session_locked). Removing Engram::Coder session-8581 on Greg's narrow word dropped /api/state sessions from 9119 to 8485, against his 'Nie usuwaj innych sesji'. My pre-check filtered /api/state delegations on parentSessionId, which that projection doesn't carry, so its zero proved nothing. Rules: before any irreversible act, read the whole code path being invoked, not its opening lines; a check that returns zero must first be shown able to return non-zero; state the blast radius to Greg BEFORE acting; and count before and after with the raw kept. A delegation's parent is not in the /api/state delegation summary. Never remove another long-lived root without Greg first hearing that its delegation children go with it."
+}

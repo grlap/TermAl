@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "fresh-worktree-needs-npm-ci",
+  "head": {
+    "state": "active",
+    "chain": [
+      "7d36e28dbacb4cb4bd3722c060328f1b"
+    ]
+  }
+}

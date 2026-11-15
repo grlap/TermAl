@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "workaround-revise-then-rename-until-w1d8a",
+  "head": {
+    "state": "active",
+    "chain": [
+      "feac34778f3d496d814ace2124b1abe6",
+      "c0f506a24e01497c8da89db4e808fe9f",
+      "7ab5a0a4478d43c6ac90ada996043168"
+    ]
+  }
+}

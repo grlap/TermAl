@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "eo-epic-open-children-2026-11-13",
+    "revision_id": "7d35171c201e49ff9928590d8d6d780b",
+    "previous": "692f0673781e46d7be8d4c2caf79833f",
+    "body_sha256": "3b4d1ed2ac84df674c7655c5c5b7bc0146dfd0384bf72ffb1b1442440827d8b3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T16:35:06.283518Z"
+    }
+  },
+  "body": "GREG P0 (verbatim via Asistant #1543, 2026-11-13 16:05Z): closing unified Execution Observability „to jest nasze P0”. Both projects sync, no unassigned work left deferred, and restarts go to Greg through Asistant as a clear RESET NOW.\nEpic w-3fe8f4472e5d: 8 reconcile children, ALL assigned at 16:07Z ahead of closures and lower work:\n- w-d1818c0d174d (P1): 8e1f, now.\n- w-a3ed3fd4d50d, then w-e1fc1595d96c (P1): d50d, now.\n- w-79cb2894b78f (P1 research), then w-90de8de3e8d6 (P3 docs): Opus3, now. Opus3 also drafts the criterion-6 per-harness restart checklist on the epic.\n- w-3ab66c26d9e3 (P1): 03d4, after P0 w-492e lands.\n- w-657d74d6944b (P3): edfd, after the 0419 re-cut.\n- w-327a67e8f9df (P4): a7bb, after the w-a6f5 measurement and slice 1's pair.\nCriterion 6: live evidence after the cutover restart, through Engram's ordinary writer, for Codex/Claude/Cursor/Gemini/OpenCode/Kimi. Needs live sessions per harness. Plan ONE coordinated restart with Engram::Fable (asked in ebe242f7 #7812).\nRelated, outside the epic: w-1fd8f197b596 (legacy census), w-3ed252d21d84 (authority wording; instruction-file process), w-f83094005168, w-b8d04dff6b68.\ncontent-v1: zero in production; ~30 old-shape test files and 2 docs remain.\nThe in-flight landings K3 S2b and then P0 w-492e finish as planned.\n\n16:20Z TRAIN RULE for EO P0 items (Fable2 to Opus2 #5919): an EO item enters the landing train directly behind the last change whose review pair is already RUNNING or COMPLETE, ahead of any non-EO change whose pair hasn't started. It never voids a running or completed pair.\nCurrent train: P0 1bf874d9 > K3 slice 1 05062f47 > EO 327a (a7bb, cut on 05062f47) > 0419 (edfd re-cuts on 327a) > ee04.\nStatus at 16:20Z:\n- 79cb: evaluation admitted (session-17858).\n- 90de: met, with evaluation queued.\n- a3ed: no-op reconciliation, evaluation requested.\n- d181: repair already on master; its C3 \"lands inside w-3fe8 final candidate through its review pair and full gate\" is blocked on Greg's answer to Asistant #1548 (accept a fresh review pair plus a current FULL).\n- 3ab6: implementing per ruling note 2857093f (remove the pre-send Engram held-binding read; local S0 stays).\n- 657d: edfd checking.\n- 327a: staged.\n- e1fc: d50d next.\nHarnesses:\n- Cursor: root session-17857 created.\n- Gemini: needs auth from Greg.\n- OpenCode: not on Central; DL560 and Mac being probed.\n\n16:40Z ADDED: w-a7e55a39af8e (P0, EO child), Gemini harness to Antigravity `agy acp` (Greg via Asistant #1557/#1558).\n- Assigned to Sol-03d4 (#3070) beside its frozen 3ab6 candidate 2262e652 (tree 840d6c4b, author placement pending with Opus2); 3ab6 keeps priority.\n- agy is ALREADY LOGGED IN on Central (cheap subscription). The smoke test is opt-in: one run, one harmless prompt, no retries. Larger use means asking Greg first with an estimate. Never run login or touch config.\n- Gemini's row in criterion 6 is not waived.\n- K3 slice 2 b979 (4ff1d9e4, author 41/0) goes to the END of the train after ee04 (Fable2 #5927).\n- a7bb's a6f5 diagnostic is closed as synthetic-only; a7bb moves to 327a.\n- Mailbox ids now need the \"mailbox-\" prefix for reads; bare UUIDs gave 409/404 at 16:34Z."
+}

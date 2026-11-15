@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "termal-greg-merger-role-rule-2026-10-19",
+  "head": {
+    "state": "active",
+    "chain": [
+      "fde39ab929b4420399869b5d6196f615",
+      "74cd718398274665a8047df0554035e4"
+    ]
+  }
+}

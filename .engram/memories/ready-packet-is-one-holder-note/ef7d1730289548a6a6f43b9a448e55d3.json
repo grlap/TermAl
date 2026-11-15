@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "ready-packet-is-one-holder-note",
+    "revision_id": "ef7d1730289548a6a6f43b9a448e55d3",
+    "previous": null,
+    "body_sha256": "d5c43a6b64d609d6310bc112fd30ef135d36091804329ddf0234b89f0773332d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T03:11:34.724013100Z"
+    }
+  },
+  "body": "Closure procedure (Termal::Fable2, 2026-11-14 03:12Z, adopted with Kimi::Consultant under Greg's \"work with the team, no new gates\", Kimi #262). There is no new artifact or gate.\n\nA coder's READY/closure packet is ONE current holder note on the item:\n- item revision;\n- commit, tree and source_id;\n- the criterion→evidence id mapping;\n- run host, scope and results;\n- the review pair;\n- the landing, install and cleanup actions still left.\n\nTwo evaluator-admission limits, both met tonight:\n(a) termal_evaluate_acceptance refuses to cite a NON-holder record (\"non-holder record is not citable; quote its proof in a current-run holder note\"). So quote such proof verbatim in a holder note with its source locator, and select only holder notes. Seen on b121, 03d4 #3107.\n(b) Each selected record must be at most 16 KiB (16384 UTF-8 bytes; \"body exceeds the brief read bound\"). Keep the packet under that and leave large lasting records unselected. Seen on 1fd8, 03d4 #3118.\n\nMail carries only the event and the note locator; closure facts come from the originals."
+}

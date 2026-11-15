@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "test-fixture-control-transport-dispatch-budget",
+    "revision_id": "9b10f9c051f34a499bc9aa99f83e30a4",
+    "previous": null,
+    "body_sha256": "4f4e84473c53d6c4ea4fc999ee9399f1507266af8d35375f5e9a990c62a8323c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T05:39:33.416903600Z"
+    }
+  },
+  "body": "Test-fixture trap (Termal::Opus3, 2026-10-23; I lost two RED runs to it). In the Rust tests, `state.install_control_test_transport(..)` (through install_control_only_transport, src/tests/engram_host_adapter.rs:167) sets inner.test_engram_dispatch_budget = Some(DEADLOCK_GUARD). Every target captures that budget, so with a scripted clock an advance of ENGRAM_DISPATCH_BUDGET_MS never spends the dispatch deadline (`remaining_dispatch_timeout`). Meanwhile confirm_engram_admission_durable (engram_queued_admission.rs:409) uses the fixed ENGRAM_DISPATCH_BUDGET_MS, so the same advance shows up as \"admission durability arrived after its operation budget\" (a late-durability hold, no retry), not as dispatch_budget_exhausted. To drive dispatch_budget_exhausted, set test_engram_dispatch_budget = Some(20 s) AFTER installing the transport and advance past it, as CausalRoot::new does (src/tests/engram_root_causal_failure.rs:321, with BudgetAfterGrant advancing 21 s on the queued wake's turn_evaluate #2). Before copying a fault from a proven fixture, diff its whole setup, not only the fault."
+}

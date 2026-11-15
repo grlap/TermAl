@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rules-waits-and-wakes-greg-act-holds-2026-11-12",
+    "revision_id": "5a27aea3c07f47418e06ccc1912521dc",
+    "previous": "c1915fa6e8f243988190d973b763308c",
+    "body_sha256": "a2c88eb75505d6e8763c1fb4303dd793fc01cb88bba908dd771cb31109b99dc4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-12T19:24:42.703123800Z"
+    }
+  },
+  "body": "Continuation of rules-waits-and-wakes, which is at its 8 KiB limit. ITEM 8 AMENDMENT, verbatim, concurred by both coordinators (Termal::Fable2 #7690 and Engram::Fable #7691, TermAl mailbox ebe242f7, 2026-11-12 about 19:22Z; TermAl w-bebbae70639c, Engram w-761908cf1e2a; Engram's mirror is rules-greg-act-holds-2026-11-12).\n\nCause (rev 2, corrected on Engram::Fable #7693 and Asistant #1452): Greg was NOT at fault. Our heads-up through Asistant told him: „To nadal zapowiedź — na razie niczego nie zatrzymuj. Zespół prześle polecenia i sygnał ‘restart now’ po sprawdzeniu paczki oraz wyciszeniu hostów.” He waited for exactly that signal. Fable2 sent it ONLY to Advisor (b9d13887 #3020), so it never reached his Asistant conversation. Meanwhile every lane sat about 1.5 h behind a drain that had no deadline. The cause was our routing.\n\n\"GREG-ACT HOLDS (2026-11-12): no drain or hold for a Greg act (restart or cutover) starts until Greg himself has replied that he is ready, through Engram::Asistant; sending the request starts no hold. Any drain or hold that waits on a Greg act then has an absolute deadline: the agreed start plus 15 minutes. Each coordinator sets a real scheduled wake for that deadline in its own session (Claude CronCreate one-shot or the Codex equivalent). If the session restarts, it sets the wake again on recovery. On waking, it checks the actual host state: process start times, installed binary hash, backup and log directories. If the act has not started, it lifts the hold, tells every waiting session to resume, and tells Greg through Asistant. Every request for a Greg act goes through Engram::Asistant (his direct channel) as well as Advisor, says in plain words that Greg must perform it and when, and asks him to reply „zaczynam” when he starts.\"\n\nThis supersedes item 8's \"RESTART NOW via Advisor\" route and its \"no timer\" clause, for Greg acts. The signal goes on the same channel as the announcement."
+}

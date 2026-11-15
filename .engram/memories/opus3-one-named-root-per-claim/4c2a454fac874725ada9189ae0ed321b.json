@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-one-named-root-per-claim",
+    "revision_id": "4c2a454fac874725ada9189ae0ed321b",
+    "previous": null,
+    "body_sha256": "7258240a045f598e30908cbbab540b838f5d53c91e9959f4abaf947da2b85c86",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T15:27:13.357434200Z"
+    }
+  },
+  "body": "Worker trap (Termal::Opus3, 2026-11-13, docs items w-7845 and w-1474): two claims must not name the same worktree as their source root. A registered launcher run there is refused at registration: HTTP 409 \"ambiguous named roots … Clear the earlier name or use separate worktrees\". When one candidate serves two items, give each claim its own worktree, for example a second detached checkout at the same commit. Also: before running any launcher command on Central, check that Opus2 hasn't announced an EXCLUSIVE window, because the launcher spawns git for the commit identity even when registration then refuses."
+}

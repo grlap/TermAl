@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol-c593-working-habits-2026-11-09",
+    "revision_id": "06a047401f9d41038a5614111ee60124",
+    "previous": null,
+    "body_sha256": "2e7e58734477c93af7e3e45e783c2a788790ee405dfdbcf38af67631cfff457e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T17:09:17.087269900Z"
+    }
+  },
+  "body": "Worker habits for Sol-c593, from Fable2/session-8112 mailbox 1a9f6a77 #1410 (message c7e687b1-2a79-493f-af8b-e5f3d133c700) and #1412 (message 07296599-741f-4d08-a14d-f9ea05aa76c9), 2026-11-09. These are habits, not new gates or authority. Write short mail in plain sentences with normal spaces and facts first. Report procedural work with no benefit in one line. For future authorized focused runs, put cargo fmt --check first, and clippy where affordable, before heavy behavioral tests; arrange this within the existing Central slot and exact-command authorization, never start extra Cargo during another owner's window or rerun an already frozen/reviewed package just to add these checks. Write new acceptance criteria as one observable outcome each, without run IDs or volatile facts; run evidence belongs in notes/gates. Existing criteria, standing rules and frozen integration inputs remain unchanged."
+}

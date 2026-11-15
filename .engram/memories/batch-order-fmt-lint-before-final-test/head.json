@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "batch-order-fmt-lint-before-final-test",
+  "head": {
+    "state": "active",
+    "chain": [
+      "cbf00e3a7a414f5f8661044e1d0a63e5"
+    ]
+  }
+}

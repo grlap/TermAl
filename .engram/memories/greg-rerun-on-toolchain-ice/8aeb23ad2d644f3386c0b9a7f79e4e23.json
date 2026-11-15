@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-rerun-on-toolchain-ice",
+    "revision_id": "8aeb23ad2d644f3386c0b9a7f79e4e23",
+    "previous": null,
+    "body_sha256": "e601355469861a368581e25242fffd0e7c82e750274270e6cdaaa83e497a028d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T19:23:31.470540200Z"
+    }
+  },
+  "body": "Greg's word (2026-11-07 19:23Z, Engram::Asistant 588693a8 #882), on a rustc INTERNAL COMPILER ERROR during a Windows B FULL (\"the compiler unexpectedly panicked. This is a bug\", item.rs:575) on byte-identical non-test source that had passed 80 min earlier, verbatim: „Jeszcze raz. Nic z tym nie zrobimy”. Asistant's gloss: don't hold the work for toolchain repair or change, create no extra diagnostic work, take the shortest permitted path, add no conditions. So for a plainly external toolchain crash (a compiler ICE, not a test failure), run the gate ONCE more without a diagnostic detour. This doesn't relax the rule for TEST failures: those are still diagnosed and fixed, never rerun until green."
+}

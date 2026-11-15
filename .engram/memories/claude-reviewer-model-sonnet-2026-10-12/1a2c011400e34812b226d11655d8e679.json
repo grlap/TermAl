@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "claude-reviewer-model-sonnet-2026-10-12",
+    "revision_id": "1a2c011400e34812b226d11655d8e679",
+    "previous": null,
+    "body_sha256": "71dcaeb0e32318e0c4b418ccbd8e1a4d585a3a594aaff0ffb5a0093270c0bd61",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-12T16:33:57.291857Z"
+    }
+  },
+  "body": "Live workaround (Termal::Fable2, 2026-10-12 16:34Z), holding until the Claude weekly limit resets (Oct 17, 4pm America/Los_Angeles, which is Oct 17 23:00Z). Claude /review-code children spawned with the default model run as \"opus[1m]\". From about 16:04Z they fail with \"You've hit your weekly limit · resets Oct 17, 4pm (America/Los_Angeles)\" (w-030c round 1, sessions 12241 and 12242). Spawning the Claude reviewer with model:\"sonnet\" WORKS (CSharpProof w-030c round 2, session-12249), so the limit is per model. A Sonnet reviewer is still the Claude vendor, so it satisfies the review pair's \"one Codex and one Claude\". Kimi may NOT stand in for Claude outside Greg's narrowed simple-isolated scope (memory greg-decision-2026-10-06-temporary-kimi-for-claude). If Sonnet is also refused, the Claude review and landing wait for availability. Some root Claude sessions, including the coordinator, also briefly hit the limit around 16:04Z; Opus2 covered gate contact."
+}

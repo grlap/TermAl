@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "merger-freeze-crlf-rules",
+    "revision_id": "1edf8ccb32584706890879bed3306126",
+    "previous": "3d268b3eee9544309f5bf7a1e3de9faf",
+    "body_sha256": "6fd65659b98ed3063601131055370f3fc29898a5bd58fd6997e474cd1db22829",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-11T06:15:23.968551800Z"
+    }
+  },
+  "body": "Freeze and carry rules for Termal::Merger packages (Termal::Fable2, 2026-10-11 02:38Z; a supplement to termal-merger-model-2026-10-10, which is at its size limit).\n1. CARRY. On this machine the system core.autocrlf=true makes `git apply` write CRLF while the index stays LF. Carry with `git -c core.autocrlf=false apply …`, or write the files from their index blobs (`git -c core.autocrlf=false checkout-index -f -- <paths>`).\n2. FREEZE. A schema-1 fingerprint computed by the reference script under the system Git config never passes the pinned host checker, which uses an isolated config (w-3a48a8c03da7). Always freeze under core.autocrlf=false (GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=false), on an LF working tree.\n3. VERIFY before reporting ready, with the pinned checker: \"C:\\github\\Personal\\TermAl\\target\\release\\termal.exe\" review-freeze-check ROOT MANIFEST FP must exit 0 with stdout exactly FP plus LF. It runs no server and opens no store.\n4. The review evidence rests on the staged blob ids. A re-freeze with byte-identical blobs needs no new pair; record the superseded fingerprint and why.\n5. Package notes name the fingerprint's KIND (schema-1, or a labelled launcher composite) plus the blob ids. On a mismatch, compare the blob ids first.\nIncidents: w-4cdb (composite b22eed66 versus schema-1 a2be1050), w-8f9a (CRLF after git apply), w-d3e9 (2b107063 from the system config, superseded by r4).\n\n6. COMMIT FROM THE INDEX (Fable2, 2026-10-11 05:23Z, after w-d3e9's 76e1819d). The working tree under the system autocrlf=true holds CRLF; the reviewed and gated input is the LF index. Commit only what is staged: run plain `git commit` with no pathspec and no re-add, or `git write-tree` plus `git commit-tree`. Never `git commit -- <paths>`, `-a`, or a re-add under core.autocrlf=false, all of which store the CRLF working files. Before any handoff, check that `git diff --stat BASE COMMIT` shows only the package's real hunks (no whole-file churn) and that each committed blob id equals the frozen staged blob id. Incident: 76e1819d stored all four w-d3e9 files with CRLF (+14360/−13998); the evaluation caught it (criterion 4 insufficient), and it never reached master.\n\n7. FRESH WORKTREE DEPENDENCIES (Fable2, 2026-10-11 05:46Z). A worktree made by `git worktree add` has no ignored ui/node_modules, and the launcher bootstraps only the Cargo build directory. Before a gate's launch turn, run `npm ci` in <root>\\ui (from the committed lockfile), then confirm `git status` is unchanged and the pinned freeze check still holds. Incident: test-a6f3358b (w-5a1a+w-8f9a) ended at once with ENOENT ...\\ui\\node_modules\\typescript\\bin\\tsc, with no stage run. Classified as environment, not product or test. The Merger launches in the Codex form: working directory set to the root, no pushd.\n\n8. ONE CREDITED ITEM PER GATE (Fable2, 2026-10-11 06:15Z). The host credits a recognised test in a shared named root only to the session's FOCUSED item. Its verbatim notice: \"A recognised test in a shared named root is reported for bound item w-5a1a58299818 only; w-8f9a11d3600c receives no credit. Make that item the focus and run its test in the next turn for its own credit.\" A combined package of two items needs one full gate per item, each with that item focused, on the unchanged tree. Don't commit between those gates. Incident: test-5d3c42bf passed for w-5a1a only, so w-8f9a needs its own credit gate."
+}

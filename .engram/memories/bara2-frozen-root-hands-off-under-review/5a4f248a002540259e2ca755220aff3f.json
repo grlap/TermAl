@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara2-frozen-root-hands-off-under-review",
+    "revision_id": "5a4f248a002540259e2ca755220aff3f",
+    "previous": null,
+    "body_sha256": "2cef8f6c3a26c29b4ff9cbc06e19952baa8b08d70399260b59821dc3c322f495",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-28T22:36:00.951347500Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA2, 2026-10-28 22:35Z; my own slip on Group B r7, confirmed by Fable2 #858).\n\nOnce a /review-code pair is spawned on a frozen root, that root is HANDS-OFF until the fan-in. Read-only reviewers read the live working tree, so an edit made while they run makes them review a moving mix of two inputs. The host also records those edits as workspace changes observed during the delegation.\n\nWhat happened: I froze Group B r7 (939655d0) and spawned the pair. A coordinator message that had crossed mine then required more tests, and I edited the root while the pair ran. I had to cancel the pair unused (cc149452, 98e83cbb), re-freeze as r8 and spawn a new pair.\n\nRule:\n- If a new requirement arrives after the spawn, CANCEL the pair first (termal_cancel_session), then edit, then re-freeze (tree, patch, archive), then spawn a fresh pair.\n- Never edit under live reviewers.\n- Before freezing, re-read the mailbox for crossed messages that add requirements, so the freeze is final.\n- Disclose any cancelled pair in the next freeze's INDEX, and never cite its results."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-claude-gate-launch-rule",
+    "revision_id": "03883320b9574d70a98b425bcec89528",
+    "previous": "6a5c5bfaed074f8c9b9db3e369259885",
+    "body_sha256": "c576712ce5fc49b9014097cd3d4800f12d49c6a872681dbec7b8d1f4a1f1a1de",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-18T01:27:14.717084300Z"
+    }
+  },
+  "body": "CLAUDE LANE GATE LAUNCH (interim, Fable2 2026-10-17 22:20Z): on the running host build 459f8540, a Claude root session's Bash-BACKGROUND gate launch fences its own credit. It counts as outstanding background work (ClaudeHazardCause::OwnSession, src/claude_outstanding_work.rs). Bug: w-b576a44fb793 (P1).\nUntil it is fixed, Claude lanes (Opus3 and other Claude lanes: BarA1, BarA2, CSharpProof) launch full gates DETACHED, as one FOREGROUND Bash call:\n  pushd \"ROOT\" && node scripts/test-launcher.mjs full --detach --notify session-8112\nin a turn that begins focused on the item, then end the turn. Fable2 gets the notify and wakes the lane.\nCodex lanes keep their usual form.\n\nADDED 2026-10-18 01:29Z (Fable2's own lesson). ANY Claude Bash run_in_background or Monitor task restricts evidence, even a read-only watcher that only polls the API: the host cannot see that it is read-only. It restricts this session, and other sessions lose credit for tests in workspaces under its workdir. Fable2's workdir is the main checkout, which contains every .tmp/wt-* lane worktree. Fable2 therefore never uses background shells or Monitor; it checks gate stages by hand on wakes. (Occurrence: task bdr92a8ag, 01:26–01:27:30Z, overlapping the w-affe gate test-e2706734; disclosed on w-affe8a4dee48.)"
+}

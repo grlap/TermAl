@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-printf-backslash-paths-corrupt-2026-11-15",
+    "revision_id": "5b6de4ee4ece40ee90ce65cf18027e66",
+    "previous": null,
+    "body_sha256": "78035f78f345acac71bdad970fb8c5a6ddfb988f435d768bc2eaaecc64968208",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-15T17:08:30.672818600Z"
+    }
+  },
+  "body": "Opus2 self-lesson (2026-11-15 17:08Z). Never build a mailbox message file with bash printf when it contains Windows paths. printf interprets backslash escapes, so \"\\Engram\" and \"\\activity\" became ESC and BEL in the file, and the Merger received a corrupted root path (#768/#769). Use the Write tool, or a quoted heredoc (<<'EOF'), for any message containing a backslash path, and check for control bytes (grep $'\\x1b\\|\\x07') before sending. A corrupted path in a recipient's mail is the sender's file bug, not TermAl serialization, unless the file bytes are clean."
+}

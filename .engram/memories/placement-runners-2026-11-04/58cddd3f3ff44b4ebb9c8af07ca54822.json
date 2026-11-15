@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "placement-runners-2026-11-04",
+    "revision_id": "58cddd3f3ff44b4ebb9c8af07ca54822",
+    "previous": null,
+    "body_sha256": "090a6e1c7bb5e60e11090a1a432f0afc1d46a8ce8dd4580bd493c6e6a7d9433d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T02:36:16.889422200Z"
+    }
+  },
+  "body": "Second TermAl runner on DL560 (Fable2 #4222, 2026-11-04 02:36Z, created on Greg's word): Codex 6, host:e83d08f4-22ac-4655-a84d-941fc0eeb4f1::session-6, same settings and brief as Codex 3 (session-3); reports PREPARED, START, END to the requester and Fable2. Passed a mailbox check only; its first job also tests it. Use it for new jobs, including the DL560 FULL on N3 if Codex 3 is busy. Don't use session-5 (held at an approval). Don't move a job queued at Codex 3 without withdrawing it and getting an answer: a withdrawal crossed a START there. Codex 3's turn was active since 23:37Z (Architect2), so its pending wakes wait."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-central-single-slot-discipline",
+    "revision_id": "52e13115c5d94636a591bfdc8f940c0e",
+    "previous": null,
+    "body_sha256": "ae92c002736e4e52bea6561bfa964612fb222b346c2954762ef44fc71ef67ab4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T15:32:36.478642700Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-30 15:33Z, my own repeated slip). Twice in 15 minutes after restart 1, I gave the Central cargo slot to two sessions at once. First, Coder 7422's c7e0 focused run and Merger3's Engram release build overlapped at 15:18–15:20Z. Then my \"Central GO\" to Merger3 at 15:28Z was followed by me authorizing Coder's next focused check at 15:31Z, and both launched around 15:32Z. Cause: I hand out GOs per conversation without one ordered Central queue, and a hold message arrives too late when the recipient is mid-turn. Rule: keep ONE explicit Central owner at a time. Before ANY GO or step that implies a cargo run on Central (including \"run one focused check\" inside a continuation), check who holds Central. If someone else holds it, put the next job in a queued position and give no GO. Release only on that job's END mail."
+}

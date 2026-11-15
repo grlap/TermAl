@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "rules-architect-escalation-boundary",
+  "head": {
+    "state": "active",
+    "chain": [
+      "76deb441686044e99a28692195c478a1"
+    ]
+  }
+}

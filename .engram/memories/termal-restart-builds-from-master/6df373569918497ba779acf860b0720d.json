@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-restart-builds-from-master",
+    "revision_id": "6df373569918497ba779acf860b0720d",
+    "previous": null,
+    "body_sha256": "04353f5d6e71fd0b64b76fe7d7784d5b1260fac1e62c77496f3636d5b19479f0",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-03T22:10:58.717026400Z"
+    }
+  },
+  "body": "Rule learned 2026-11-03 (Opus2 #4132, #4139). The Central host runs `cargo run --release` from the master checkout, so a restart REBUILDS from whatever master holds at that moment. Holding an install does not pin what a restart runs; fast-forwarding master does change it. While a \"restart now\" is pending, do not land: keep master at the announced commit, then land, push and install after the restart. Also: the rebuilt exe's sha differs from the install worktree's build of the same commit (a056b834 vs 6be26d03 for 14b53e3b), so tell Greg the COMMIT, never the exe hash, as the version identity. A FULL can still run on a candidate during the wait, since its parent stays master."
+}

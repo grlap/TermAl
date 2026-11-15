@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "bara2-mail-start-before-cargo-runs",
+  "head": {
+    "state": "active",
+    "chain": [
+      "7fb8f725313841a49091137fd7de4802"
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "coordinator-gate-go-needs-peer-end",
+  "head": {
+    "state": "active",
+    "chain": [
+      "56766ace3c2d4f888a024b3d914ac29e",
+      "443f211a8b02421e9f7ccdf904a18992"
+    ]
+  }
+}

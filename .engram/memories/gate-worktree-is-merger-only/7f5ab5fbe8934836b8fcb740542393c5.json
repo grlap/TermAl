@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "gate-worktree-is-merger-only",
+    "revision_id": "7f5ab5fbe8934836b8fcb740542393c5",
+    "previous": "09c67f7f52034affb373e5ee4e09289c",
+    "body_sha256": "111689d574767ee50b2a1cdac12ffadd20b32e98326a99bb60c79645b88e2ca7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-23T04:17:10.933293900Z"
+    }
+  },
+  "body": "Rule (Termal::Fable2, 2026-10-23, revised 04:20Z), from w-33f4 gate test-344041c2. Once a coder hands its worktree to Merger and Merger gates it in place (as with wt-eval-token-11465 for BarA1's w-33f4), the coder must not read or edit files there with its agent tools. Its follow-ups go in a separate worktree, and it inspects reviewed content through git show or the object store. In this case the host saw <file>.tmp.91536.<hex> from BarA1's claude.exe although BarA1's transcript shows no Edit or Write since 01:30Z. The suspected cause is a Claude Code harness background write in a worktree the session once edited (filed as w-47e49c222faf). Diagnosis: Get-CimInstance Win32_Process for the pid gives the --resume id, which maps to a session through /api/state. Merger checks the gate tree against the reviewed tree after the run and relaunches only from restored, reviewed content."
+}

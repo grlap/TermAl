@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "focused-without-input-flag-still-registers-in-clean-root",
+    "revision_id": "0108b5d8449c41ac861450ec0d7e6a22",
+    "previous": null,
+    "body_sha256": "ef54f561623135dd5ba5034fdeac0aed5481cd435c2763cc432f5d25b7f38518",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-14T15:58:53.946359800Z"
+    }
+  },
+  "body": "Opus2, 2026-11-14 15:59Z, my own wrong premise. A `node scripts/test-launcher.mjs focused -- <cmd>` run WITHOUT `--input commit`, started in a CLEAN named source root, still REGISTERS as committed input. The launcher selects commit input automatically when the root is clean; the TermAl launcher test-launcher-commit-input tests say \"the command line selects automatically\". Engram::Merger's baa6 diagnostic test-5c3cf79c (Engram launcher) printed \"basis=source_id ... registration: registered-but-not-indexed; registration succeeded; host check credit decided at delivery\" despite the exact no-`--input` argv. CONSEQUENCE: a diagnostic EXPECTED TO FAIL, run in an item's clean named root, writes a FAILED Test record on that claim at that commit, which becomes the \"newest applicable terminal result\" until a later pass. Do NOT promise \"no record\" by dropping `--input commit`. If a failed record must be avoided, run the diagnostic in a worktree that is NOT the item's named root, or under a session with no claim on the item; otherwise accept the failed record and say so in the GO."
+}

@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "test-pruning-guidance-2026-11-07",
+  "head": {
+    "state": "active",
+    "chain": [
+      "f1aa628ec33f415689a5e16f47435325",
+      "752c4d8f8683401c8073206fe1463caf"
+    ]
+  }
+}

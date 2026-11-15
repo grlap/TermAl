@@ -1,0 +1,28 @@
+{
+  "id": "01a1ddf7-5462-7012-8cd5-0c01c0463037",
+  "external_ref": null,
+  "title": "Document the \"refusals explain themselves\" design rule in TermAl's docs",
+  "outcome": "Document the \"refusals explain themselves\" design rule in TermAl's docs",
+  "acceptance": [
+    "TermAl's developer documentation states the rule in the wording both coordinators concurred on (memory design-rule-refusals-explain-themselves-2026-11-15), and cross-links to the feature docs it applies to.",
+    "The change lands as an ordinary Markdown landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "design-rule",
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

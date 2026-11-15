@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "author-run-must-cover-changed-source-test-modules",
+    "revision_id": "0f2ec618dada4641b18f1f6a4c499eb9",
+    "previous": null,
+    "body_sha256": "03c437838f3245c295a6835cb14014e6e040f8207675e339f360390651bde9ea",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T20:49:24.220941900Z"
+    }
+  },
+  "body": "Process rule from the TermAl coordinator (Termal::Fable2), 2026-11-11, after two FULL failures in one day that the author runs did not catch:\n- w-18a1 R15: 22 Rust failures, against a focused author run of 47 tests.\n- combo63 edfd 4fe61e6b: one failure, in the sibling module engram_unadmitted_reporting_repairs, against a focused author run of 553 tests.\nBefore a candidate is handed to the integration owner, the author run must cover the whole suite, or at least EVERY test module that exercises the changed source files. Covering only the new or targeted tests is not enough. Authors list those modules in the handoff, and the integration owner applies the rule in GO requests. This saves DL560 FULL slots and review pairs, because a regression is caught before the train."
+}

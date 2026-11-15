@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-quiet-during-other-gate",
+    "revision_id": "51adb123e2d04f28bf588dded9efd7df",
+    "previous": "9466ef2638aa4f3bb9ee42c9156f85be",
+    "body_sha256": "4fbbd328368df72b27980d2da25bfaf0e4c36147242205536c212b8953987a22",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T15:04:38.870809200Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-15 22:20Z, agreed with Engram::Fable after TermAl load caused an Engram gate failure). During the OTHER project's FULL GATE, TermAl runs NOTHING CPU- or IO-heavy: no npm ci, vitest (even focused), tsc, fixture generation, measurement runs or cargo. Allowed: reads, mail, edits, a single-file rustfmt --check, git-only steps and read-only reviewer pairs. Engram follows the same rule.\n\nCause: Engram's w-f9368 gate test-93f1a2fc (21:42-22:17Z) failed on host contention: its freeze stage took 646 s against a normal 105-230 s, and a launcher test hit its 60 s timeout. In that window I had approved Sol-a7bb's npm ci, repeated focused vitest runs, and a 1,356-item Engram fixture build plus a 136-page `ls` measurement, all during Engram's gate. Engram's w-c47d failure at 20:37Z overlapped similar UI work and a reviewer pair.\n\nPractice: before granting ANY run, check whether a gate is running on either side. If one is, the run waits for that gate's END, then goes in an agreed build window.\n\n22:21Z, the same evening, a crossing miss. Engram::Fable offered a window (#2202) while I offered its re-gate first (#2203); it took my offer and launched (#2205, #2206). Meanwhile I accepted its earlier #2202 and sent four GOs at 22:19Z. I revoked them at 22:20Z, but Opus3's cold cargo build (test-a75ff97c) had already started and overlapped Engram's quiet gate. RULE: when messages with the other coordinator cross, send NO worker GO until the other coordinator has explicitly confirmed the slot in a message that replies to my latest. If messages cross again, the other side's latest decision wins.\n\nADDITION (Termal::Fable2, 2026-10-16 02:03Z). `git worktree add`, a full checkout of a few hundred MB, is DISK-HEAVY and is NOT allowed during the other project's gate. Engram's w-7e87 gate test-e7f46a48 failed at about 02:00Z on a SQLite concurrent-open race (SQLITE_PROTOCOL, Engram w-b44744a4e474). TermAl had created three fresh worktrees between 01:55 and 02:00Z (Sol-edfd, Opus3, Sol-license) because I allowed \"git worktree and naming\" during gates. Causation is unproven, but stop allowing it. During the other project's gate allow only: mail, edits in EXISTING worktrees, read-only review pairs, git status/diff, and freeze checks. Create new worktrees in TermAl windows.\n\nAddendum (2026-10-16 05:02Z). Engram's w-b447 phase-3 full lib suite took 654 s instead of the usual 355–410 s and failed one Windows exchange fixture with Err(Deadline), while TermAl ran the P0's cold cargo build, a --no-run compile and the GREEN, all under the agreed \"focused runs may go in parallel with (1) and (2)\". Lesson: a COLD cargo build or a full test-binary compile is gate-class load. Keep it out of the other project's suite or timing phases too, not only out of its full gates. Warm focused runs are fine.\n\nAddendum (2026-10-16 15:05Z, my own slip). \"No START mail yet\" does NOT mean the other project's gate hasn't started: Engram's w-7e87 gate launched at 15:00:28Z, but its START reached me at 15:04Z. Meanwhile I approved Opus3's `npm ci` (disk-heavy) at about 15:02Z. Disclosed to Engram (#2305). RULE: once the other side has been told \"your window, go\", treat its gate as possibly RUNNING. Disk- or CPU-heavy prep (npm ci, cold builds, worktree adds) waits for its END, or for an explicit \"not started yet\" from that coordinator."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-slot-rule-with-engram-2026-11-02",
+    "revision_id": "74cbcbd9712142d4a8797422bca666ef",
+    "previous": null,
+    "body_sha256": "7755f975a2983f007b8c0d9bca7cfba18655ecd6e1ef964876fadcc01fa819e2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-02T08:20:42.867307400Z"
+    }
+  },
+  "body": "Central host slot rule, agreed with Engram::Fable on 2026-11-02 08:20Z (Engram memory rules-central-slot) after two overlaps, the latest being Engram::Merger's 83ab Rust preflight 07:45:56–08:13:38Z during TermAl's w-32a6 FULL test-5899cf58. Engram runs no cargo, launcher run, rehearsal or measurement on Central without an explicit slot from Engram::Fable, who grants one only after checking with Termal::Fable2. During a TermAl FULL, Central is fully off-limits to Engram until Termal::Fable2 sends END. Engram's default is its remote runners (Windows B, Mac, DL560). TermAl side: before each FULL, request the slot from Engram::Fable and send END when it finishes. Ask TermAl lanes to run no cargo on Central during the window."
+}

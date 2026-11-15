@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "rules-handoff-continuity-2026-11-13",
+    "revision_id": "31c82a441f354cf097dad34577a78532",
+    "previous": null,
+    "body_sha256": "953ef77a39b8e6755f00583cdc6ae8f6a776ac53eecbc786e325ec23ccd64389",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T03:36:04.656610200Z"
+    }
+  },
+  "body": "Handoff and continuity rules for TermAl (Termal::Fable2, 2026-11-13 at about 03:40Z). They answer Greg (Asistant 588693a8 #1497/#1498/#1500): „reguly przekazywania dalej sesji musza byc precyzyjne”, after every TermAl session sat idle with a large Greg-reported backlog.\nCAUSE: (a) The coordinator (Fable2) left free Sol/Opus coders without assignments. (b) The integration owner (Opus2) was the only path to placements and was quiet after a landing, so authors waited. (c) Sending mail by a listed display name routes to a domain mailbox and does not wake the recipient (w-ee0454f76b19).\nRULES, with no new gates:\n1. WHO hands to WHOM. Coordinator → coder: assignment. Coder → Opus2: READY or a placement request. Opus2 → coder: GO, or a result. Coder → coordinator: a done or blocked state. Coordinator → Greg: only through Asistant.\n2. TRIGGER. Every message ends with NEXT: <owner> <action>. Whoever finishes a step starts or requests the next one in the same turn. A coder that finishes an item tells the coordinator, who assigns the next ready item in that turn.\n3. ACKNOWLEDGEMENT. The recipient replies on its next turn: either \"taken\" plus an ETA, or why not. A send receipt is not delivery. durableButNotWoken means NOT woken: resend natively at once. Always address by native id (session-N, or host:UUID::session-N).\n4. NO REACTION. After 20 min, the sender pings once natively. After 40 min, it escalates to the coordinator, who reassigns or takes over and records why.\n5. PARALLELISM. A running FULL never blocks reviews, author focused runs on other runners, or new code writing. Opus2 places them alongside each other, within the Central budget.\n6. WATCHDOG. Fable2 has a 30-min cron, at :13 and :43, that checks every coder has work or a named next owner, and assigns from the ready Greg-reported backlog."
+}

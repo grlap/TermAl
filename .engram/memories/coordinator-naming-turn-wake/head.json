@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "coordinator-naming-turn-wake",
+  "head": {
+    "state": "active",
+    "chain": [
+      "05de979c23864a26a2cb31f5036f758d"
+    ]
+  }
+}

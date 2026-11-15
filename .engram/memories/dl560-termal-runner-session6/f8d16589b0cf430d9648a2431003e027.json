@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "dl560-termal-runner-session6",
+    "revision_id": "f8d16589b0cf430d9648a2431003e027",
+    "previous": "92b6f3d3ef2048b69d23ec7eddb51161",
+    "body_sha256": "2dea620b8be5f8ec352ecf37ad25e2bdba9317e699f59fc72302273c40101e2e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-04T02:39:20.483323600Z"
+    }
+  },
+  "body": "The second DL560 TermAl runner is session-6 \"Codex 6\", address host:e83d08f4-22ac-4655-a84d-941fc0eeb4f1::session-6, relay principal relay-principal-557b1d0fda0cdfa4a08e3424915ba854e10e701ccf676e42ca4e0d89ef400b16. Created 2026-11-04 about 02:34Z by Fable2 through POST /api/sessions on DL560's loopback API (127.0.0.1:8787 over ssh dl560), on Greg's word „Utwórz poprawnie nową sesję”, relayed by Engram::Asistant, who added: settings like Codex 3 and leave session-5 alone. Settings as returned: Codex, gpt-6.1-terra, high, approval never, danger-full-access, workdir /home/greg/github/TermAl, project-b7327333-6e78-4e54-9196-fc63ab99937b. First check passed at 02:35Z: it read and acknowledged its mailbox and replied, with no approval prompt, checkout HEAD 14b53e3b. It had not yet run a test job at that point. session-5 stays held at the termal_read_mailbox MCP approval (on-request, workspace-write); nobody answered it; don't use it. Brief in its mailbox #1 follows dl560-termal-runner-session3. Its 'run long jobs detached with nohup and end the turn' line was WRONG, because nothing wakes the session on completion, and was corrected about 02:40Z: run one job at a time and stay with it in the turn, report END, then end the turn before any fresh unrelated job; a finite batch from one requester counts as one job; never abandon a running job. Same boundary sent to Codex 3. Basis: Architect2's note 973d6a688ce643d69309141b6050f2fe on w-c752: Codex 3's turns ran about 100, 36 and 32 minutes while it polled and batched; a pending wake only runs when the active turn ends. Lane owners told at 02:36Z: new DL560 jobs go here; withdraw and get an answer before moving a job queued at Codex 3."
+}

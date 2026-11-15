@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-frozen-train-never-gains-parts",
+  "head": {
+    "state": "active",
+    "chain": [
+      "6b81adc6e50e4ef2b314695193d41b33"
+    ]
+  }
+}

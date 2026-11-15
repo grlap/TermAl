@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-resume-on-durable-not-woken",
+    "revision_id": "152f8e1183a34813a189eac06c99eed9",
+    "previous": "525a5c6007da45fc8d2c9d8fe1de1a0a",
+    "body_sha256": "c82efca0ba2b86fc3caed0407831e11d0a297c85e4273d74554c5b3dd24e9f5f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-20T14:39:00.361113400Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-10-20 10:33Z, from 8 occurrences today across 5 sessions: Sol-1cee, Sol-d50d, CSharpProof, Sol-edfd and Coder, on both Codex and Claude workers). When a send to a worker returns notificationDisposition \"durableButNotWoken\", check that session right away with GET /api/state. If it is idle with queuePaused=true, POST /api/sessions/{id}/queue/resume and re-check; it should go active. Then record the occurrence on w-80e0cb2002da. Do not resend: the message is already durable, and the resume delivers it. Without this, the worker sits idle on a GO until the next watchdog tick. This holds until w-80e0's fix is live on the running host.\n\nRefinement (Fable2, 2026-10-20 14:00Z). Before resuming, read the head's last engramControl card with GET /api/sessions/{id} and look at its continuationReason. (a) \"Automatic retry scheduled … next at T\" (persist-writer Deadline under gate load, w-1fcaa9b93d12): Resume returns 200 but is a no-op, because the retry scheduler owns the head. Wait past T; it recovers by itself (Advisor and Sol-c593 at 13:58Z). (b) \"Automatic continuation withheld: retained authorization requires reconciliation\" (for example \"named-root acknowledgement belongs to a superseded authority image\"): w-b21c5132848c. Resume is silently a no-op. Only a UI retry or cancel of the head by the lane owner or Greg clears it, and agents do not touch it. (c) A plain Stop-paused queue with no retained head: resume as above (w-80e0).\n\nUpdate to (b), 14:40Z: the variant CAN be cleared without Greg. The lane's OWNER (not the coordinator, for another project's lane) POSTs /api/sessions/{id}/queued-prompts/{head_prompt_id}/cancel, then /queue/resume, and the next head starts. This was verified on 11330 (w-b21c note). The cancelled wake's mailbox bodies stay unread, so nothing is lost. For a TermAl lane, the coordinator may do it after confirming that the head is a pure wake (mailbox notification text) that was never granted."
+}

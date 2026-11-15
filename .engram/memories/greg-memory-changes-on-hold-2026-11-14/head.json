@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-memory-changes-on-hold-2026-11-14",
+  "head": {
+    "state": "active",
+    "chain": [
+      "57806d2a184946d8b323f6592abd25b3",
+      "384e72683ad440bcae8456edf4dde3e4"
+    ]
+  }
+}

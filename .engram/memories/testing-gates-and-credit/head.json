@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "testing-gates-and-credit",
+  "head": {
+    "state": "active",
+    "chain": [
+      "8dbc69a535494d069324db47aff29ebe",
+      "3e48dc9049a94f29acd32ec205ebac02",
+      "82d8a196e9bb4e58a71feab0427195f9"
+    ]
+  }
+}

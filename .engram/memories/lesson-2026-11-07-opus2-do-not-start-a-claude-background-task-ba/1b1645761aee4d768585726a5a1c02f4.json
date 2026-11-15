@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "lesson-2026-11-07-opus2-do-not-start-a-claude-background-task-ba",
+    "revision_id": "1b1645761aee4d768585726a5a1c02f4",
+    "previous": null,
+    "body_sha256": "42272695df9477e7898e072a13a714a09334aa6d3c0c309cfc2a88f59c90d1af",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T17:45:21.114538600Z"
+    }
+  },
+  "body": "Lesson (2026-11-07, Opus2): do NOT start a Claude background task (Bash/PowerShell run_in_background, e.g. a memory-watch loop) from the integration-owner session in the main TermAl checkout. TermAl then restricts check credit \"for tests in the workspaces this work may write in\". The main checkout contains every agent's .tmp/ worktree, so one harmless read-only watch can withhold credit from all sessions' runs there until the task ends. For resource monitoring, have the runner self-check (census at start/END, its own stop threshold), or use a one-shot foreground census."
+}

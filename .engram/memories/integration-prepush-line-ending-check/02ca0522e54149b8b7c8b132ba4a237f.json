@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "integration-prepush-line-ending-check",
+    "revision_id": "02ca0522e54149b8b7c8b132ba4a237f",
+    "previous": "86bbe1c8080441e6a464e9ad849a4e50",
+    "body_sha256": "adf56c4f4373b7e96e0bb866b6f05ea3ee95789f34118ee0f8256bdaa9395748",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-12T19:00:55.343416900Z"
+    }
+  },
+  "body": "Integration owner pre-push check (Termal::Opus2, from Termal::Fable2's mailbox 4daa5b87 #2159, 2026-10-11 05:23Z; revision 2 corrects the counting method per Fable2 #2168). The Merger's w-d3e9 commit 76e1819d stored all four files as CRLF: whole-file churn of +14360/-13998, and its evaluation then found criterion 4 insufficient. It was never pushed and must be refused if handed over.\nRULE: before pushing any Merger commit, in addition to the usual checks (master tip = reviewed/gated commit, origin/master = base, fast-forward, staged blob ids):\n(1) run `git diff --stat <base> <hash>` and refuse when a small change shows whole-file-sized line counts;\n(2) count CR bytes in the committed BLOBS with `git cat-file blob <rev>:<path> | tr -cd '\\r' | wc -c` (expect 0).\nDO NOT use `grep -c $'\\r'` in this machine's Git Bash: it matched every line (a sanity test with LF-only input returned 2), which produced a false 'CR in every line' reading on the minimap commit 02474e0a. Do not read working-tree files either: system core.autocrlf=true checks them out as CRLF.\nBackground: core.autocrlf=true also makes `git apply` write CRLF while the index stays LF. Carry with `git -c core.autocrlf=false apply`, or write files from their index blobs.\n\n(3) Read the commit SUBJECT against the item's title and criteria before pushing, and refuse a subject that misstates the change (Fable2 #2174, 2026-10-11): 7182f259 (w-d97c0dfe41af) was pushed with the subject 'preserve FOLLOW on tiny upward scrolls' when the change actually DETACHES follow. Pushed history stays as is; the correction is recorded on the item. A wrong subject goes back to the Merger for a recommit before the push.\n\nREPRODUCING A GATE'S trackedIndexDiffSha256 (Opus2, 2026-10-12, from w-ce76 2c44e013; Fable2 #2278).\n\nThe launcher's `git diff --cached HEAD --binary` reads the CHECKED-OUT worktree file instead of the blob for stat-clean entries. Those files are CRLF here, so a file can render as a whole-file rewrite. A no-checkout scratch worktree (`read-tree COMMIT`) renders the blobs instead and gives a DIFFERENT hash for the same tree: 223a8fbb vs the gate's b4a3c021. That false mismatch nearly blocked a correct push.\n\nReproduce in the gated worktree itself, read-only, once its index equals the commit (`git diff --cached HEAD` is empty):\n`env GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=NUL GIT_ATTR_NOSYSTEM=1 GIT_OPTIONAL_LOCKS=0 git diff --cached <parent> --binary | sha256sum`\nmust equal the gate's value, and its `index` lines must name the committed blob ids. Also tracked as w-03d466958d59 (the fingerprint depends on the checkout)."
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1ddf7-68fb-7032-83f6-3a4a5d31f4f2",
+  "external_ref": null,
+  "title": "Acceptance evaluation refuses a Markdown-only item's check with \"inner command is not a recognized test runner\" and no next step",
+  "outcome": "Acceptance evaluation refuses a Markdown-only item's check with \"inner command is not a recognized test runner\" and no next step",
+  "acceptance": [
+    "When an item's only check is a non-test command (for example a Markdown link checker run under the focused launcher), the refusal names the check that decided, the observed command, and a concrete supported route for such an item (for example a declared test command or the supported waiver), per the 'refusals explain themselves' rule; shown by a test of the refusal text and route.",
+    "No new gate is added and existing evaluation semantics for test-bound criteria are unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "check-credit",
+    "design-rule",
+    "host-feedback"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

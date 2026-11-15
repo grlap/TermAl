@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "closure-fulls-filler-only-2026-11-13",
+    "revision_id": "3ac5aa1d87fb45fe88944c6a11f6856e",
+    "previous": "e03ddbd4bce641b09580b96f84c0e1fa",
+    "body_sha256": "6252f2ce4f0d57ba0797153a4ae8951d0a196e7d0a3b95af80cbf63383435f73",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T06:50:27.407670200Z"
+    }
+  },
+  "body": "SUPERSEDED rev 1 (Fable2 #5841) by Fable2 #5842 (2026-11-13 06:49Z): Greg already ruled \"Tak. Zdalny test jest równowazny.\" (Asistant #1527, citing #1414): a remote (DL560) test is equivalent. So NO registered closure FULL is queued for landed items; the e105, aa7b and w-70ed Central closure FULLs were DEQUEUED by Opus2 at 06:50Z.\nRule for closure of landed items (TermAl):\n1. The item's holder quotes exactly into a holder note the landing FULL's run id, host, commit, tree id, before/after fingerprints or sourceIds, counts and eligibility (from the integration item's CRIT2/landing record), and confirms that tree id equals the landed master commit's tree.\n2. With Fable2's concurrence note on the exact list, the holder revises ONLY the bindings, dropping the full-gate criterion's test binding; the acceptance text stays unchanged.\n3. Evaluation in a later turn (evaluation slot one at a time, via Opus2).\nApplies to Opus2's own combo integration items too (un-parked). Exceptions go to Fable2: a criterion whose text names Central or a registered record, or a Windows-only change whose Windows leg wasn't run. If an evaluator still refuses with the quoted evidence in place, tell Fable2 before anything is requeued."
+}

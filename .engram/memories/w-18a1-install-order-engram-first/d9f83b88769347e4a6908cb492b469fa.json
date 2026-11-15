@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "w-18a1-install-order-engram-first",
+    "revision_id": "d9f83b88769347e4a6908cb492b469fa",
+    "previous": "cf7f90da8efd4fb18856199999100243",
+    "body_sha256": "cb09af307a086f9ff71bdfe5add5a3a1afa6e4a390b13a3a37881290f91fb4dc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-11T14:45:04.292488800Z"
+    }
+  },
+  "body": "Landing/install condition for TermAl w-18a1 (Fable2 #5577, 2026-11-11): its R9+ sends the Engram source command --timeout-ms 60000, but the installed Engram source owner caps at 30000; 60000 arrives only with Engram w-6ecc in the Engram sync install. On EACH host (Central and DL560) the Engram sync install must come FIRST, then the TermAl w-18a1 install; otherwise every committed-input evaluation on that host is refused NotClean. Check this at w-18a1 install time on both hosts.\n\nWIDENED (Fable2 #5584, 2026-11-11 14:44Z, from a7bb's #1266 finding): the w-18a1 launcher (scripts/test-launcher.mjs createRun -> sourceOwnerMetadata) probes the installed Engram source owner with --timeout-ms 60000 on EVERY run, even with --input plain. So once w-18a1 is on master, every launcher run on a host whose Engram is pre-sync fails before its tests, including test-ref FULLs. The Engram-first order therefore covers EVERY host that runs the launcher, not only installs: Central, DL560 and the Mac runner. BEFORE LANDING w-18a1, confirm with Engram::Fable that the Engram sync install (w-6ecc, 60000 cap) is on all three hosts. Until then, R13-era diagnostics may use the published master launcher by absolute path from the candidate cwd (30000 budget), disclosed, plain, with no credit (GO-CARGO-R13-1)."
+}

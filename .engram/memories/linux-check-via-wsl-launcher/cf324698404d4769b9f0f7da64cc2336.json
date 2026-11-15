@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "linux-check-via-wsl-launcher",
+    "revision_id": "cf324698404d4769b9f0f7da64cc2336",
+    "previous": null,
+    "body_sha256": "53f184e8c4c39f233c415a61ec99a289ae0744804580def73d3d044344f2c57d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-03T01:33:44.126778400Z"
+    }
+  },
+  "body": "Native Linux check through the maintained Windows launcher, proven by Sol-03d4 on 2026-11-03 (Fable2 request2231). Run from your own named root. Exact successful PowerShell command for this lane:\nnode scripts/test-launcher.mjs focused --input commit -- C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -NonInteractive -Command 'wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/github/Personal/TermAl/.tmp/wt-remove-turn-gating-12327 && CARGO_TARGET_DIR=/mnt/c/github/Personal/TermAl/.tmp/linux-wsl-target-12327 cargo check --bin termal\"; exit $LASTEXITCODE'\nFor the test configuration replace the inner command with cargo check --bin termal --tests. Substitute your own source-root path and distinct repository-local .tmp/linux-wsl-target-SESSION target; do not share another lane's build lock. Ubuntu already has cargo at /home/greg/.cargo/bin and gcc; no installation/global change. Windows git supplies identity: WSL git cannot read the C:/ pointer in a Windows linked worktree.\nWhy the wrapper: direct launcher wsl.exe -d ... fails127 before Cargo because the Windows owner quotes every option, which WSL treats as a command: /bin/bash -d command not found. Exact quoted-option .NET probe reproduced it. Bare pwsh.exe is absent from the launcher PATH (UNRUN); the absolute existing Windows PowerShell path above works and exit LASTEXITCODE preserves native Cargo status. No output filtering pipeline required.\nProven production PASS: test-3d51611c-867d-4262-99f5-41652dc1fa7c END01:32:40.310Z, clean commit0c383ae852bc939e834ce4b3aa75d9648b92e9a0, before/after f89ac76e8212f230bc07087f2fee4069770d2957f8a808f202d4a1257d083f51. Same wrapper previously reached real Unix E0282 on ca3 (f8091dcf); explicit Result<Output> fixed that compile defect. Compile checks are evidence, not recognized Test records. Test-configuration compile8a378c1e is still pending at publication."
+}

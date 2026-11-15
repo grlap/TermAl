@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "root-session-queue-resume-route",
+    "revision_id": "32c8bb165c964aea9c9f1d6c323a6914",
+    "previous": null,
+    "body_sha256": "92d630cebd1d85a375600f03a6ca595bf08b15a705a8d57b726e318b0e34482e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-31T22:59:48.447778200Z"
+    }
+  },
+  "body": "A paused ROOT session queue (sends return notificationDisposition \"heldBehindPausedQueue\") is resumed by an agent with POST /api/sessions/<session-id>/queue/resume against the TermAl host. Read back the state: the session should show active and queuePaused=false. Greg said agents may send this themselves (relayed by Engram::Advisor, TermAl mailbox b9d13887 #2939, 2026-10-31 22:56Z, which applied it to session-12325). termal_resume_session is a different thing: it resumes held DELEGATIONS only. Record each occurrence on w-f23a694c9bc5 so the underlying pause gets fixed."
+}

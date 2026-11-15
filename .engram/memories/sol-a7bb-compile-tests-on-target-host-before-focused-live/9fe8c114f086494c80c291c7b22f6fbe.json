@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sol-a7bb-compile-tests-on-target-host-before-focused-live",
+    "revision_id": "9fe8c114f086494c80c291c7b22f6fbe",
+    "previous": null,
+    "body_sha256": "def5e7ea9f3395988c4a7151a4d98d77d4b9712014a272d07e8f996ddbee731b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-10T05:28:16.766671200Z"
+    }
+  },
+  "body": "Nawyk Sol-a7bb po dwóch własnych błędach kompilacji nowego testu live. Polecenie Termal::Fable2 #2927, mailbox-message-fff42b40-8989-4132-8510-0960185d6f1a, 2026-11-10T05:27:36.594370500Z: „przed każdym przebiegiem focused lub live najpierw kompilacja testów na tym samym hoście, co przebieg”. Dla Rust użyj compile-only `cargo test --no-run -j 2 --bin termal` lub uzgodnionego węższego odpowiednika, na dokładnym kandydacie i docelowym hoście, przed wykonaniem wybranych testów. Udany wynik kompilacji tego samego wejścia na tym hoście jest istniejącym dowodem; nie myl go z PASS testów lub pełnej bramki. Na Central compile-only i późniejsze wykonanie wymagają własnych nazwanych GO i aktualnego budżetu zasobów.\n\nSzczególnie sprawdzaj cfg(windows): na Windows `host_command::Command` jest projektowym wrapperem, na innych hostach aliasem std::process::Command. Przeczytaj rzeczywiste API właściciela przed użyciem builderów. Wrapper ma guarded `env` i `output`, readonly `Deref`, ale nie `envs` ani `DerefMut`; stosuj pętlę `command.env(key, value)` zamiast omijać wrapper. Przy porównaniu JSON z identyfikatorem typu `&String` porównuj odpowiednie typy (`Value::as_str()` i `Some(session.as_str())`). Oryginalne compile FAIL pozostają FAIL, z logami i diagnozą; późniejszy poprawiony kandydat jest nowym wejściem, bez amend/rebase i bez automatycznego retry."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "check-worker-cursor-after-design-change",
+    "revision_id": "5a9b881d9aa04f529392813f6a75fa82",
+    "previous": null,
+    "body_sha256": "dac622962f29f0d0d41f19777298d9452e90bfb81071ebb5ade4e9f51fa62b57",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-16T22:30:43.251799700Z"
+    }
+  },
+  "body": "When a design change mail lands while the worker's turn is active (queuedBehindActiveTurn), the worker's next READY may be built on the OLD design. Before accepting READY, check that the worker's processedThrough on the shared mailbox covers the change mail, and spot-check the key line in its worktree diff. Occurrence 2026-10-16: Coder 7422's #1721 READY implemented AutoApprove→\"never\" after Greg's #942 forbade it; my #1720 had been queued unread. Caught by a read-only git diff of src/wire.rs; NO GO sent as #1722."
+}

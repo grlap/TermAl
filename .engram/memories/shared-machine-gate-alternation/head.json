@@ -1,0 +1,14 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "shared-machine-gate-alternation",
+  "head": {
+    "state": "active",
+    "chain": [
+      "cf9e5d403de44b34954d281d9a243acb",
+      "b7bc11d893404322b31fa878649c17c9",
+      "94a316fd0dcc477e89a67477f698cfd2",
+      "7c3bb579caf64bfd9297eb775a4b8308"
+    ]
+  }
+}

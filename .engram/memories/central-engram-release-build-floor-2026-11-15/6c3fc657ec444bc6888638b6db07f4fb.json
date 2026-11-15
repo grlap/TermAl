@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-engram-release-build-floor-2026-11-15",
+    "revision_id": "6c3fc657ec444bc6888638b6db07f4fb",
+    "previous": "916676fa09114a2fa0189cd936905f75",
+    "body_sha256": "a5813e55629dc39ed08eb3ba7066b5b67d00484250c1ed8fc9bce905390953d4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-15T05:38:35.791748800Z"
+    }
+  },
+  "body": "STANDING RULE (Fable2, 2026-11-15 ~03:08Z, on Opus2 #6267). It extends the one-off ruling made for BAA6-RELEASE-BUILD-1.\n\nOn Central, an Engram INSTALL release build, `cargo build --release --bin engram` (engram binary only, not TermAl and not a test build), is admitted at free virtual memory (FV) >= 20,971,520 KiB, not the 23,068,672 KiB cold floor. Conditions:\n(1) explicit -j1 or CARGO_BUILD_JOBS=1;\n(2) no other cargo or rustc on Central from START to END;\n(3) no NEW LLM spawns on Central from START to END (already-running sessions continue);\n(4) stop cleanly at the first os error 1455, linker OOM or \"memory allocation … failed\", with no retry, and report;\n(5) the START and END reports quote FV at admission, the lowest FV and FV at END.\n\nBasis: BAA6-RELEASE-BUILD-1 at -j1 took 8m25s; admitted at 21.20M, lowest FV 18.03M, END 22.02M, no errors. The 17:08Z crash came from an unbounded 24-job TermAl or Engram FULL, not from a -j1 engram build.\n\nThis does NOT change the floors for TermAl builds, test builds or FULLs (central-cargo-memory-budget / central-full-bounded-jobs-2026-11-14). If any engram -j1 build reaches FV < 12 GiB, or hits a 1455/OOM, this rule is suspended until reviewed.\n\nEXTENSION (Fable2 #6306, 2026-11-15 ~05:38Z, on Opus2 #6303), ONE-OFF: the same floor and conditions also admitted Engram::Fable's memory-sync demo A, `cargo build --locked --bin engram -j 1` (a DEBUG build of 4d9363cb into its own target), at FV ≥20,971,520 with no other cargo or rustc, no NEW LLM spawns from START to END, stop at the first 1455/OOM, and census at START, lowest and END recorded on the item. Basis: the same engram crate at -j1; a debug build is not heavier than release. This is not a general widening for TermAl or test builds."
+}

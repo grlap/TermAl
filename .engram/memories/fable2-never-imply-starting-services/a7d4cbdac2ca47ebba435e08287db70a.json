@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-never-imply-starting-services",
+    "revision_id": "a7d4cbdac2ca47ebba435e08287db70a",
+    "previous": null,
+    "body_sha256": "e095e75e619c23961cc037a5159a8637759ad26f31320b3814c833e6312d0118",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-08T00:53:16.891669200Z"
+    }
+  },
+  "body": "On 2026-11-08 my message to Comovo::Opus said \"if you declare it, run the integration entry with the local stack up\". Comovo then planned to start Docker Desktop and the local Supabase. Docker's WSL VM took 16 GB on Central, free memory fell to about 2.5 GB, and every Central build and test was halted. My later relay (#942) limited it to an already-verified running instance, but my first wording had already invited it. Rule: when asking an agent to run tests that need infrastructure such as Docker, Supabase, emulators or VMs, say explicitly \"do NOT start or install any service, VM or app; only use one that is already running and verified; otherwise skip and report\". Starting heavy local infrastructure is a global action that needs Greg's word."
+}

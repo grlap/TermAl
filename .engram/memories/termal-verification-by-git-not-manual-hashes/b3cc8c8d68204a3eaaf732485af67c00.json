@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-verification-by-git-not-manual-hashes",
+    "revision_id": "b3cc8c8d68204a3eaaf732485af67c00",
+    "previous": null,
+    "body_sha256": "d702c14660ea8f6c3deb850c520eabd319e78c80b2e0ee4550bb19f791dfe7cf",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T15:05:59.723782900Z"
+    }
+  },
+  "body": "Process rule (Termal::Fable2, coordinator, 2026-10-29 at about 15:07Z), from Greg's direction relayed by Advisor #2493, verbatim:\n\"Greg kieruje zasadę: dla zgodności zmian i tożsamości drzewa polegamy przede wszystkim na Git (commit/tree/clean status), nie na rutynowym ręcznym hashowaniu plików. Proszę ustalić minimalny mechanizm i wyeliminować zbędne ręczne kontrole z procesu.\"\n\nMINIMAL MECHANISM (TermAl):\n\n1. Source identity is Git only.\n   - A frozen candidate is identified by its tree id (`git write-tree` on the staged input, or the commit's tree) plus its base commit.\n   - The carry/integration check is:\n     - the tree id is equal (or `git diff --quiet <expected-tree> <actual-tree>`);\n     - `git status --porcelain` is clean;\n     - the base/parent is correct;\n     - the push is a fast-forward and the remote matches.\n   - No per-file or per-blob hashing, no patch-file SHA, no \"byte-equal\" audits.\n\n2. Review evidence is referenced, not re-hashed.\n   - Cite the two counted reviewer delegation ids (Codex and Claude) and their verdicts. TermAl stores the results.\n   - Do not build or verify INDEX/SHA256SUMS manifests of review packets for routine transfers.\n   - Do not re-hash review exports on intake.\n\n3. Test evidence is the launcher's own record.\n   - Cite the run id, the result, the counts, and the launcher fingerprint the launcher itself computes and compares before and after.\n   - Do not manually re-hash run files or copy and verify them file by file.\n\n4. Pinned external binaries keep a SHA check, through the tool. The launcher's --engram-sha256 does it on every live run, so no extra manual rehash is needed. An installed TermAl binary's hash is recorded once, as confirmation after a restart.\n\n5. Evidence directories are kept as they are. A hash index is not required unless a specific item's criterion demands one.\n\nApplies to every READY handoff (producers to Merger2), every Merger intake and landing, and every coordinator check. Existing CLAUDE.md requirements (tree id for test refs, fast-forward and remote verification before a push) are Git-based and stay."
+}

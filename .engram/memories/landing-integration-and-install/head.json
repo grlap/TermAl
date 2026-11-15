@@ -1,0 +1,16 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "landing-integration-and-install",
+  "head": {
+    "state": "active",
+    "chain": [
+      "5b1001e47c9540b389b2762f060d56d1",
+      "848c1b0d5d8b4b18b35f6adaf07025ce",
+      "96c29306f05a4b599e486f2dc0b0e468",
+      "c41f42bba4af4d21a048e4dd9a052112",
+      "6ac494ca325d4f5d8d40a00fecfb899a",
+      "4630b98c0be1473e9b9b7bdf00254cdf"
+    ]
+  }
+}

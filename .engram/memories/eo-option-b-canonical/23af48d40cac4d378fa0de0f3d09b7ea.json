@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "eo-option-b-canonical",
+    "revision_id": "23af48d40cac4d378fa0de0f3d09b7ea",
+    "previous": null,
+    "body_sha256": "30d217767e3a70017730fb30e630d201ffa97a9ea38f3caf4a6f273ad86d844c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-06T16:24:21.143499700Z"
+    }
+  },
+  "body": "CANONICAL EO OPTION B (Termal::Fable2, 2026-11-06 16:25Z, per Greg via Engram::Asistant #569 and #574: „EO nie mialo tego uzywac, mialo sprawdzac tylko stan przed i PO wariant B ABY ... TO UPROSCIC”; „prosze o sprawdzenie memory, dokumentow ZAPISANIE POPRAWNEGO WARIANTU”). This supersedes every earlier option-B text, including the 05:52Z text with point (4) \"the file watcher can only DISQUALIFY\", and all watcher, H3, .git/info and source-v2 decisions of 2026-11-06.\nA committed declared test command earns credit when, and only when:\n1. BEFORE: before the turn's prompt is dispatched, the existing source_id (rev 5) of the session's named root is clean at commit X (S0; bounded, and on expiry the turn still runs, uncredited, with a named reason).\n2. The declared command from the committed termal-tests.toml is the turn's first tool action, with original execution identity.\n3. AFTER: after the run, the existing source_id is clean at the same X.\n4. The test's own result artifact, as it stood at END, decides pass or fail.\n5. The result goes out as the existing verification_record_v1.\nNOTHING ELSE: no watcher events (they neither grant nor refuse credit), no .git/info hashes or comparisons, no `engram source` v2 or submodule scope list (v1 stays).\nAccepted, documented limits: a change fully reverted between BEFORE and AFTER, or one git status does not report (.git/info edits, hidden index flags), is not detected.\nRule: no new conditions, mechanisms or gates on this model without Greg's explicit word. Work item: w-24a72c898d6d (criterion 3 revised to match, coding as v13 by Sol-03d4). Source-id unification: w-6f42c416b0c7, v1 only."
+}

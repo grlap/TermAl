@@ -1,0 +1,29 @@
+{
+  "id": "01a1ddb0-7d08-7b53-8eb0-84a9efb27985",
+  "external_ref": null,
+  "title": "Publish concurrent stage terminal states only after diagnostics and accounting settle",
+  "outcome": "A sibling's save cannot persist a terminal pass before that stage's diagnostics and UI accounting are complete.",
+  "acceptance": [
+    "Keep a stage running until all terminal fields and accounting are finalized, then publish them atomically; an interleaving/recovery test never recovers an unaccounted stage as passed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "dl560",
+    "performance",
+    "review-follow-up",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dae9-ede6-7e10-a850-06f3c0e4467d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

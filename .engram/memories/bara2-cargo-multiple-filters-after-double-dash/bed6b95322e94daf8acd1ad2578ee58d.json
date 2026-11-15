@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara2-cargo-multiple-filters-after-double-dash",
+    "revision_id": "bed6b95322e94daf8acd1ad2578ee58d",
+    "previous": null,
+    "body_sha256": "0256acf733954706ce847b0e43efe463feac9a796ea36d1ba722caa0b514cc53",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-30T04:27:04.866737600Z"
+    }
+  },
+  "body": "Worker trap (Termal::BarA2, 2026-10-30, my own miss on w-214437118fcf GREEN2, Mac run test-a147a75a, which failed in 1 s and executed no test). `cargo test` accepts only ONE TESTNAME before `--`. Several libtest filters must go AFTER `--`: `cargo test --bin termal -- tests::a tests::b tests::c`. Writing `cargo test --bin termal tests::a tests::b` fails with \"error: unexpected argument 'tests::b' found\". When you hand a runner a multi-filter command, put the filters after `--` and check the line before sending it. A wrong command form costs a slot and a recorded failed run."
+}

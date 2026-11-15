@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "carry-confirmation-pair-rule",
+  "head": {
+    "state": "active",
+    "chain": [
+      "df878c8205404de3a2c752a02e1037da",
+      "131f98a4cc9c45aca4dce149c7a9a32d",
+      "92af44b9bc0a42bf828d18425e0c7719"
+    ]
+  }
+}

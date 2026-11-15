@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "central-termal-j1-cold-test-compile-peak-2026-11-15",
+  "head": {
+    "state": "active",
+    "chain": [
+      "9c4db0a18ee04e2aa5fb4264f98af2ea"
+    ]
+  }
+}

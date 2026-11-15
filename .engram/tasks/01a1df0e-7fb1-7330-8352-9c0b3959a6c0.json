@@ -1,0 +1,30 @@
+{
+  "id": "01a1df0e-7fb1-7330-8352-9c0b3959a6c0",
+  "external_ref": null,
+  "title": "Bound private producer stderr in parent acceptance and policy read diagnostics",
+  "outcome": "Parent acceptance and policy reads retain useful typed classification and safe causes without exposing private values from arbitrary producer stderr.",
+  "acceptance": [
+    "Classify supported refusals, unsupported commands and genuine transport failures correctly while preventing synthetic credential/path values in arbitrary producer stderr from reaching parent/operator-visible diagnostics.",
+    "Behavioral raw-CLI coverage exercises parent request and policy readers, including successful reads and supported user-error codes; preserve evaluator recovery confidentiality and keep error ownership explicit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "diagnostics",
+    "pre-existing",
+    "security"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

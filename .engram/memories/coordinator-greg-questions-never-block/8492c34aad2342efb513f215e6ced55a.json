@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "coordinator-greg-questions-never-block",
+    "revision_id": "8492c34aad2342efb513f215e6ced55a",
+    "previous": null,
+    "body_sha256": "d4811bd1e3d71ac6fd1589757fdc09a8f16f94c2742d92ad78042e73e00383a9",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-17T15:44:14.699892600Z"
+    }
+  },
+  "body": "Greg's policy (2026-10-17, via Engram::Advisor b9d13887 #985), verbatim: 'Pytania do mnie mogą być w fazie projektowej. Nie powinni nigdy blokować pracy.' (questions to me may come in the design phase; they must never block work). Questions are recorded with a recommended default and never justify idle capacity. Continue reversible design, tests and measurement, and dispatch other ready lanes; apply the recommended default whenever existing authority permits.\nAlso (#984): a P1 overdue-handoff fix, TermAl w-d9f93ea08fd2 (design by Architect2 8983). The INTERIM WATCHDOG is a CronCreate job in Fable2's session, firing at :04/:14/:24/:34/:44/:54 (job 2a0557d3, session-only, 7-day expiry). After a session restart, RE-CREATE it."
+}

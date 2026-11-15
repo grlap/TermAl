@@ -1,0 +1,14 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "placement-runners-2026-11-04",
+  "head": {
+    "state": "active",
+    "chain": [
+      "58cddd3f3ff44b4ebb9c8af07ca54822",
+      "e2e2fa2fba7b4cc981e1753d39f56c23",
+      "b70ac7ad947742738efd729225b0e1c1",
+      "cc0c79690dba4ad8a11bf9425dffb502"
+    ]
+  }
+}

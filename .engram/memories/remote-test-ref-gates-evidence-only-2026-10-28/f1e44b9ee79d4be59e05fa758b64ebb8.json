@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "remote-test-ref-gates-evidence-only-2026-10-28",
+    "revision_id": "f1e44b9ee79d4be59e05fa758b64ebb8",
+    "previous": "782edb91488a407bb6747bd9c0710eda",
+    "body_sha256": "7df38cd65a78b9c84a76dc253bb0d52327b98ea0a4a940ce02b0054c39b84f28",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T00:58:13.921222500Z"
+    }
+  },
+  "body": "CURRENT: JOINT RECORD, revision 4 (Engram memory rules-greg-equivalent-gate-hosts-2026-10-28). Approved by Greg, Advisor #2418 at 00:57:54Z on 2026-10-29, verbatim: \"Greg: TAK, akceptuję r4. Czysty Git oraz potwierdzenie brancha/commitu wystarczą dla tożsamości wejścia. Proszę wdrożyć wspólny zapis z Engram::Fable.\"\nBasis:\n- Greg #2411 (machines are equivalent): \"Greg direct decision: maszyny są równoważne. Centralna bramka NIE musi być uruchamiana na centralnym Windowsie. Uzgodnijcie jeden zgodny zapis z Engram::Fable i wykorzystujcie Windows B/Mac dla bramek na exact test-ref, z zachowaniem wszystkich wymogów identycznego drzewa, fingerprintu i rozpoznanego dowodu.\"\n- Greg #2416 (Git versus hashes).\n- Revision 4 text agreed in Engram::Fable #5170 and Termal::Fable2 #5171/#5173; Engram::Fable #5172 concurred. History: revisions 1–3 of this memory.\nREMOTE LANDING GATE: Windows B, the Mac and central are EQUIVALENT gate hosts. A full gate by the standard launcher on Windows B or the Mac on an exact test ref counts as the landing gate, with the same weight as central, when ALL of these hold:\n(1) INPUT: a merge-ready input. Reviews are complete with no Medium or higher, and focused checks passed on the exact input. It is pushed as refs/heads/test/<item>-<fp8>, whose complete tree id was recorded on the item before the push. The runner uses a fresh worktree equal to that commit.\n(A) SOURCE IDENTITY = Git. The runner records HEAD = the test commit, HEAD^{tree} = the tree id recorded before the push, and an EMPTY `git status --porcelain --untracked-files=all`, both BEFORE and AFTER the run. The launcher's own before/after review-freeze fingerprint must be equal, as an automatic launcher output required by CLAUDE.md's test-ref bullet; it is NOT compared against any lander-supplied value. The reviewed staged fingerprint stays only as provenance (ref suffix and commit message).\n(B) RESULT: the launcher's results.json shows exit 0, every stage passed, and no unrun stage, with the recorded HEAD and tree equal to the test commit.\n(C) TRANSPORT INTEGRITY: ONE sha256 of the whole returned archive, declared by the runner and verified once by the lander after reassembly. Per-file manifests are OPTIONAL.\n(D) RECORD: ONE `gate full --work-ref <item> --ref <archive-sha256>` per item, plus a note naming the host, run id, commit, tree and the retained .evidence path. No typed host credit until w-af3c and gated control.\n(5) SCOPE: it gates only a landing whose master commit has exactly that tree id. Windows-only changes need a Windows gate, and Windows B counts as one.\n(6) The test ref is deleted after the evidence is recorded, and the push and the deletion are recorded on the item.\n(7) QUIET HOST: while a TermAl full gate runs on the remote host, that host runs no other Cargo, test or gate. A process census is recorded at launch and at END. An Engram gate follows Engram's own slot rule.\nLATER, not adopted yet: local freezes could also use a Git-native identity (`git write-tree` of the fully staged index plus an empty untracked check) instead of the custom fingerprint."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-post-cutover-queue-2026-11-12",
+    "revision_id": "93a4a2d0ab514f4c961a2c6d653b8b63",
+    "previous": null,
+    "body_sha256": "c18f80cffa89283610aac1a73cc9991162c7af3cfee0b7aee9ff0e36da2c8ff1",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-12T17:28:30.269348900Z"
+    }
+  },
+  "body": "Opus2 (TermAl integration owner) state at the 17:45Z Engram cutover on 2026-11-12. TermAl master = origin/master = 73f0fe27 (combo72, w-7997bae14da6 DONE), installed on Central (7d39db12) and DL560 (e71abd2f). Post-restart queue: (1) d50d w-8275 ed418be7: READY for intake (R3 pair clean, 1014 UI plus 176 Rust green); it needs the author's byte-identical carry onto then-current master (no path overlap with 73f0; 50 no-renames paths), then a DL560 landing FULL via test ref; the native browser trial is d50d's. (2) c593 S2b e45d6639: pair clean (Fable 1733); the landing FULL plus the Windows persistence-floor check come after the cutover. It RAISES the reader floor (old TermAl refuses stores, rollback is restore-only), so coordinate its timing with Fable2 and Engram::Fable before landing. (3) edfd w-36d0 RED-2 on f8b9c674 (fixture-corrected witness), a Central cargo slot. (4) a7bb w-78ec R2 carry 5f81de92 on e3970152: author run GO-CENTRAL-CARGO-78EC-AUTHOR-1 parked; it needs a carry for landing. (5) 12329 w-8f12 R4 Mac batch (if not run during the outage), then the Windows subset. (6) Engram::Opus w-6bba: Mac plus Windows focused runs, review round 4, FULL. (7) 11330 w-9fcb 8f59b7f1 check PASSED. Known defects filed today: w-36d0e270de9d (evaluation preflight accepts a rebound root), w-30b524c2bc6b (16-record cap undocumented). Mailbox send helper: bash .tmp/q8111/send-one.sh TO FILE KEY; the log is .tmp/q8111/next-train.txt."
+}

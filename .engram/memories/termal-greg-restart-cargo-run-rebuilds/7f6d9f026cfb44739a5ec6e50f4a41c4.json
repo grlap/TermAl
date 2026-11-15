@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-greg-restart-cargo-run-rebuilds",
+    "revision_id": "7f6d9f026cfb44739a5ec6e50f4a41c4",
+    "previous": "51a1cf1ba1094a048a1efae29fb15c0e",
+    "body_sha256": "cd7eb40a75e3821a628d016fb31763797b44fa125b89cb7ceafddb9d72d4ccf5",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-29T13:45:24.171373800Z"
+    }
+  },
+  "body": "Restart facts and message rules (Termal::Fable2, 2026-10-29). Rev 2 adds the shared rules agreed with Engram::Fable #5235 (Engram memory rules-install-and-cutover rev 5, item 5), made after Greg asked for a process fix via Advisor #2283.\n\nFACT: Greg restarts the Windows TermAl host with `cargo run --release` in the master checkout, C:\\github\\Personal\\TermAl.\n- This REBUILDS target/release/termal.exe from the checkout and overwrites the integration owner's install, keeping no backup.\n- The 2026-10-29 instance:\n  - cargo PID 44332 started at 13:26:32Z;\n  - the binary was rewritten at 13:29:50Z (sha256 75a0c094…a81c);\n  - host PID 67788 started at 13:29:51Z;\n  - the installed 00028980, built from the same commit 1efcfd02, was lost.\n- The cargo process that is the parent of termal.exe is the host's own Cargo. Exclude it from slot censuses.\n\nRULES for every message to Greg about a restart\n\n(a) While the Engram cutover build is staged but not installed, the message STARTS with this line: \"⛔ NIE restartuj TermAl, dopóki nie dostaniesz „restart now\" z hashem Engram <hash>. Engram nie jest jeszcze zainstalowany.\"\nNever use a \"READY\" / \"Gotowość: TAK\" headline for a restart that still needs the install. My 13:07Z message #2465 broke this rule, and the restart followed 22 minutes later.\n\n(b) When Greg names a moment, or a window starting within about 30 minutes, run this sequence within minutes:\n1. TermAl QUIET.\n2. Engram::Fable's INSTALL NOW to Merger3.\n3. INSTALLED.\n4. Fable2's \"restart now\".\nFor a longer or unknown wait, do no install, and (a) stands.\n\n(c) After a restart without the install: report it to Engram::Fable at once, keep the staged build, and re-arm.\n\n(d) TermAl-specific:\n- \"restart now\" names the TermAl master commit that `cargo run --release` will compile, and the checkout must be clean at that commit.\n- After the restart, record the running termal.exe hash, and have the integration owner map it to the reviewed tree. Treat it as UNKNOWN until it is mapped (Architect2 note b4fc8fd6 (c) on w-1e85dae945d4).\n- The agent's install is a fallback only.\n\nIf Greg answers Fable2 directly with a restart time, forward it to Engram::Fable at once."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-2026-11-07-00-54z-relayed-by-engram-asistant-24-verbatim-us",
+    "revision_id": "cbe7e1efb8454e8393dbedc2614dac60",
+    "previous": "e659cef8c386417ea2b9502cbd80cb57",
+    "body_sha256": "b24ad28d693daf67cd109a80ab6a401ec47e284249083c46ea617be3fb5825a6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-07T01:07:45.327391600Z"
+    }
+  },
+  "body": "Greg, 2026-11-07 00:54Z, relayed by Engram::Asistant #24, verbatim: „USUNAC TESTY sprawdzajace claud.md czy agents.md Natychmiast!! Nigdy ich niedodawac”. This applies to every project. No test may read, pin or compare the content of AGENTS.md, CLAUDE.md or other agent instruction/command files. A permanent ban goes into both projects' instructions; the instruction files themselves stay.\nTermAl removal is assigned to Termal::Opus3 (Opus2 at about 01:00Z, cc Fable2). Scope:\n- src/tests/agent_commands.rs: commit_rule_pins_the_final_diff_audit_in_both_instruction_files, commit_rule_pins_which_review_findings_block_a_landing, review_changes_pins_two_review_resume_wait_flow, review_changes_pins_final_diff_audit, review_code_pins_delegated_child_inline_reviewer_mode.\n- src/tests/codex_read_guidance.rs: the_review_code_command_carries_the_same_guidance.\nProduct tests that use temp-dir fixture files stay.\nLanding: next after 925c, ahead of M1, gated by the DL560 FULL. This supersedes w-52ef's pin update in 3ce13910; w-52ef becomes rules-text-only.\n\nBroadened by Greg at 00:57Z (Engram::Asistant #25), verbatim: „Zero tautologi. Tak marnujemy cykle. Te testy nic nie wnosza. Teraz kazda zmiana wymusza zmiane testow. Czyli edycja 2 razy. O ile zlapiemy to odrazu. Absurd! Nigdy wiecej.” Rule: no tautological tests, meaning tests that only pin text or mirror the implementation so every change needs a second edit without verifying behaviour. Tests assert observable effects. No new automated gate may verify the rule's wording. Tracked as w-7dafeeae3cfe (Opus3); confirm to Asistant after landing.\n\nWidened again by Greg at 01:06Z (Engram::Asistant #26), verbatim: „Nie ma testów czytających pliki md i sprawdzania czy mają okreslone frazy. Usunąć natychmiast.” Applies to ALL Markdown files.\nExtra TermAl tests found by Opus2's survey at master 7b921438:\n- delegation_mcp_durability_pending_tests.rs durability_pending_documentation_links_the_contract_and_its_consumers\n- process_limits_tests.rs nofile_docs_cross_link_runtime_harness_and_shared_codex_policies\n- tests/coordination_instructions.rs mailbox_guidance_existing_surfaces_share_agent_neutral_body and mailbox_coverage_guidance_is_shared_bounded_and_explicit_about_later_replies (keep only the product part)\n- tests/load_sensitive_limits.rs the_docs_state_the_derived_limits plus its doc() helper\nNo JS/TS/UI test reads repo .md. Opus3 is asked to fold these into w-7daf as a new candidate superseding c56b0dc8."
+}

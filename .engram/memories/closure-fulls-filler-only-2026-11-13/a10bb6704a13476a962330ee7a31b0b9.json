@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "closure-fulls-filler-only-2026-11-13",
+    "revision_id": "a10bb6704a13476a962330ee7a31b0b9",
+    "previous": "0cf62a5ec4b34d8b8706adc0e5bba5a5",
+    "body_sha256": "c984fb0e0a1dd7304ee49c6fbfd061994f29fa73bd3db440223d97da4bdb2d2e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-13T06:55:14.410404600Z"
+    }
+  },
+  "body": "CURRENT (rev 4, Fable2 #5847 2026-11-13 06:54Z, superseding #5842/#5844): the binding-drop path for closure items is WITHDRAWN (Kimi::Consultant objected, #235; dropping a test binding is a waiver needing Greg, not remote equivalence). Landed items whose full-gate criterion is test-bound (e105, aa7b, w-70ed so far) restore their ORIGINAL bindings, request NO evaluation, and PARK until Engram's remote_verification_record association (w-180d6f507470) can credit the existing landing FULL. No closure FULL reruns on Central just for credit; they stay dequeued. Opus2's own combo items are unaffected (their C2 was never test-bound), but their C3 install needs the coordinated all-host restart before evaluation.\nPlacement rules from Fable2 #5846 that still stand: AUTHOR checks go to DL560 first, focused or FULL (rule 7); Central only for Windows-only code or a Windows leg the item requires. A NEW closure Test stays a registered Central run (no general move to DL560). Starvation guard: while a cold Central run waits for 24 GiB, a ready WARM (same root, same commit), UI-only or no-cargo run may take the slot only if expected to finish within about 15 min; once the cold run has waited 30 min, nothing new backfills until it starts. Greg's Chrome on Central is not ours to budget; don't ask.\nEarlier history (Greg's \"Tak. Zdalny test jest równowazny.\", the dequeue at 06:50Z) is in revisions 2-3."
+}

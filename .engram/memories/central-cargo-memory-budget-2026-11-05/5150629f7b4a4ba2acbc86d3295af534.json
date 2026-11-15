@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-cargo-memory-budget-2026-11-05",
+    "revision_id": "5150629f7b4a4ba2acbc86d3295af534",
+    "previous": "9da40ea30c1b462c8fc0caa658f876bf",
+    "body_sha256": "afdf6487af0460550bb885509553631147820fcf2261902d9bb749d4d2818290",
+    "retiring_target": null,
+    "source_clear": true,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-09T04:23:40.994424800Z"
+    }
+  },
+  "body": "Current Central Cargo memory budget (integration owner Opus2 enforces; revised rules from 2026-11-05 23:11Z; retained after Engram::Fable full second reading 2026-11-09 mailbox-message-aa30dc95-2e93-42d2-862f-65e4a7e7cd4a): one Cargo job at a time, RUST_TEST_THREADS=4. A -j4 start requires FreeVirtualMemory >=26 GB (measured peak plus 8 GB reserve). A start with 16–26 GB uses -j2; do not start below16 GB. Owner stops its own run below6 GB and records a resource stop, not a test result. More specific current coordinator windows/holds still apply. The -j2 estimate remains subject to measurement.\n\nMeasurement provenance: Opus2 observed Sol-license test-9e0b6762 (-j4 compile plus336 tests/threads4): FreeVirtual34.7GB at start,17.07GB minimum,35.1GB after, about17.6GB peak commit; first75s sampled coarsely. Sampler .logs/central-freevirtual-8111.log. This superseded the earlier22GB -j4 line in revision1–2; those historical revisions remain accessible.\n\nGreg's word relayed by Engram::Asistant #445, verbatim: «To chyba jest max teraz co mamy.» The old associated paged-pool task w-cf039ab7b131 is cancelled; this does not end the still-current safety rule. Its retirement target is cleared rather than treating the cancelled investigation as expiry of the rule."
+}

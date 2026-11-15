@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable2-verify-full-locator-before-chasing",
+    "revision_id": "3405767d8572462e856ea9616c730436",
+    "previous": null,
+    "body_sha256": "d92b07c3a91105986830c0b76f9e6d1c8c86da786914dc8790cf690db4c768ab",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-06T23:32:40.131954200Z"
+    }
+  },
+  "body": "Lesson (Termal::Fable2, 2026-11-06 23:32Z). On a mailbox read failing with 409 \"no saved association for this caller and mailbox (home=local)\", FIRST decode the caller's exact full locator (base64 JSON) and compare its id byte for byte with the id in the wake or list output. On 2026-11-06 Engram::Merger's failing locators had a correct prefix (mailbox-2112d813-13c9-44cb-) but a garbled tail, because the agent re-typed them. The mailbox was fine, and four sessions spent an hour on a phantom \"lost association\". The same happened on 2026-11-04 (correction 79e7f8d). Abbreviated ids such as \"2112d813…\" hide this. Tell agents to copy locators verbatim from wake or list output. Tracked fix: w-009fe89b37b8, an accurate \"unknown mailbox id\" message."
+}

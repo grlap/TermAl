@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-cargo-slot-rule-2026-10-28",
+    "revision_id": "2d3ef34788e8406abeb9ad03394cb3ef",
+    "previous": null,
+    "body_sha256": "bae66f42257e5634c56b09c24e27205522df09f8ed1d4e0a402035ea2ad17e10",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-10-28T23:44:26.039733400Z"
+    }
+  },
+  "body": "TermAl Cargo slot rule (Termal::Fable2, recorded 2026-10-28 at 23:45Z). Source: Greg's direct word in Engram memory rules-greg-b16-acceleration-2026-10-28, revision 1 (Advisor #2227, message 4a246bae, 17:09:49Z), verbatim: \"Greg: TAK dla wcześniejszych niezależnych landingów bez restartu oraz pełnego pakietu przyspieszenia B16, bez osłabiania dowodów ani canary. TermAl ma: podział pracy, review etapami z końcową pełną parą, pre-gate 15 testów pod obciążeniem, drugi slot Cargo tylko >=40 GiB, Mac/Windows równolegle i pre-staging restartu.\"\nRULE:\n- ONE Cargo build or test at a time on this host when free commit is below 40 GiB. A SECOND concurrent Cargo, whether the TermAl focused slot plus the Engram slot or any two, is allowed ONLY at 40 GiB or more of free commit.\n- Floors otherwise unchanged: a single focused run at ≥ 20 GiB; a full gate at ≥ 25 GiB commit and ≥ 50 GiB disk, holding both slots to START+20, with NO concurrent Cargo for its whole duration when it carries a real-time writer deadline.\n- Remote hosts follow the joint record remote-test-ref-gates-evidence-only-2026-10-28, revision 2.\nDISCLOSED PRIOR ADMISSIONS, below the floor, by the coordinator, before this rule was recorded here:\n- 22:45Z: the Engram Nmax FK baseline (test-70411ce2) ran concurrently with Sol-8e1f's TermAl focused run (test-1c48122d), at about 35 GiB.\n- 23:12Z: the Engram Nmax after-fix batch (test-f786e2d8) ran concurrently with Opus2's TermAl live run (test-9180ab17), at about 36 GiB, with Merger3's Engram full gate also running past START+20.\n- 23:41Z: GO #259 to Merger3 at 30.6 GiB was refused by Merger3 and withdrawn.\nThese are attributed admissions only; no OOM, test failure or causal effect is inferred. Raised by Merger3 (faff713b #260/#262)."
+}
