@@ -591,7 +591,7 @@ fn engram_focused_launcher_words<'a>(
             }
             if !matches!(
                 flag.as_str(),
-                "--input" | "--notify" | "--item" | "--next-owner" | "--next-action" | "--require-binary-env"
+                "--input" | "--notify" | "--item" | "--next-owner" | "--next-action" | "--require-binary-env" | "--request-message-id"
             ) {
                 return Err(format!("unsupported focused launcher option {flag:?}"));
             }
@@ -620,6 +620,9 @@ fn engram_focused_launcher_words<'a>(
                     // recognizing a plain check grants no verification credit.
                     "--input" => matches!(value.as_str(), "commit" | "plain"),
                     "--notify" => !value.trim().starts_with('-'),
+                    // Recognition preserves this selector as metadata. The
+                    // registration owner still authenticates original custody.
+                    "--request-message-id" => mailbox_test_message_selector_valid(value),
                     _ => {
                         !value.contains(['\r', '\n'])
                             && value.len() <= max_bytes
