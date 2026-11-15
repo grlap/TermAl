@@ -73,6 +73,16 @@ fn current_capture_cancellation() -> Option<Arc<CaptureCancellation>> {
     CAPTURE_CANCELLATION.with(|slot| slot.borrow().clone())
 }
 
+/// Runs `run` with no capture cancellation in scope, and restores the
+/// caller's scope afterwards, even if `run` panics. For checks that only read
+/// memory and carry their own deadline: their answer must not depend on when
+/// a host shutdown cancels the capture they happen to run on.
+fn without_capture_cancellation<T>(run: impl FnOnce() -> T) -> T {
+    let _restore =
+        CaptureCancellationScope(CAPTURE_CANCELLATION.with(|slot| slot.replace(None)));
+    run()
+}
+
 fn check_capture_cancellation() -> Result<()> {
     check_capture_cancellation_at(std::time::Instant::now())
 }

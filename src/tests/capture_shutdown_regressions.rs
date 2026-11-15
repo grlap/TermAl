@@ -328,3 +328,175 @@ fn unix_shutdown_cancels_live_git_before_releasing_the_capture_root() {
         .unwrap();
     assert!(!root.exists());
 }
+
+/// Builds an observation request on a capture worker, as the closing capture
+/// builds its observations. When `stop_first`, the worker's capture is stopped
+/// first, as host retirement stops the captures before it joins the workers.
+fn build_on_a_capture_worker(
+    stop_first: bool,
+    build: impl FnOnce() -> std::result::Result<EngramControlRequest, EngramTransportError>
+    + Send
+    + 'static,
+) -> std::result::Result<EngramControlRequest, EngramTransportError> {
+    let lifetime = Arc::new(CaptureLifetime::default());
+    let (built_tx, built_rx) = mpsc::channel();
+    let worker_lifetime = lifetime.clone();
+    lifetime
+        .spawn_observer("observation-on-a-stopped-capture", move || {
+            if stop_first {
+                worker_lifetime.stop();
+            }
+            built_tx.send(build()).unwrap();
+        })
+        .unwrap();
+    let built = built_rx.recv_timeout(TEST_PHASE_DEADLOCK_GUARD).unwrap();
+    assert!(lifetime.stop_and_join(), "the capture worker ends");
+    built
+}
+
+fn observation_basis(key: &str) -> EngramUnadmittedObservationBasis {
+    EngramUnadmittedObservationBasis {
+        idempotency_key: key.into(),
+        binding: EngramControlWorkBinding {
+            root_execution_id: "fixture-root".into(),
+            work_id: "fixture-work".into(),
+            run_id: "fixture-run".into(),
+            work_revision: 1,
+            claim_id: "fixture-claim".into(),
+            claim_fence: 1,
+        },
+        root_basis: EngramObservationRootBasis {
+            capture_run_cut: 1,
+            latest_event: None,
+            state: EngramObservationRootState::None {},
+        },
+        observed_interval: EngramObservationInterval {
+            from: "2026-01-01T00:00:00Z".into(),
+            through: "2026-01-01T00:00:02Z".into(),
+        },
+        policy_basis: EngramObservationPolicyBasis::AccountIfEligible {
+            project_policy_epoch: 1,
+            policy: "a".repeat(32),
+            obligation_rule_set: "b".repeat(32),
+        },
+    }
+}
+
+fn observation_built_at() -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:03Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc)
+}
+
+/// A source basis with a complete SourceId whose tree is `tree` repeated.
+fn complete_source(tree: char) -> Value {
+    json!({"workspace_id": "fixture-workspace", "source_id": {
+        "commit": "a".repeat(40), "tree": tree.to_string().repeat(40),
+        "submodules": [], "changes": []}})
+}
+
+fn source_basis(source: Value) -> EngramExecutionSourceBasis {
+    serde_json::from_value(source).unwrap()
+}
+
+fn sighting_of(
+    source: Value,
+) -> impl FnOnce() -> std::result::Result<EngramControlRequest, EngramTransportError> + Send + 'static
+{
+    move || {
+        engram_source_sighting_request(
+            observation_basis("fixture-sighting"),
+            EngramMeasuredSighting {
+                source_basis: source_basis(source),
+                observed_at: "2026-01-01T00:00:01Z".into(),
+            },
+            observation_built_at(),
+        )
+    }
+}
+
+/// An unadmitted turn whose measured change starts at `baseline` and ends at
+/// a complete sighting of another tree.
+fn change_from(
+    baseline: Value,
+) -> impl FnOnce() -> std::result::Result<EngramControlRequest, EngramTransportError> + Send + 'static
+{
+    move || {
+        let baseline = source_basis(baseline);
+        engram_unadmitted_turn_request(
+            observation_basis("fixture-turn"),
+            "fixture-turn".into(),
+            Some(EngramObservedSourceChange::ContentComparison {
+                workspace_id: "fixture-workspace".into(),
+                baseline: EngramMeasuredBaseline {
+                    workspace_id: baseline.workspace_id.clone(),
+                    source_revision: baseline.source_revision.clone(),
+                    source_id: baseline.source_id.clone(),
+                    observed_at: "2026-01-01T00:00:00Z".into(),
+                },
+                sighting: EngramMeasuredSighting {
+                    source_basis: source_basis(complete_source('e')),
+                    observed_at: "2026-01-01T00:00:02Z".into(),
+                },
+            }),
+            vec![],
+            observation_built_at(),
+        )
+    }
+}
+
+#[test]
+fn a_complete_observation_identity_stays_valid_after_host_shutdown() {
+    for stop_first in [false, true] {
+        let when = if stop_first {
+            "after host shutdown"
+        } else {
+            "on a running capture"
+        };
+        if let Err(error) = build_on_a_capture_worker(stop_first, sighting_of(complete_source('b')))
+        {
+            panic!("a complete sighting is valid {when}: {}", error.message);
+        }
+        if let Err(error) = build_on_a_capture_worker(stop_first, change_from(complete_source('b')))
+        {
+            panic!(
+                "a complete source change is valid {when}: {}",
+                error.message
+            );
+        }
+    }
+}
+
+#[test]
+fn a_malformed_observation_identity_stays_malformed_after_host_shutdown() {
+    let no_source_id =
+        json!({"workspace_id": "fixture-workspace", "source_revision": "content-v1:fixture"});
+    let mut also_a_revision = complete_source('b');
+    also_a_revision["source_revision"] = json!("content-v1:fixture");
+    for stop_first in [false, true] {
+        for (shape, malformed) in [
+            ("no source_id", &no_source_id),
+            ("a source_revision", &also_a_revision),
+        ] {
+            let case = format!("{shape}, stopped first: {stop_first}");
+            let sighting = build_on_a_capture_worker(stop_first, sighting_of(malformed.clone()))
+                .expect_err(&format!("{case}: a malformed sighting is refused"));
+            assert!(
+                sighting
+                    .message
+                    .contains("source_sighting.source_basis needs one complete bounded source_id"),
+                "{case}: the sighting is refused as malformed: {}",
+                sighting.message
+            );
+            let change = build_on_a_capture_worker(stop_first, change_from(malformed.clone()))
+                .expect_err(&format!("{case}: a malformed baseline is refused"));
+            assert!(
+                change
+                    .message
+                    .contains("source_change.baseline needs one complete bounded source identity"),
+                "{case}: the baseline is refused as malformed: {}",
+                change.message
+            );
+        }
+    }
+}

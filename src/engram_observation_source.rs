@@ -5,13 +5,20 @@ enum EngramObservationSourceRefusal {
     OwnerUnavailable,
 }
 
+// A shape check of an identity already in memory. It runs outside the calling
+// capture's cancellation: a host shutdown that cancels the capture does not
+// make a complete identity look malformed, and a malformed identity is never
+// accepted. Its own budget deadline still bounds it.
 fn engram_observation_identity_valid(
     revision: &str, source_id: Option<&EngramSourceId>,
 ) -> bool {
     match source_id {
         Some(source_id) => revision.is_empty()
             && serde_json::to_vec(source_id).is_ok_and(|bytes| bytes.len() <= ENGRAM_SOURCE_JSON_LIMIT)
-            && source_id.validate(std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET).is_ok(),
+            && without_capture_cancellation(|| {
+                source_id.validate(std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET)
+            })
+            .is_ok(),
         None => false,
     }
 }

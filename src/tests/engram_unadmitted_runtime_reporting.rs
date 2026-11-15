@@ -1791,3 +1791,81 @@ fn owned_exit_reader_failure_and_stop_close_and_deliver_the_adopted_trace() {
         fixture.assert_no_granted_reporting();
     }
 }
+
+/// Host retirement asks the observation worker to stop and cancels the
+/// captures before it joins them, so a sighting send that already passed the
+/// worker's checks meets a cancelled capture at the producer. The sighting is
+/// still well formed there, so the producer's own shape check accepts it; it
+/// is neither refused nor failed locally, and the worker ends normally: a
+/// worker that panics never clears its running flag.
+#[test]
+fn a_sighting_send_met_by_host_shutdown_stays_well_formed_and_the_worker_ends_normally() {
+    let mut fixture = ReportingTurn::new(
+        "unadmitted-sighting-at-shutdown",
+        true,
+        ReplyMode::Recorded,
+        false,
+    );
+    let observations = fixture.turn.state.runtime_observation_lifetime.clone();
+    let captures = fixture.turn.state.capture_lifetime.clone();
+    let (stopped_tx, stopped_rx) = mpsc::channel();
+    *fixture.producer.request_hook.lock().unwrap() = Some(Arc::new(move |request| {
+        let EngramControlRequest::ExecutionObserve { observation, .. } = request else {
+            return;
+        };
+        if matches!(
+            observation.occurrence,
+            EngramInterTurnOccurrence::SourceSighting { .. }
+        ) {
+            // The retirement order of retire_capture_observation_workers.
+            observations.request_stop();
+            captures.stop();
+            let _ = stopped_tx.send(());
+        }
+    }));
+    fixture.finish();
+    assert_eq!(
+        occurrence(&fixture.observation())["kind"],
+        "unadmitted_turn"
+    );
+    crate::tests::phase_sync::receive(&stopped_rx, "the sighting send reaches the producer");
+    assert!(
+        fixture.turn.state.capture_lifetime.stop_and_join(),
+        "the observation worker ends"
+    );
+    let accepted = fixture
+        .sent
+        .try_recv()
+        .expect("the producer's shape check accepts the sighting after the cancellation");
+    assert_eq!(occurrence(&accepted)["kind"], "source_sighting");
+    fixture.turn.record(|record| {
+        assert!(
+            !record.engram.unadmitted_worker_running,
+            "the observation worker ended normally instead of panicking"
+        );
+        let failed: Vec<_> = record
+            .engram
+            .unadmitted_reports
+            .iter()
+            .flat_map(|report| report.envelopes.iter())
+            .filter(|envelope| envelope.request["occurrence"]["kind"] == "source_sighting")
+            .map(|envelope| &envelope.delivery)
+            .filter(|delivery| {
+                matches!(
+                    delivery,
+                    EngramRuntimeObservationDelivery::LocalFailure { .. }
+                        | EngramRuntimeObservationDelivery::Refused { .. }
+                )
+            })
+            .collect();
+        assert!(
+            failed.is_empty(),
+            "a sighting met by host shutdown is neither refused nor failed: {failed:?}"
+        );
+    });
+    *fixture
+        .producer
+        .request_hook
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+}
