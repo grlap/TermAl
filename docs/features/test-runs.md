@@ -358,10 +358,13 @@ existing owner, directory, request/digest, durability and lifecycle checks.
 It is not a cached verdict. A compaction completion revalidates its own exact
 summary and proof rather than rebuilding all unrelated summaries. Idle ticks
 still poll pending persistence fences, but skip history selection at a revision
-already examined. Mutation paths that select directly and all rescans still do
-so; runtime-only eligibility changes without selection or a revision bump may
-retain detail until the next revision or the 10-second idle rescan. Failed
-compaction/removal writes retain retry eligibility.
+already examined. Mutation paths that select directly still do so. A rescan
+selects only when it changed the index (a changed, removed or restored run) or
+a writer marked the examined revision stale: a released or settled run wait, a
+published registration, a card that became terminal, a live card removed with
+its session, a removed observation persistence fence, a durable observation or
+a lifecycle revalidation. An unchanged idle rescan builds no compaction
+population. Failed compaction/removal writes retain retry eligibility.
 
 A lifecycle revalidation after a named-root read builds no full-history
 projection while it holds the state lock. Each changed row publishes the

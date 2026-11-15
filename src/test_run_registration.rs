@@ -1295,6 +1295,8 @@ impl AppState {
                 .test_runs
                 .registration_failures
                 .remove(&request.run_id);
+            // A published registration can make its run compaction-eligible.
+            inner.test_runs.compaction_examined_revision = None;
             diagnostics.published = true;
             // This exact durable identity is acknowledged at publication.
             // A later unrelated holder must not delay it with another query.

@@ -326,7 +326,8 @@ struct TestRunIndex {
     transport_batch_pending: bool,
     transport_version: Arc<AtomicU64>,
     /// Scheduling hint only. Proof predicates are always recomputed when
-    /// selection runs; mutation writers and rescans also select explicitly.
+    /// selection runs. A writer that changes a selection input clears it; a
+    /// rescan selects only when it changed the index or this is cleared.
     compaction_examined_revision: Option<u64>,
     compactions_durable: HashSet<String>,
     compactions_revalidating: HashSet<String>,
@@ -1352,10 +1353,18 @@ impl AppState {
             );
             work.persistence.merge(card_persistence);
             points.mark("cards_done");
-            let compaction = self.compact_test_runs_traced_locked(&mut inner);
-            work.compaction_population = compaction.population;
-            work.compaction_eligible = compaction.eligible;
-            work.persistence.merge(compaction.persistence);
+            // Select only when this pass changed the index or a writer cleared
+            // the examined revision after changing a selection input. An
+            // unchanged pass would rebuild every terminal summary to select
+            // nothing; a deferred selection never removes detail.
+            if inner.test_runs.compaction_examined_revision.is_none()
+                || work.removed + work.changed + work.restored > 0
+            {
+                let compaction = self.compact_test_runs_traced_locked(&mut inner);
+                work.compaction_population = compaction.population;
+                work.compaction_eligible = compaction.eligible;
+                work.persistence.merge(compaction.persistence);
+            }
             points.mark("compaction_done");
             inner.test_runs.transport_batch_pending = false;
             let projection = self.test_run_history_projection_locked(&inner);

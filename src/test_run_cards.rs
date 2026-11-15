@@ -560,9 +560,15 @@ fn update_test_run_card_locked(
     };
     // Bookkeeping follows the check even when the card is unchanged, so an
     // excerpt read at a new version is not read again on every rescan.
-    if let Some(stored) = inner.test_run_cards.get_mut(run_id) {
+    let became_terminal = inner.test_run_cards.get_mut(run_id).is_some_and(|stored| {
+        let was_terminal = stored.terminal;
         stored.terminal = snapshot.is_terminal();
         stored.failure_detail_version = failure_detail_version.clone();
+        !was_terminal && stored.terminal
+    });
+    if became_terminal {
+        // A run whose card is no longer live can become compaction-eligible.
+        inner.test_runs.compaction_examined_revision = None;
     }
     if unchanged {
         return None;
@@ -779,6 +785,10 @@ impl AppState {
                     TestRunCardLookup::Cold => continue,
                     TestRunCardLookup::Gone => {
                         inner.test_run_cards.remove(run_id);
+                        if !card.terminal {
+                            // A live card no longer holds its run back.
+                            inner.test_runs.compaction_examined_revision = None;
+                        }
                         continue;
                     }
                 };
@@ -849,6 +859,9 @@ impl AppState {
                 TestRunCardLookup::Resident(stored) if stored.is_terminal() => {
                     if let Some(entry) = inner.test_run_cards.get_mut(&run_id) {
                         entry.terminal = true;
+                        // The orphaned card was not terminal, so its run can
+                        // now become compaction-eligible.
+                        inner.test_runs.compaction_examined_revision = None;
                     }
                 }
                 TestRunCardLookup::Resident(stored) => {
@@ -867,6 +880,9 @@ impl AppState {
                 TestRunCardLookup::Cold => {}
                 TestRunCardLookup::Gone => {
                     inner.test_run_cards.remove(&run_id);
+                    // Orphans are never terminal: the removed card no
+                    // longer holds its run back from compaction.
+                    inner.test_runs.compaction_examined_revision = None;
                 }
             }
         }

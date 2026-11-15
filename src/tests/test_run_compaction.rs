@@ -3,6 +3,9 @@
 // discriminators through real persistence/API fixtures; does not mint credit.
 use super::*;
 
+#[path = "test_run_rescan_compaction.rs"]
+mod rescan_compaction;
+
 fn fill_safe(fixture: &RunFixture, session: &str, count: usize) {
     for number in 0..count {
         let key = format!("compact-native-{number}");

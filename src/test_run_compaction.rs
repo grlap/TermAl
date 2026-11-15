@@ -529,10 +529,13 @@ impl AppState {
         // Select again only after a completion or when a writer or a failed
         // pass asked for it (`compaction_examined_revision` cleared). Fences
         // are polled above on every tick. Another subsystem's revision does
-        // not select: every rescan selects (test_runs.rs), so an eligibility
-        // change no writer reported keeps its detail until the next rescan,
-        // at most 10 s idle and one 2 s tick while a run is running. Deferring
-        // a selection never removes detail.
+        // not select. A rescan selects only when it changed the index or the
+        // examined revision is cleared (test_runs.rs). An input an indexed
+        // run's summary shows (state, restart risk, project, durability) is
+        // caught by the rescan's summary diff; every other input that can make
+        // a run eligible (waits, cards, registration failures, observation
+        // fences) is cleared by its writer. Deferring a selection never
+        // removes detail.
         if had_completions || inner.test_runs.compaction_examined_revision.is_none() {
             self.compact_test_runs_locked(&mut inner);
         }

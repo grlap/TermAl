@@ -609,6 +609,10 @@ fn consume_test_run_waits_for_stopped_session_locked(
         .into_iter()
         .partition(|wait| wait.session_id == session_id);
     *inner.test_run_waits = remaining;
+    if !stopped.is_empty() {
+        // A run no wait names any longer can become compaction-eligible.
+        inner.test_runs.compaction_examined_revision = None;
+    }
     stopped
 }
 
@@ -1154,6 +1158,10 @@ impl AppState {
                 consumed.push((wait, TestRunWaitConsumedReason::Completed));
             }
             *inner.test_run_waits = remaining;
+            if !consumed.is_empty() {
+                // A run no wait names any longer can become compaction-eligible.
+                inner.test_runs.compaction_examined_revision = None;
+            }
             if consumed.is_empty() && !progress_changed {
                 return refresh;
             }

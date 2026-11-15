@@ -434,6 +434,8 @@ impl AppState {
         }
         drop(pending);
         inner.test_runs.observations_failed.remove(run_id);
+        // Neither a fence nor a failure holds the run back from compaction now.
+        inner.test_runs.compaction_examined_revision = None;
         if inner.test_runs.observations_durable.insert(run_id.to_owned())
             && let Ok(revision) = self.commit_delta_locked(&mut inner)
         {
@@ -1189,14 +1191,15 @@ impl AppState {
                 .lock()
                 .expect("test observation mutex poisoned")
                 .remove(&id);
+            // A pending fence holds its run back from compaction, even a
+            // stale one; its removal, and durable detail below, can make the
+            // run eligible. Ask the next selection, as the batch writer does.
+            inner.test_runs.compaction_examined_revision = None;
             if inner.test_run_observations.get(&id) != Some(&expected) {
                 continue;
             }
             if result.is_ok() {
                 inner.test_runs.observations_durable.insert(id.clone());
-                // Durable detail can make its run compaction-eligible: ask the
-                // next compaction step to select, as the batch writer does.
-                inner.test_runs.compaction_examined_revision = None;
             } else {
                 inner.test_runs.observations_failed.insert(id.clone());
             }
